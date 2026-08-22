@@ -36,7 +36,7 @@ def test_direction_key_is_stable_and_typed() -> None:
     assert all(len(unit.key) == 2 for unit in units)
     assert all(
         isinstance(route_id, int) and isinstance(direction_index, int)
-        for route_id, direction_index in units[0:1]  # type: ignore[misc]
+        for route_id, direction_index in (unit.key for unit in units)
     )
 
 
