@@ -13,6 +13,12 @@ from .pipeline_dedup import (
     dir_stat_volume_map,
     merge_recomputed_stats,
 )
+from .pipeline_filtering import (
+    apply_limits,
+    build_filter_limits,
+    split_active_routes,
+    split_ok_and_errors,
+)
 from .pipeline_loading import build_route_tasks
 
 # Совместимость с текущим runtime: единая стадия загрузки используется вместо
@@ -29,6 +35,10 @@ _runtime._merge_recomputed_stats = merge_recomputed_stats
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "build_route_tasks",
+    "build_filter_limits",
+    "split_active_routes",
+    "split_ok_and_errors",
+    "apply_limits",
     "compute_pipeline_bbox",
     "route_inside_bbox",
     "select_secondary_routes",
