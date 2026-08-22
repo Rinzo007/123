@@ -69,7 +69,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--no-bbox-filter",
         action="store_true",
-        help="Не отсекать вторичные маршруты по bbox",
+        help="Устаревший флаг: сохранён для совместимости и больше не влияет на расчёт",
     )
     parser.add_argument(
         "--max-route-number",
@@ -178,8 +178,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             continue
         if item == "--clean-names":
             warnings.warn(
-                "--clean-names больше не применяется: "
-                "фильтр по именам убран из базовых типов.",
+                "--clean-names больше не применяется: фильтр по именам удалён.",
                 DeprecationWarning,
                 stacklevel=2,
             )
