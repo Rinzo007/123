@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from .geometry import haversine_km
 
@@ -14,7 +14,15 @@ if TYPE_CHECKING:
     from .models import Direction, RouteData, Stop
     from .type_defs import Coordinate
 
-__all__ = ["DirUnit", "build_units", "dir_geo_sig", "network_center_distances"]
+DirectionKey: TypeAlias = tuple[int, int]
+
+__all__ = [
+    "DirUnit",
+    "DirectionKey",
+    "build_units",
+    "dir_geo_sig",
+    "network_center_distances",
+]
 
 
 class DirUnit:
@@ -61,13 +69,20 @@ class DirUnit:
         return self.route.route_type
 
     @property
-    def stable_key(self) -> str:
-        """Стабильный ключ направления.
+    def key(self) -> DirectionKey:
+        """Канонический стабильный ключ направления.
 
-        В отличие от позиционного ``unit_id``, этот ключ не зависит
-        от порядка маршрутов в исходном итерируемом объекте.
+        В отличие от позиционного ``unit_id``, ключ не зависит от порядка
+        маршрутов во входном списке и пригоден для внешних результатов,
+        кэшей и связывания статистик направления.
         """
-        return f"{self.route.route_id}:{self.di}"
+        return (self.route_id, self.di)
+
+    @property
+    def stable_key(self) -> str:
+        """Строковое представление стабильного ключа для отчётов/CLI."""
+        route_id, direction_index = self.key
+        return f"{route_id}:{direction_index}"
 
     @property
     def name(self) -> str:
@@ -94,8 +109,8 @@ def build_units(routes: Iterable[RouteData]) -> list[DirUnit]:
     Пропускает маршруты с ошибками/без направлений и направления
     с числом координат < 2.
 
-    ``unit_id`` — позиционный (0..n-1). Для стабильной внешней идентификации
-    рекомендуется использовать ``DirUnit.stable_key``.
+    ``unit_id`` — локальный позиционный индекс для массивов/графов.
+    Для любой долговечной идентификации следует использовать ``DirUnit.key``.
     """
     units: list[DirUnit] = []
 
@@ -136,6 +151,8 @@ def network_center_distances(units: list[DirUnit]) -> dict[int, float]:
     центроида (средней координаты) до центра сети.
 
     Возвращает ``{unit_id: км}``; направления без координат пропускаются.
+    ``unit_id`` здесь остаётся локальным индексом, потому что функция
+    участвует во внутренних численных расчётах.
     """
     centroids: dict[int, tuple[float, float]] = {}
     lats: list[float] = []
