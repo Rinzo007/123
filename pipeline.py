@@ -13,11 +13,19 @@ from .pipeline_dedup import (
     dir_stat_volume_map,
     merge_recomputed_stats,
 )
-from .pipeline_tasks import BASE_ROUTE_TYPES, build_base_tasks, build_secondary_tasks
+from .pipeline_filtering import (
+    apply_limits,
+    build_filter_limits,
+    split_active_routes,
+    split_ok_and_errors,
+)
+from .pipeline_loading import build_route_tasks
+from .pipeline_types import PipelineContext, PipelineResult
 
-_runtime.BASE_ROUTE_TYPES = BASE_ROUTE_TYPES
-_runtime.build_base_tasks = build_base_tasks
-_runtime.build_secondary_tasks = build_secondary_tasks
+_runtime.PipelineContext = PipelineContext
+_runtime.PipelineResult = PipelineResult
+_runtime.build_base_tasks = build_route_tasks
+_runtime.build_secondary_tasks = lambda *args, **kwargs: []
 _runtime.compute_pipeline_bbox = compute_pipeline_bbox
 _runtime.select_secondary_routes = select_secondary_routes
 _runtime._route_inside_bbox = route_inside_bbox
@@ -27,6 +35,13 @@ _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
+    "PipelineContext",
+    "PipelineResult",
+    "build_route_tasks",
+    "build_filter_limits",
+    "split_active_routes",
+    "split_ok_and_errors",
+    "apply_limits",
     "compute_pipeline_bbox",
     "route_inside_bbox",
     "select_secondary_routes",
