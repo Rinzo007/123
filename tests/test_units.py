@@ -34,6 +34,10 @@ def test_direction_key_is_stable_and_typed() -> None:
     ]
     assert all(isinstance(unit.key, tuple) for unit in units)
     assert all(len(unit.key) == 2 for unit in units)
+    assert all(
+        isinstance(route_id, int) and isinstance(direction_index, int)
+        for route_id, direction_index in units[0:1]  # type: ignore[misc]
+    )
 
 
 def test_direction_key_does_not_depend_on_route_order() -> None:
@@ -56,4 +60,8 @@ def test_legacy_unit_id_remains_local_index() -> None:
     units = build_units([_route(10, "10"), _route(20, "20")])
 
     assert [unit.unit_id for unit in units] == [0, 1, 2, 3]
-    assert all(isinstance(unit.key, DirectionKey.__args__) for unit in units)
+
+    key: DirectionKey = units[0].key
+    route_id, direction_index = key
+    assert isinstance(route_id, int)
+    assert isinstance(direction_index, int)
