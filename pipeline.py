@@ -1,6 +1,6 @@
 """Публичный фасад pipeline.
 
-Реализация вынесена в ``pipeline_runtime``. Функциональные stage-helper'ы
+Реализация вынесена в ``pipeline_runtime``. Functional stage-helper'ы
 подключаются из специализированных модулей, сохраняя прежние импорты.
 """
 
@@ -13,6 +13,7 @@ from .pipeline_dedup import (
     dir_stat_volume_map,
     merge_recomputed_stats,
 )
+from .pipeline_dedup_stage import run_dedup_pass
 from .pipeline_enrichment import compute_ghs, compute_ghs_s, compute_overture, compute_poi
 from .pipeline_filtering import (
     apply_limits,
@@ -23,7 +24,7 @@ from .pipeline_filtering import (
 from .pipeline_loading import build_route_tasks
 from .pipeline_types import PipelineContext, PipelineResult
 
-# Runtime compatibility bindings.  Stage implementations live in dedicated modules.
+# Runtime compatibility bindings. Stage implementations live in dedicated modules.
 _runtime.PipelineContext = PipelineContext
 _runtime.PipelineResult = PipelineResult
 _runtime.build_base_tasks = build_route_tasks
@@ -35,6 +36,7 @@ _runtime._apply_dedup_removals = apply_dedup_removals
 _runtime._dir_stat_volume_map = dir_stat_volume_map
 _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
+_runtime._run_dedup_pass = run_dedup_pass
 _runtime.compute_ghs = compute_ghs
 _runtime.compute_ghs_s = compute_ghs_s
 _runtime.compute_overture = compute_overture
@@ -59,4 +61,5 @@ __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "compute_ghs_s",
     "compute_overture",
     "compute_poi",
+    "run_dedup_pass",
 ]
