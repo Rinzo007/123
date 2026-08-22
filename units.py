@@ -5,16 +5,15 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any
 
 from .geometry import haversine_km
+from .type_defs import DirectionKey
 
 if TYPE_CHECKING:
     from .enums import RouteType
     from .models import Direction, RouteData, Stop
     from .type_defs import Coordinate
-
-DirectionKey: TypeAlias = tuple[int, int]
 
 __all__ = [
     "DirUnit",
