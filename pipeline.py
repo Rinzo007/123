@@ -13,11 +13,12 @@ from .pipeline_dedup import (
     dir_stat_volume_map,
     merge_recomputed_stats,
 )
-from .pipeline_tasks import BASE_ROUTE_TYPES, build_base_tasks, build_secondary_tasks
+from .pipeline_loading import build_route_tasks
 
-_runtime.BASE_ROUTE_TYPES = BASE_ROUTE_TYPES
-_runtime.build_base_tasks = build_base_tasks
-_runtime.build_secondary_tasks = build_secondary_tasks
+# Совместимость с текущим runtime: единая стадия загрузки используется вместо
+# двух групп маршрутов. Второй вызов намеренно пустой, чтобы не загружать сеть дважды.
+_runtime.build_base_tasks = build_route_tasks
+_runtime.build_secondary_tasks = lambda *args, **kwargs: []
 _runtime.compute_pipeline_bbox = compute_pipeline_bbox
 _runtime.select_secondary_routes = select_secondary_routes
 _runtime._route_inside_bbox = route_inside_bbox
@@ -27,6 +28,7 @@ _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
+    "build_route_tasks",
     "compute_pipeline_bbox",
     "route_inside_bbox",
     "select_secondary_routes",
