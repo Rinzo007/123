@@ -13,6 +13,7 @@ from .pipeline_dedup import (
     dir_stat_volume_map,
     merge_recomputed_stats,
 )
+from .pipeline_enrichment import compute_ghs, compute_ghs_s, compute_overture, compute_poi
 from .pipeline_filtering import (
     apply_limits,
     build_filter_limits,
@@ -22,8 +23,7 @@ from .pipeline_filtering import (
 from .pipeline_loading import build_route_tasks
 from .pipeline_types import PipelineContext, PipelineResult
 
-# Совместимость с текущим runtime: единая стадия загрузки используется вместо
-# двух групп маршрутов. Второй вызов намеренно пустой, чтобы не загружать сеть дважды.
+# Runtime compatibility bindings.  Stage implementations live in dedicated modules.
 _runtime.PipelineContext = PipelineContext
 _runtime.PipelineResult = PipelineResult
 _runtime.build_base_tasks = build_route_tasks
@@ -35,6 +35,10 @@ _runtime._apply_dedup_removals = apply_dedup_removals
 _runtime._dir_stat_volume_map = dir_stat_volume_map
 _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
+_runtime.compute_ghs = compute_ghs
+_runtime.compute_ghs_s = compute_ghs_s
+_runtime.compute_overture = compute_overture
+_runtime.compute_poi = compute_poi
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "PipelineContext",
@@ -51,4 +55,8 @@ __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "apply_dedup_removals",
     "dir_stat_volume_map",
     "merge_recomputed_stats",
+    "compute_ghs",
+    "compute_ghs_s",
+    "compute_overture",
+    "compute_poi",
 ]
