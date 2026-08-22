@@ -1,5 +1,8 @@
 """Общие определения типов для пакета wikiroutes."""
 
-type Coordinate = tuple[float, float]
+from typing import TypeAlias
 
-__all__ = ["Coordinate"]
+Coordinate: TypeAlias = tuple[float, float]
+DirectionKey: TypeAlias = tuple[int, int]
+
+__all__ = ["Coordinate", "DirectionKey"]
