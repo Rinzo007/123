@@ -20,10 +20,16 @@ from .pipeline_filtering import (
     split_ok_and_errors,
 )
 from .pipeline_loading import build_route_tasks
+from .pipeline_output import (
+    build_heatmap,
+    compute_stop_volumes,
+    generate_routes_network,
+    gen_route_count_formula,
+    stops_area_km2,
+)
 from .pipeline_types import PipelineContext, PipelineResult
 
-# Совместимость с текущим runtime: единая стадия загрузки используется вместо
-# двух групп маршрутов. Второй вызов намеренно пустой, чтобы не загружать сеть дважды.
+# Runtime compatibility bindings. Stage implementations live in dedicated modules.
 _runtime.PipelineContext = PipelineContext
 _runtime.PipelineResult = PipelineResult
 _runtime.build_base_tasks = build_route_tasks
@@ -35,6 +41,11 @@ _runtime._apply_dedup_removals = apply_dedup_removals
 _runtime._dir_stat_volume_map = dir_stat_volume_map
 _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
+_runtime._stops_area_km2 = stops_area_km2
+_runtime.compute_stop_volumes = compute_stop_volumes
+_runtime.gen_route_count_formula = gen_route_count_formula
+_runtime.generate_routes_network = generate_routes_network
+_runtime.build_heatmap = build_heatmap
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "PipelineContext",
@@ -51,4 +62,9 @@ __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
     "apply_dedup_removals",
     "dir_stat_volume_map",
     "merge_recomputed_stats",
+    "stops_area_km2",
+    "compute_stop_volumes",
+    "gen_route_count_formula",
+    "generate_routes_network",
+    "build_heatmap",
 ]
