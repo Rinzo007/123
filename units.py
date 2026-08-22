@@ -142,18 +142,16 @@ def _rounded_coordinate(value: Any) -> float | None:
     return result
 
 
-def network_center_distances(units: list[DirUnit]) -> dict[int, float]:
+def network_center_distances(units: list[DirUnit]) -> dict[DirectionKey, float]:
     """Расстояние (км) каждого направления до центра маршрутной сети.
 
     Центр сети — средняя точка (центроид центроидов) всех направлений.
     Расстояние направления — по гаверсинусам от его собственного
     центроида (средней координаты) до центра сети.
 
-    Возвращает ``{unit_id: км}``; направления без координат пропускаются.
-    ``unit_id`` здесь остаётся локальным индексом, потому что функция
-    участвует во внутренних численных расчётах.
+    Возвращает ``{DirectionKey: км}``; направления без координат пропускаются.
     """
-    centroids: dict[int, tuple[float, float]] = {}
+    centroids: dict[DirectionKey, tuple[float, float]] = {}
     lats: list[float] = []
     lons: list[float] = []
 
@@ -169,7 +167,7 @@ def network_center_distances(units: list[DirUnit]) -> dict[int, float]:
             continue
 
         centroid = (lat_sum / len(coords), lon_sum / len(coords))
-        centroids[unit.unit_id] = centroid
+        centroids[unit.key] = centroid
         lats.append(centroid[0])
         lons.append(centroid[1])
 
@@ -180,8 +178,8 @@ def network_center_distances(units: list[DirUnit]) -> dict[int, float]:
     center_lon = sum(lons) / len(lons)
 
     return {
-        unit_id: haversine_km(center_lat, center_lon, lat, lon)
-        for unit_id, (lat, lon) in centroids.items()
+        direction_key: haversine_km(center_lat, center_lon, lat, lon)
+        for direction_key, (lat, lon) in centroids.items()
     }
 
 
