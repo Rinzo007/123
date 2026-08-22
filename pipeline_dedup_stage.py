@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from .dedup import dedup_network_after
 from .dedup_policy import dedup_compute_removals
