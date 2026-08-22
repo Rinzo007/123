@@ -20,9 +20,12 @@ from .pipeline_filtering import (
     split_ok_and_errors,
 )
 from .pipeline_loading import build_route_tasks
+from .pipeline_types import PipelineContext, PipelineResult
 
 # Совместимость с текущим runtime: единая стадия загрузки используется вместо
 # двух групп маршрутов. Второй вызов намеренно пустой, чтобы не загружать сеть дважды.
+_runtime.PipelineContext = PipelineContext
+_runtime.PipelineResult = PipelineResult
 _runtime.build_base_tasks = build_route_tasks
 _runtime.build_secondary_tasks = lambda *args, **kwargs: []
 _runtime.compute_pipeline_bbox = compute_pipeline_bbox
@@ -34,6 +37,8 @@ _runtime._dedup_affected_route_ids = affected_route_ids
 _runtime._merge_recomputed_stats = merge_recomputed_stats
 
 __all__ = [name for name in dir(_runtime) if not name.startswith("_")] + [
+    "PipelineContext",
+    "PipelineResult",
     "build_route_tasks",
     "build_filter_limits",
     "split_active_routes",
