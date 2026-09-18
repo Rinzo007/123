@@ -14,6 +14,11 @@ logger = logging.getLogger("wikiroutes.cache")
 
 DEFAULT_MAX_ENTRY_BYTES = 8 * 1024 * 1024
 DEFAULT_COMPRESS_MIN_BYTES = 512
+# Дорожные рёбра OD заметно крупнее обычных JSON-записей кэша.
+# Лимит остаётся общим 8 MiB, но для этого вида кэша разрешаем до 64 MiB.
+DEFAULT_KIND_LIMITS = {
+    "od_roads": 64 * 1024 * 1024,
+}
 
 _GZIP_MAGIC = b"\x1f\x8b"
 
@@ -51,7 +56,7 @@ class JsonCache:
         self.read_enabled = read
         self.write_enabled = write
         self.max_entry_bytes = max_entry_bytes
-        self.kind_limits = kind_limits or {}
+        self.kind_limits = {**DEFAULT_KIND_LIMITS, **(kind_limits or {})}
         self.compress = compress
         self.compress_min_bytes = compress_min_bytes
         self._lock = threading.Lock()
