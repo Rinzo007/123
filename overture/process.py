@@ -197,7 +197,7 @@ def _aggregate_route_stats(
             count=len(idxs),
             ok=route_ok,
         )
-            route_entry = {
+        route_entry = {
             "total_area_m2": route_stats.total_area_m2,
             "corridor_m2": route_stats.corridor_m2,
             "count": route_stats.count,
@@ -219,9 +219,6 @@ def _process_single_route(
         return OvertureStats(ok=False), {}, {}
 
     dir_sigs = _direction_signatures(rd)
-    route_geo_sig = hashlib.sha256(";".join(dir_sigs).encode()).hexdigest()[:16]
-    route_key = f"{state.ctx.city}_{rd.route_id}_route_{state.ctx.sig}_{route_geo_sig}"
-
     direction_stats: list[OvertureStats] = []
     dir_stats_map: dict[tuple[int, int], OvertureStats] = {}
     route_buffers: list[Any] = []
@@ -230,7 +227,7 @@ def _process_single_route(
     route_buffer_missing = False
 
     for di, d in enumerate(rd.directions):
-        key = f"{state.ctx.city}_{rd.route_id}_{di}_{state.ctx.sig}_{dir_sigs[di]}"
+        key = f"direction_{state.ctx.sig}_{dir_sigs[di]}"
         cached = (
             _cache_get(state.cache, state.cache_lock, key)
             if state.cache is not None
@@ -255,8 +252,6 @@ def _process_single_route(
     route_stats, route_entry = _aggregate_route_stats(
         rd, route_buffers, direction_stats, route_buffer_missing, state
     )
-    if route_entry is not None:
-        _store_cache_entry(state, route_key, route_entry, cache_entries)
     return route_stats, dir_stats_map, cache_entries
 
 
