@@ -14,6 +14,7 @@ from shapely.geometry import box as shapely_box
 
 from ..common import resolve_sources, utm_epsg
 from .download import resolve_poi_place_file
+from .config import OvertureConfig
 from .geometry import _geometry_hashes, _repair_polygonal_geometries
 from .http import (
     _concat_part_frames,
@@ -22,11 +23,7 @@ from .http import (
     _part_local_path,
     _read_part_frames,
 )
-from .settings import (
-    OVERTURE_DEDUPE_BY_GEOMETRY,
-    OVERTURE_PROJECTION_CHUNK_SIZE,
-    OVERTURE_SKIP_REPAIR,
-)
+
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -256,14 +253,16 @@ def _deduplicate_buildings_by_id(gdf: Any) -> Any:
     return gdf.loc[new_labels]
 
 
-def _deduplicate_buildings(gdf: Any) -> Any:
+def _deduplicate_buildings(
+    gdf: Any, *, dedupe_by_geometry: bool = True
+) -> Any:
     before = len(gdf)
     if before == 0:
         return gdf
 
     gdf = _deduplicate_buildings_by_id(gdf)
 
-    if OVERTURE_DEDUPE_BY_GEOMETRY and len(gdf) > 1:
+    if dedupe_by_geometry and len(gdf) > 1:
         hashes = _geometry_hashes(gdf.geometry.values)
         gdf = gdf.copy()
         gdf["__geom_hash"] = hashes
@@ -299,9 +298,11 @@ def _read_bbox_filtered_sources(
     return all_gdfs
 
 
-def _validate_or_repair(geoms: np.ndarray) -> tuple[np.ndarray, int]:
+def _validate_or_repair(
+    geoms: np.ndarray, *, skip_repair: bool = False
+) -> tuple[np.ndarray, int]:
     """Валидация либо ремонт геометрий; возвращает (валидные, число пропущенных)."""
-    if OVERTURE_SKIP_REPAIR:
+    if skip_repair:
         valid_mask = shapely.is_valid(geoms)
         return geoms[valid_mask], int((~valid_mask).sum())
     return _repair_polygonal_geometries(geoms)
@@ -342,10 +343,13 @@ def load_overture_geometries(
     bbox: tuple[float, float, float, float],
     limit: int = 0,
     epsg: int | None = None,
+    *,
+    config: OvertureConfig | None = None,
 ) -> tuple[np.ndarray, int | None]:
     import geopandas as gpd
     import pandas as pd
 
+    config = config or OvertureConfig.from_env()
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_geom = shapely_box(min_lon, min_lat, max_lon, max_lat)
 
@@ -356,7 +360,9 @@ def load_overture_geometries(
     gdf = gpd.GeoDataFrame(pd.concat(all_gdfs, ignore_index=True), crs="EPSG:4326")
     del all_gdfs
 
-    gdf = _deduplicate_buildings(gdf)
+    gdf = _deduplicate_buildings(
+        gdf, dedupe_by_geometry=config.dedupe_by_geometry
+    )
     gdf = _apply_overture_limit(gdf, limit)
 
     if epsg is None:
@@ -365,7 +371,9 @@ def load_overture_geometries(
         logger.warning("Overture: не удалось определить UTM-зону, пропуск")
         return np.asarray([], dtype=object), None
 
-    valid_geometries, invalid_count = _validate_or_repair(gdf.geometry.values)
+    valid_geometries, invalid_count = _validate_or_repair(
+        gdf.geometry.values, skip_repair=config.skip_repair
+    )
     del gdf
 
     if invalid_count:
@@ -376,7 +384,7 @@ def load_overture_geometries(
         return np.asarray([], dtype=object), None
 
     polygon_geometries = _project_geometries_to_epsg(
-        valid_geometries, epsg, OVERTURE_PROJECTION_CHUNK_SIZE, gpd
+        valid_geometries, epsg, config.projection_chunk_size, gpd
     )
 
     return polygon_geometries, epsg
