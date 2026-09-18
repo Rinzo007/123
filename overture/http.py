@@ -507,16 +507,6 @@ def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     return Path(cache_dir) / "parts" / safe
 
 
-def _is_valid_cached_part(path: Path) -> bool:
-    """Проверяет существующий part-файл чтением parquet footer."""
-    try:
-        from pyarrow.parquet import ParquetFile
-        ParquetFile(path)
-        return path.stat().st_size > 0
-    except Exception:
-        return False
-
-
 def _download_part_once(key: str, cache_dir: str | Path) -> None:
     """Скачивает одну часть атомарно (tmp + replace), пропуская готовые.
 
