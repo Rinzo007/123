@@ -1,5 +1,6 @@
 """Настройки и константы GIS-модуля Overture."""
 
+import hashlib
 import os
 
 
@@ -23,7 +24,7 @@ OVERTURE_THEME_ALIASES = {
     "connector": "connector",
 }
 
-OVERTURE_CACHE_VERSION = 10
+OVERTURE_CACHE_VERSION = 11
 
 try:
     OVERTURE_THREAD_BATCH_SIZE = int(os.getenv("OVERTURE_THREAD_BATCH_SIZE", "0"))
@@ -49,3 +50,20 @@ except (TypeError, ValueError):
     OVERTURE_BUFFER_CACHE_MAX_SIZE = 5_000
 
 OVERTURE_PROJECTION_CHUNK_SIZE = 50_000
+
+
+def overture_algorithm_signature() -> str:
+    """Возвращает сигнатуру настроек, влияющих на геометрию и расчёт площадей."""
+    payload = {
+        "dedupe_by_geometry": OVERTURE_DEDUPE_BY_GEOMETRY,
+        "assume_no_overlap": OVERTURE_ASSUME_NO_OVERLAP,
+        "use_coverage_union": OVERTURE_USE_COVERAGE_UNION,
+        "union_grid_size": OVERTURE_UNION_GRID_SIZE,
+        "min_building_area_m2": OVERTURE_MIN_BUILDING_AREA_M2,
+        "buffer_quad_segs": OVERTURE_BUFFER_QUAD_SEGS,
+        "line_simplify_m": OVERTURE_LINE_SIMPLIFY_M,
+        "directions_latlon": OVERTURE_DIRECTIONS_LATLON,
+        "skip_repair": OVERTURE_SKIP_REPAIR,
+    }
+    canonical = repr(sorted(payload.items())).encode()
+    return hashlib.sha256(canonical).hexdigest()[:16]
