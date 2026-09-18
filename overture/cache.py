@@ -7,7 +7,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from .adapters import JsonCache, OvertureStats
+from .adapters import OvertureStats
+from .ports import CachePort
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -77,7 +78,7 @@ def _file_signature(paths: list[str]) -> str:
     return hashlib.sha256(";".join(parts).encode()).hexdigest()[:16]
 
 
-def _cache_get(cache: JsonCache | None, lock: threading.RLock | None, key: str) -> Any:
+def _cache_get(cache: CachePort | None, lock: threading.RLock | None, key: str) -> Any:
     if cache is None:
         return None
     try:
