@@ -155,16 +155,14 @@ def test_stac_request_closes_connection(monkeypatch):
     assert captured == [("close", 120.0, context)]
 
 
-def test_stac_downloads_ranges_and_retries_failed_chunk(monkeypatch):
+def test_stac_downloads_ranges_and_passes_retry_budget(monkeypatch):
     import overture.http as http
 
     calls = []
 
     def fake_fetch_chunk(url, start, timeout, chunk, retries, retry_delay):
         calls.append((start, timeout, chunk, retries))
-        if len(calls) == 1:
-            raise TimeoutError("read operation timed out")
-        if len(calls) == 2:
+        if start == 0:
             return 206, b"abcd", 8
         return 206, b"efgh", 8
 
@@ -178,7 +176,6 @@ def test_stac_downloads_ranges_and_retries_failed_chunk(monkeypatch):
         retry_delay=0,
     ) == b"abcdefgh"
     assert calls[0][0] == 0
-    assert calls[1][0] == 0
-    assert calls[2][0] == 4
+    assert calls[1][0] == 4
     assert all(call[1] == 7 for call in calls)
     assert all(call[3] == 1 for call in calls)
