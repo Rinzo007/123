@@ -109,7 +109,7 @@ def _fetch_chunk(
     плюс пауза между повторами.
     """
     url_list = [urls] if isinstance(urls, str) else list(urls)
-    attempts = retries * len(url_list)
+    attempts = max(1, retries + 1) * len(url_list)
     last_exc: Exception | None = None
     for attempt in range(attempts):
         if attempt:
@@ -255,7 +255,7 @@ def _is_valid_cached_part(
             return False
         ParquetFile(path)
         return True
-    except (OSError, ValueError, TypeError, OverflowError):
+    except Exception:
         return False
 
 
