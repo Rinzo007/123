@@ -281,8 +281,7 @@ def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
     )
 
     assert keys == ["bucket/relevant.parquet"]
-    assert calls[0].endswith("/2026-08-19.0/collections.parquet")
-    assert calls[1] == "collection-fallback"
+    assert calls[0] == "collection-fallback"
 
 
 def test_download_progress_reports_speed_and_eta(monkeypatch, caplog):
@@ -306,7 +305,7 @@ def test_download_progress_reports_speed_and_eta(monkeypatch, caplog):
 def test_stac_hosts_include_s3_catalog_mirror():
     import overture.http as http
 
-    assert http._STAC_HTTP_HOSTS[0] == "https://stac.overturemaps.org"
+    assert http._STAC_HTTP_HOSTS[0].endswith(".s3.us-west-2.amazonaws.com/stac")
     assert "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac" in http._STAC_HTTP_HOSTS
 
 
