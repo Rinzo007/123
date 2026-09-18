@@ -28,19 +28,7 @@ from .process import (
     _thread_batch_worker,
     _WorkerState,
 )
-from .settings import (
-    OVERTURE_ASSUME_NO_OVERLAP,
-    OVERTURE_BUFFER_CACHE_MAX_SIZE,
-    OVERTURE_CACHE_VERSION,
-    OVERTURE_MIN_BUILDING_AREA_M2,
-    OVERTURE_PROJECTION_CHUNK_SIZE,
-    OVERTURE_THREAD_BATCH_MAX,
-    OVERTURE_THREAD_BATCH_SIZE,
-    OVERTURE_UNION_GRID_SIZE,
-    OVERTURE_USE_COVERAGE_UNION,
-    _resolve_overture_release,
-    overture_algorithm_signature,
-)
+from .settings import _resolve_overture_release
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -150,7 +138,7 @@ def _pipeline_signature(
             f"buffer={buffer_m:.6f}|"
             f"limit={int(limit or 0)}|"
             f"epsg={epsg}|"
-            f"algorithm={overture_algorithm_signature()}"
+            f"algorithm={config.algorithm_signature()}"
         ).encode()
     ).hexdigest()[:16]
 
