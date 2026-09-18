@@ -83,12 +83,46 @@ def _cache_put(
         logger.exception("Overture: ошибка записи кэша для ключа %s", key)
 
 
+def _stats_to_cached(st: OvertureStats) -> dict[str, Any]:
+    """Сериализует статистику в стабильный JSON-совместимый формат."""
+    return {
+        "total_area_m2": float(max(0.0, st.total_area_m2)),
+        "corridor_m2": float(max(0.0, st.corridor_m2)),
+        "count": int(max(0, st.count)),
+        "ok": bool(st.ok),
+    }
+
+
 def _stats_from_cached(cached: Any) -> OvertureStats:
     if not isinstance(cached, dict):
         return OvertureStats(ok=False)
-    return OvertureStats(
-        total_area_m2=max(0.0, float(cached.get("total_area_m2", 0.0))),
-        corridor_m2=max(0.0, float(cached.get("corridor_m2", 0.0))),
-        count=max(0, int(cached.get("count", 0) or 0)),
-        ok=bool(cached.get("ok", True)),
-    )
+    try:
+        return OvertureStats(
+            total_area_m2=max(0.0, float(cached.get("total_area_m2", 0.0))),
+            corridor_m2=max(0.0, float(cached.get("corridor_m2", 0.0))),
+            count=max(0, int(cached.get("count", 0) or 0)),
+            ok=bool(cached.get("ok", True)),
+        )
+    except (TypeError, ValueError, OverflowError):
+        return OvertureStats(ok=False)
+
+
+def _route_stats_from_cached(
+    cached: Any,
+) -> tuple[OvertureStats, dict[int, OvertureStats]] | None:
+    """Читает атомарный route-cache с результатами маршрута и направлений."""
+    if not isinstance(cached, dict):
+        return None
+    route_payload = cached.get("route")
+    directions_payload = cached.get("directions")
+    if not isinstance(route_payload, dict) or not isinstance(directions_payload, dict):
+        return None
+
+    route_stats = _stats_from_cached(route_payload)
+    dir_stats: dict[int, OvertureStats] = {}
+    try:
+        for key, payload in directions_payload.items():
+            dir_stats[int(key)] = _stats_from_cached(payload)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return route_stats, dir_stats
