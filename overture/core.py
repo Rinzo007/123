@@ -14,7 +14,8 @@ from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry import box as shapely_box
 
-from .adapters import JsonCache, OvertureStats, utm_epsg
+from .adapters import OvertureStats, utm_epsg
+from .ports import CachePort
 from .cache import LRUCache, _file_signature
 from .context import _OvertureContext
 from .config import OvertureConfig
@@ -224,7 +225,7 @@ class _BatchAccumulator:
 
 
 def _flush_pending(
-    cache: JsonCache | None, cache_lock, pending: list[tuple[str, Any]]
+    cache: CachePort | None, cache_lock, pending: list[tuple[str, Any]]
 ) -> None:
     """Пачкой записывает отложенные записи кэша."""
     if cache and pending:
