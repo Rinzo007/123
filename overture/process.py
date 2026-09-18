@@ -79,6 +79,7 @@ class _WorkerState:
 
     ctx: _OvertureContext
     transformer: Any
+    transformer_local: threading.local | None
     cache: JsonCache | None
     write_cache: bool
     cache_lock: threading.RLock | None
@@ -99,6 +100,23 @@ def _direction_signatures(rd: RouteData) -> list[str]:
     return dir_sigs
 
 
+def _get_transformer(state: _WorkerState) -> Any:
+    """Возвращает Transformer, локальный для текущего потока."""
+    if state.transformer is not None:
+        return state.transformer
+    if state.transformer_local is None:
+        raise RuntimeError("Transformer не инициализирован")
+    transformer = getattr(state.transformer_local, "transformer", None)
+    if transformer is None:
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs(
+            "EPSG:4326", f"EPSG:{state.ctx.epsg}", always_xy=True
+        )
+        state.transformer_local.transformer = transformer
+    return transformer
+
+
 def _build_cached_direction_buffer(
     d: Any, sig: str, key: str, state: _WorkerState
 ) -> Any | None:
@@ -109,7 +127,7 @@ def _build_cached_direction_buffer(
         return buf
 
     try:
-        buf = _overture_direction_buffer(d, state.transformer, state.ctx.buffer_m)
+        buf = _overture_direction_buffer(d, _get_transformer(state), state.ctx.buffer_m)
     except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
         logger.exception("Overture: ошибка построения буфера для %s", key)
         return None
