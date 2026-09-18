@@ -36,7 +36,7 @@ def load_overture_segments(
     retry_delay: float = 2.0,
     classes: frozenset[str] | None = None,
 ) -> Any | None:
-    """Скачивает тему ``segment`` (транспортные отрезки дорог) через STAC/HTTP.
+    """Загружает тему ``segment`` через DuckDB cloud scan с HTTP fallback.
 
     Возвращает ``GeoDataFrame`` с ``LineString``/``MultiLineString``
     геометриями в EPSG:4326 или ``None`` при ошибке/пустом результате.
