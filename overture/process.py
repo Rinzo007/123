@@ -274,7 +274,7 @@ def _process_single_route(
             # подставляем фактический id текущего маршрута.
             dir_stats_map = {
                 (rd.route_id, di): st
-                for (_, di), st in cached_dirs.items()
+                for di, st in cached_dirs.items()
             }
             return route_stats, dir_stats_map, {}
 
@@ -316,7 +316,7 @@ def _process_single_route(
         cache_entries[route_key] = {
             "route": route_entry,
             "directions": {
-                f"{rd.route_id}:{di}": _stats_to_cached(st)
+                str(di): _stats_to_cached(st)
                 for di, st in enumerate(direction_stats)
             },
         }
