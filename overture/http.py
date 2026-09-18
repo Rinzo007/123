@@ -21,10 +21,16 @@ from typing import Any
 logger = logging.getLogger("wikiroutes.gis.overture")
 
 
+# Официальные endpoint'ы Overture. Azure добавлен как резервное зеркало:
+# документация Overture публикует основной каталог и на S3, и на Azure.
+# Второй Azure endpoint через dfs полезен там, где blob endpoint режется
+# сетевым прокси/фильтрацией.
 _OVERTURE_HTTP_HOSTS: tuple[str, ...] = (
     "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com",
     "https://overturemaps-us-west-2.s3.amazonaws.com",
     "https://s3.us-west-2.amazonaws.com/overturemaps-us-west-2",
+    "https://overturemapswestus2.blob.core.windows.net",
+    "https://overturemapswestus2.dfs.core.windows.net",
 )
 
 
@@ -87,6 +93,9 @@ def _http_get_range(
 
 
 def _overture_host_url(host: str, bucket: str, bucket_key: str, obj_path: str) -> str:
+    """Строит HTTP URL для S3/Azure endpoint'а из общего object key."""
+    if host.endswith((".blob.core.windows.net", ".dfs.core.windows.net")):
+        return f"{host}/{obj_path}"
     if "s3.us-west-2.amazonaws.com/" in host and not host.endswith(bucket):
         return f"{host}/{obj_path}"
     return f"{host}/{obj_path}" if bucket in host else f"{host}/{bucket_key}"
