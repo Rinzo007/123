@@ -573,6 +573,35 @@ def _stac_item_hrefs(
         .get("bbox", [])
     )
 
+    # STAC Item hrefs are resolved relative to the directory containing
+    # collection.json, not relative to collection.json itself. Resolving
+    # against the file URL produces malformed paths such as:
+    # .../segment/collection.json/2026-08-19.0/transportation/segment/00002/00002.json
+    collection_dir = base_url.rsplit("/", 1)[0] + "/"
+
+    def resolve_item_href(href: str) -> str:
+        # Some published Overture STAC collections contain an href prefixed
+        # with collection.json/ and then a release-relative path. Treat that
+        # as a path from the STAC root, not as a child of collection.json.
+        normalized = href.lstrip("./")
+        if normalized.startswith("collection.json/"):
+            normalized = normalized[len("collection.json/") :]
+
+        parts = normalized.split("/", 1)
+        if len(parts) == 2:
+            first = parts[0]
+            if len(first) >= 10 and first[4] == "-" and first[7] == "-" and "." in first:
+                base_parts = urllib.parse.urlsplit(base_url)
+                marker = "/" + first + "/"
+                if marker in base_parts.path:
+                    prefix = base_parts.path.split(marker, 1)[0] + marker
+                    root_url = urllib.parse.urlunsplit(
+                        (base_parts.scheme, base_parts.netloc, prefix, "", "")
+                    )
+                    return urllib.parse.urljoin(root_url, normalized)
+
+        return urllib.parse.urljoin(collection_dir, normalized)
+
     # Overture's published collections currently carry one union bbox followed
     # by one bbox per Item, in the same order as the item links. Use that
     # spatial index to avoid fetching every Item JSON.
@@ -584,12 +613,12 @@ def _stac_item_hrefs(
                 continue
             xmin, ymin, xmax, ymax = map(float, item_bbox)
             if xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat:
-                candidate_links.append(urllib.parse.urljoin(base_url, href))
+                candidate_links.append(resolve_item_href(href))
         return candidate_links
 
     # Be conservative if a future STAC writer changes the extent layout.
     return [
-        urllib.parse.urljoin(base_url, href)
+        resolve_item_href(href)
         for href in item_links
     ]
 
@@ -640,13 +669,14 @@ def _http_resolve_stac_part_files_via_collection(
         return []
 
     def fetch_item(item_url: str) -> str | None:
-        import urllib.parse
-
         item_path = urllib.parse.urlsplit(item_url).path
-        relative_path = item_path.split(f"/{release}/", 1)[-1]
+        marker = f"/{release}/"
+        if marker not in item_path:
+            raise ValueError(f"Некорректный STAC Item URL: {item_url}")
+        relative_path = item_path.split(marker, 1)[1]
         item_urls = [
-            f"{base}/{release}/{relative_path.lstrip('/')}"
-            for base in collection_urls
+            f"{host}/{release}/{relative_path.lstrip('/')}"
+            for host in _STAC_HTTP_HOSTS
         ]
         item_data = _http_get_stac(
             item_urls,
