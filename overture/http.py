@@ -620,6 +620,9 @@ def _http_resolve_stac_part_files(
             retries=retries,
             retry_delay=retry_delay,
         )
+        import pyarrow.compute as pc
+        from pyarrow import parquet as pq
+
         table = pq.read_table(io.BytesIO(data))
 
         feature_type_filter = (pc.field("collection") == overture_type) & (
