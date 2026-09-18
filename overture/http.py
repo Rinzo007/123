@@ -1,0 +1,453 @@
+"""Сетевой слой Overture: HTTP/S3, STAC-резолвинг, докачка и чтение частей.
+
+Скачивание данных Overture обходит нестабильный pyarrow-S3 транспортом
+напрямую по HTTP (Range-чанки, переживающие TLS-обрывы), затем парт-файлы
+читаются с локального диска через geopandas/pyarrow.
+"""
+
+import datetime as datetime_module
+import email.utils
+import io
+import logging
+import ssl
+import time
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger("wikiroutes.gis.overture")
+
+
+_OVERTURE_HTTP_HOSTS: tuple[str, ...] = (
+    "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com",
+    "https://overturemaps-us-west-2.s3.amazonaws.com",
+    "https://s3.us-west-2.amazonaws.com/overturemaps-us-west-2",
+)
+
+
+# Порция данных на один HTTP-запрос для докачки. Обрывы TLS (EOF) на больших
+# файлах S3 случаются тем чаще, чем длиннее единичный GET; лимит чанка делает
+# запрос коротким, а resume — по уже записанным байтам.
+_OVERTURE_CHUNK_BYTES = 4 * 1024 * 1024
+
+# Пауза между повторами одного чанка после TLS-обрыва (INVALID_SESSION_ID):
+# даёт S3 время сбросить повреждённую сессию до полного handshake.
+_CHUNK_RETRY_DELAY_S = 2.0
+
+
+def _http_get_url(url: str, timeout: float) -> bytes:
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _http_get_range(
+    url: str, start: int, timeout: float, chunk: int, context: ssl.SSLContext | None
+) -> tuple[int, bytes]:
+    """GET ``bytes=start-`` на URL; возвращает (статус, байты).
+
+    При поддержке Range (206) отдаёт до ``chunk`` байт от смещения ``start``.
+    Если сервер игнорирует Range (200), читает всё тело целиком — докачка для
+    такого хоста невозможна, вызывающий обязан сбросить смещение на 0.
+    ``context`` — свежий TLS-контекст: S3 после обрыва отвечает
+    ``INVALID_SESSION_ID`` на предложение старой сессии, полный handshake
+    на новом контексте исключает повтор этой ошибки.
+    """
+    req = urllib.request.Request(url, method="GET")
+    if start > 0:
+        req.add_header("Range", f"bytes={start}-")
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
+        status = getattr(resp, "status", 200)
+        data = resp.read(chunk if status == 206 else None)
+    return status, data
+
+
+def _overture_host_url(host: str, bucket: str, bucket_key: str, obj_path: str) -> str:
+    if "s3.us-west-2.amazonaws.com/" in host and not host.endswith(bucket):
+        return f"{host}/{obj_path}"
+    return f"{host}/{obj_path}" if bucket in host else f"{host}/{bucket_key}"
+
+
+def _fetch_chunk(
+    urls: str | list[str],
+    start: int,
+    timeout: float,
+    chunk: int,
+    retries: int,
+    retry_delay: float = 2.0,
+) -> tuple[int, bytes]:
+    """Один Range-GET на URL с повторами; при исчерпании — последняя ошибка.
+
+    ``urls`` может быть одним URL или списком хост-вариантов одного объекта:
+    попытки идут по кругу через все хосты, поэтому транзитный отказ одного S3
+    хоста (DPI-сброс с ``INVALID_SESSION_ID``) не сжигает весь бюджет — чанк
+    уходит через следующий живой хост. Каждая попытка — свежий TLS-контекст
+    плюс пауза между повторами.
+    """
+    url_list = [urls] if isinstance(urls, str) else list(urls)
+    attempts = retries * len(url_list)
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(retry_delay)
+        url = url_list[attempt % len(url_list)]
+        try:
+            context = ssl.create_default_context()
+            return _http_get_range(url, start, timeout, chunk, context)
+        except Exception as exc:  # noqa: BLE001 — внешняя сетевая граница
+            last_exc = exc
+            logger.warning(
+                "Overture: Range-чанк %s (offset %d) failed: %s",
+                url,
+                start,
+                exc,
+            )
+    raise last_exc if last_exc is not None else RuntimeError(
+        f"Overture: Range-загрузка {url_list[0]} не удалась"
+    )
+
+
+def _append_chunk(part: Path, start: int, data: bytes, chunk: int) -> int:
+    """Записывает чанк в part (wb/ab по смещению) и возвращает новое смещение."""
+    mode = "ab" if start > 0 else "wb"
+    with part.open(mode) as fh:
+        fh.seek(start) if mode == "wb" else None
+        fh.write(data)
+    return start + len(data)
+
+
+class _PartProgress:
+    """Замер скорости докачки парт-файла по HTTP (байты и время).
+
+    Логирует ход каждые ``log_interval_s`` секунд; ``summary()`` отдаёт
+    итоговую строку со средней скоростью за всю загрузку части (вместе с
+    паузами между повторами — видна реальная эффективность).
+    """
+
+    _MB = 1024 * 1024
+
+    def __init__(self, name: str, log_interval_s: float = 10.0) -> None:
+        self._name = name
+        self._log_interval_s = log_interval_s or float("inf")
+        self._t0 = time.monotonic()
+        self._last_log = self._t0
+        self._bytes = 0
+
+    def update(self, data: bytes) -> None:
+        """Принимает очередной скачанный кусок, изредка логирует прогресс."""
+        self._bytes += len(data)
+        now = time.monotonic()
+        if now - self._last_log >= self._log_interval_s:
+            logger.info(
+                "Overture: %s — скачано %.1f МБ, скорость %.2f МБ/с",
+                self._name,
+                self._bytes / self._MB,
+                self._megabytes_per_sec(now),
+            )
+            self._last_log = now
+
+    def _megabytes_per_sec(self, now: float) -> float:
+        elapsed = now - self._t0
+        if elapsed <= 0:
+            return 0.0
+        return (self._bytes / self._MB) / elapsed
+
+    def summary(self) -> str:
+        """Итоговая строка: имя, объём, время, средняя скорость."""
+        now = time.monotonic()
+        return (
+            f"{self._name}: скачано {self._bytes / self._MB:.1f} МБ "
+            f"за {now - self._t0:.1f} с "
+            f"({self._megabytes_per_sec(now):.2f} МБ/с)"
+        )
+
+
+def _download_part_from_host(
+    urls: str | list[str],
+    part: Path,
+    timeout: float,
+    *,
+    chunk: int = _OVERTURE_CHUNK_BYTES,
+    per_chunk_retries: int = 3,
+    retry_delay: float = _CHUNK_RETRY_DELAY_S,
+) -> None:
+    """Докачивает объект в ``part`` чанками с Range, переживая TLS-обрывы.
+
+    ``urls`` — один URL или список хост-вариантов одного объекта S3: DPI
+    периодически рвёт TLS только к части хостов (``INVALID_SESSION_ID``),
+    поэтому каждый чанк по кругу пробует все хосты и уходит через живой.
+
+    Каждый чанк — отдельный GET. Смещение продолжается со следующего после
+    записанных байт, поэтому обрыв соединения на середине файла не требует
+    перекачки с нуля; повторный запуск продолжает с сохранённого ``part``.
+    """
+    list_urls = [urls] if isinstance(urls, str) else list(urls)
+    progress = _PartProgress(part.name)
+    start = part.stat().st_size if part.exists() else 0
+    while True:
+        status, data = _fetch_chunk(
+            list_urls, start, timeout, chunk, per_chunk_retries, retry_delay
+        )
+        if status != 206:
+            # Хост не поддержал Range — получено всё тело файла; докачки нет.
+            with part.open("wb") as fh:
+                fh.write(data)
+        else:
+            start = _append_chunk(part, start, data, chunk)
+        progress.update(data)
+        complete = len(data) < chunk or status != 206
+        if complete:
+            logger.info("Overture: %s", progress.summary())
+            return
+
+
+def _retry_after_value(retry_after: str) -> float | None:
+    """Парсит ``Retry-After`` как число секунд; None при нечисловом значении."""
+    try:
+        return float(retry_after)
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_after_date(retry_after: str) -> float | None:
+    """Парсит ``Retry-After`` как HTTP-дату (RFC 7231); None при не-дата."""
+    try:
+        when = email.utils.parsedate_to_datetime(retry_after)
+        return (when - datetime_module.datetime.now(datetime_module.UTC)).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_after_seconds(retry_after: str | None, fallback: float) -> float:
+    """Возвращает паузу в секундах из заголовка ``Retry-After`` (или fallback).
+
+    Overture STAC отвечает на 429 как числом секунд, так и HTTP-датой
+    (RFC 7231). Минимум 30 секунд: лимит обычно исчезает дольше, чем
+    стандартный экспоненциальный backoff.
+    """
+    if not retry_after:
+        return max(fallback, 30.0)
+    seconds = _retry_after_value(retry_after)
+    if seconds is not None:
+        return max(seconds, 30.0)
+    seconds = _retry_after_date(retry_after)
+    if seconds is not None:
+        return max(seconds, 30.0)
+    return max(fallback, 30.0)
+
+
+def _stac_retry_delay(exc: Exception, attempt: int, retry_delay: float) -> float:
+    """Пауза перед повтором STAC-запроса.
+
+    Для HTTP 429 — ``Retry-After`` из ответа (минимум 30 с по RFC 7231),
+    иначе экспоненциальный backoff от ``retry_delay``.
+    """
+    import urllib.error
+
+    if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        return _retry_after_seconds(retry_after, retry_delay * (2**attempt))
+    return retry_delay * (2**attempt)
+
+
+def _log_stac_retry(
+    url: str, attempt: int, retries: int, delay: float, exc: Exception, rate_limited: bool
+) -> None:
+    label = " (429)" if rate_limited else ""
+    logger.warning(
+        "Overture: STAC %s попытка %d/%d — повтор через %.1fs%s: %s",
+        url,
+        attempt + 1,
+        retries + 1,
+        delay,
+        label,
+        exc,
+    )
+
+
+def _http_get_stac(
+    url: str, timeout: float = 60.0, retries: int = 0, retry_delay: float = 2.0
+) -> bytes:
+    """Скачивает STAC collections.parquet с повторами и экспоненциальной паузой.
+
+    Соединение к STAC — единая точка входа в автозагрузку; транзитные сбои
+    TLS (в т.ч. WinError 10054) не должны обрушивать весь POI-расчёт.
+    При HTTP 429 ждём ``Retry-After`` из ответа (или минимум 30 секунд).
+    """
+    import urllib.error
+
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            return _http_get_url(url, timeout)
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            rate_limited = exc.code == 429
+        except Exception as exc:  # noqa: BLE001 — внешняя сетевая граница
+            last_exc = exc
+            rate_limited = False
+        if attempt >= retries:
+            continue
+        delay = _stac_retry_delay(last_exc, attempt, retry_delay)
+        _log_stac_retry(url, attempt, retries, delay, last_exc, rate_limited)
+        time.sleep(delay)
+    raise last_exc if last_exc is not None else RuntimeError("Overture: STAC-загрузка не удалась")
+
+
+def _http_resolve_stac_part_files(
+    release: str,
+    theme: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float],
+    retries: int = 0,
+    retry_delay: float = 2.0,
+) -> list[str]:
+    """Возвращает список ключей S3 частей, пересекающих bbox (через STAC по HTTP)."""
+    import pyarrow.compute as pc
+    from pyarrow import parquet as pq
+
+    stac_url = f"https://stac.overturemaps.org/{release}/collections.parquet"
+    data = _http_get_stac(stac_url, timeout=60.0, retries=retries, retry_delay=retry_delay)
+    table = pq.read_table(io.BytesIO(data))
+
+    feature_type_filter = (pc.field("collection") == overture_type) & (
+        pc.field("type") == "Feature"
+    )
+    min_lat, min_lon, max_lat, max_lon = bbox
+    bbox_filter = (
+        (pc.field("bbox", "xmin") < max_lon)
+        & (pc.field("bbox", "xmax") > min_lon)
+        & (pc.field("bbox", "ymin") < max_lat)
+        & (pc.field("bbox", "ymax") > min_lat)
+    )
+    table = table.filter(feature_type_filter & bbox_filter)
+    keys: list[str] = []
+    for path in table.column("assets").to_pylist():
+        href = path["aws"]["alternate"]["s3"]["href"]
+        if href.startswith("s3://"):
+            keys.append(href[len("s3://") :])
+    return keys
+
+
+def _part_local_path(key: str, cache_dir: str | Path) -> Path:
+    safe = key.replace("/", "__").replace("=", "_")
+    return Path(cache_dir) / "parts" / safe
+
+
+def _download_part_once(key: str, cache_dir: str | Path) -> None:
+    """Скачивает одну часть атомарно (tmp + replace), пропуская готовые.
+
+    Крупные парт-файлы тянутся с докачкой по HTTP Range (переживает TLS-обрывы):
+    частичный файл ``<name>.part`` продолжается на повторных запусках, а после
+    полного скачивания атомарно переименовывается в целевой.
+    """
+    dest = _part_local_path(key, cache_dir)
+    if dest.exists() and dest.stat().st_size > 0:
+        return
+
+    bucket, _, obj_path = key.partition("/")
+    part = dest.with_name(dest.name + ".part")
+    urls = [_overture_host_url(host, bucket, key, obj_path) for host in _OVERTURE_HTTP_HOSTS]
+    _download_part_from_host(urls, part, timeout=120.0)
+    part.replace(dest)
+
+
+def _download_part_round(keys: list[str], cache_dir: str | Path) -> None:
+    """Одна попытка скачать все части; первая ошибка прерывает раунд."""
+    for key in keys:
+        _download_part_once(key, cache_dir)
+
+
+def _download_overture_parts(
+    keys: list[str], cache_dir: str | Path, retries: int, retry_delay: float
+) -> None:
+    """Качает отсутствующие части по HTTP, повторяя неудавшиеся попытки."""
+    parts_dir = Path(cache_dir) / "parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            _download_part_round(keys, cache_dir)
+            return
+        except Exception as exc:  # noqa: BLE001 — внешняя сетевая граница
+            last_exc = exc
+        if attempt < retries:
+            delay = retry_delay * (2**attempt)
+            logger.warning(
+                "Overture: скачивание частей попытка %d/%d — повтор через %.1fs: %s",
+                attempt + 1,
+                retries + 1,
+                delay,
+                last_exc,
+            )
+            time.sleep(delay)
+    raise last_exc if last_exc is not None else RuntimeError(
+        "Overture: скачивание частей не удалось"
+    )
+
+
+def _read_part_frames(
+    local_files: list[str], bbox_filter: tuple, gpd: Any
+) -> list[Any]:
+    """Читает локальные parquet-части с bbox-фильтром (cx-fallback на битые файлы)."""
+    frames = []
+    for path in local_files:
+        try:
+            frame = gpd.read_parquet(path, bbox=bbox_filter)
+        except (ValueError, TypeError):
+            frame = gpd.read_parquet(path)
+            frame = frame.cx[
+                bbox_filter[0] : bbox_filter[2],
+                bbox_filter[1] : bbox_filter[3],
+            ]
+        frames.append(frame)
+    return frames
+
+
+def _concat_part_frames(frames: list[Any], gpd: Any, *, to_epsg4326: bool = True) -> Any:
+    """Склеивает кадры частей, приводя CRS к EPSG:4326 при необходимости."""
+    if not frames:
+        return gpd.pd.DataFrame()
+    gdf = gpd.pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    if gdf.crs is None:
+        return gdf.set_crs("EPSG:4326")
+    if to_epsg4326 and str(gdf.crs).upper() != "EPSG:4326":
+        return gdf.to_crs("EPSG:4326")
+    return gdf
+
+
+def _read_overture_parts(local_files: list[str], bbox_filter: tuple, gpd: Any) -> Any | None:
+    frames = _read_part_frames(local_files, bbox_filter, gpd)
+    if not frames:
+        return None
+    gdf = _concat_part_frames(frames, gpd)
+    return gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+
+
+__all__ = [
+    "_CHUNK_RETRY_DELAY_S",
+    "_OVERTURE_CHUNK_BYTES",
+    "_OVERTURE_HTTP_HOSTS",
+    "_PartProgress",
+    "_append_chunk",
+    "_concat_part_frames",
+    "_download_overture_parts",
+    "_download_part_from_host",
+    "_download_part_once",
+    "_download_part_round",
+    "_fetch_chunk",
+    "_http_get_range",
+    "_http_get_stac",
+    "_http_get_url",
+    "_http_resolve_stac_part_files",
+    "_log_stac_retry",
+    "_overture_host_url",
+    "_part_local_path",
+    "_read_overture_parts",
+    "_read_part_frames",
+    "_retry_after_date",
+    "_retry_after_seconds",
+    "_retry_after_value",
+    "_stac_retry_delay",
+]
