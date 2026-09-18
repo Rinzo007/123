@@ -109,7 +109,7 @@ def _stats_from_cached(cached: Any) -> OvertureStats:
 
 def _route_stats_from_cached(
     cached: Any,
-) -> tuple[OvertureStats, dict[tuple[int, int], OvertureStats]] | None:
+) -> tuple[OvertureStats, dict[int, OvertureStats]] | None:
     """Читает атомарный route-cache с результатами маршрута и направлений."""
     if not isinstance(cached, dict):
         return None
@@ -119,11 +119,10 @@ def _route_stats_from_cached(
         return None
 
     route_stats = _stats_from_cached(route_payload)
-    dir_stats: dict[tuple[int, int], OvertureStats] = {}
+    dir_stats: dict[int, OvertureStats] = {}
     try:
         for key, payload in directions_payload.items():
-            route_id, direction_index = str(key).split(":", 1)
-            dir_stats[(int(route_id), int(direction_index))] = _stats_from_cached(payload)
+            dir_stats[int(key)] = _stats_from_cached(payload)
     except (AttributeError, TypeError, ValueError):
         return None
     return route_stats, dir_stats
