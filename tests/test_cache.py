@@ -8,10 +8,12 @@ from overture.cache import (
     _stats_to_cached,
 )
 
-from tests.conftest import OvertureStats
-
-
-def test_lru_cache_evicts_least_recently_used():
+class _Stats:
+    total_area_m2: float = 0.0
+    corridor_m2: float = 0.0
+    count: int = 0
+    ok: bool = True
+\ndef test_lru_cache_evicts_least_recently_used():
     cache = LRUCache(max_size=2)
     cache.put("a", 1)
     cache.put("b", 2)
@@ -23,7 +25,7 @@ def test_lru_cache_evicts_least_recently_used():
 
 
 def test_stats_round_trip():
-    original = OvertureStats(total_area_m2=12.5, corridor_m2=30.0, count=4, ok=True)
+    original = _Stats(total_area_m2=12.5, corridor_m2=30.0, count=4, ok=True)
     restored = _stats_from_cached(_stats_to_cached(original))
     assert restored.total_area_m2 == 12.5
     assert restored.corridor_m2 == 30.0
