@@ -92,7 +92,7 @@ def _cache_get(cache: CachePort | None, lock: threading.RLock | None, key: str) 
 
 
 def _cache_put(
-    cache: JsonCache | None, lock: threading.RLock | None, key: str, value: Any
+    cache: CachePort | None, lock: threading.RLock | None, key: str, value: Any
 ) -> None:
     if cache is None:
         return
