@@ -84,3 +84,24 @@ def test_part_manifest_detects_tampering(tmp_path):
     assert _is_valid_cached_part(path, key="bucket/object")
     path.write_bytes(path.read_bytes()[:-1] + b"x")
     assert not _is_valid_cached_part(path, key="bucket/object")
+
+
+def test_fetch_chunk_attempts_at_least_once_when_retries_zero(monkeypatch):
+    calls = []
+
+    def fake_range(url, start, timeout, chunk, context):
+        calls.append((url, start))
+        return 206, b"x", 1
+
+    monkeypatch.setattr("overture.http._http_get_range", fake_range)
+    from overture.http import _fetch_chunk
+
+    result = _fetch_chunk(
+        ["https://a.test/object", "https://b.test/object"],
+        start=0,
+        timeout=5,
+        chunk=1,
+        retries=0,
+    )
+    assert result == (206, b"x", 1)
+    assert calls == [("https://a.test/object", 0)]
