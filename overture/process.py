@@ -12,10 +12,7 @@ import shapely
 from shapely.errors import GEOSException
 from shapely.geometry import LineString
 
-from ..cache import JsonCache
-from ..metrics import OvertureStats
-from ..models import RouteData
-from ..units import dir_geo_sig
+from .adapters import JsonCache, OvertureStats, RouteData, dir_geo_sig
 from .cache import (
     LRUCache,
     _cache_get,
