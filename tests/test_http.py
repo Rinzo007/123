@@ -309,3 +309,29 @@ def test_stac_hosts_include_s3_catalog_mirror():
     assert http._STAC_HTTP_HOSTS[0] == "https://stac.overturemaps.org"
     assert "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac" in http._STAC_HTTP_HOSTS
 
+
+
+def test_stac_accepts_url_list(monkeypatch):
+    import overture.http as http
+
+    calls = []
+
+    def fake_fetch_chunk(url, start, timeout, chunk, retries, retry_delay):
+        calls.append((url, start))
+        return 206, b"x", 1
+
+    monkeypatch.setattr(http, "_fetch_chunk", fake_fetch_chunk)
+    monkeypatch.setattr(http, "_STAC_CHUNK_BYTES", 4)
+
+    data = http._http_get_stac(
+        ["https://a.example/stac.parquet", "https://b.example/stac.parquet"],
+        timeout=1,
+        retries=0,
+        retry_delay=0,
+    )
+
+    assert data == b"x"
+    assert calls == [(
+        ["https://a.example/stac.parquet", "https://b.example/stac.parquet"],
+        0,
+    )]
