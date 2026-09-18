@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
+@runtime_checkable
 class CachePort(Protocol):
     """Синхронный интерфейс дискового кэша."""
 
@@ -16,6 +17,7 @@ class CachePort(Protocol):
         ...
 
 
+@runtime_checkable
 class DirectionPort(Protocol):
     """Минимальный интерфейс геометрического направления маршрута."""
 
@@ -24,6 +26,7 @@ class DirectionPort(Protocol):
         ...
 
 
+@runtime_checkable
 class RoutePort(Protocol):
     """Минимальный контракт маршрута, необходимый Overture."""
 
@@ -40,6 +43,7 @@ class RoutePort(Protocol):
         ...
 
 
+@runtime_checkable
 class StatsPort(Protocol):
     """Контракт статистики, используемый внутренними слоями."""
 
