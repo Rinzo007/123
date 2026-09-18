@@ -511,7 +511,8 @@ def _http_get_stac(
     chunks: list[bytes] = []
     start = 0
     total_size: int | None = None
-    progress = _PartProgress(url.rsplit("/", 1)[-1] or "STAC")
+    display_url = url[0] if isinstance(url, (list, tuple)) else url
+    progress = _PartProgress(display_url.rsplit("/", 1)[-1] or "STAC")
 
     while True:
         status, data, reported_total = _fetch_chunk(
