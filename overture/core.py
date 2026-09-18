@@ -419,13 +419,23 @@ def compute_overture_result(
     if not routes_value:
         return OvertureResult.skipped(reason="no_routes")
 
-    paths = _resolve_overture_paths(overture_path)
+    try:
+        limit_value = int(limit or 0)
+    except (TypeError, ValueError, OverflowError):
+        return OvertureResult.invalid_input(reason="invalid_limit")
+    if limit_value < 0:
+        return OvertureResult.invalid_input(reason="invalid_limit")
+
+    try:
+        paths = _resolve_overture_paths(overture_path)
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        return OvertureResult.error_result(exc)
     if paths is None:
         return OvertureResult.skipped(reason="overture_source_not_found")
 
     try:
         pipeline = _build_pipeline(
-            paths, bbox_value, buffer_value, limit, city, config
+            paths, bbox_value, buffer_value, limit_value, city, config
         )
         if pipeline is None:
             return OvertureResult.no_data(reason="no_buildings")
