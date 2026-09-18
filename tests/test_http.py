@@ -128,3 +128,66 @@ def test_overture_http_includes_official_azure_mirrors():
     )
     assert blob.endswith("/release/2026-01-21.0/theme=buildings/type=building/part.parquet")
     assert dfs.endswith("/release/2026-01-21.0/theme=buildings/type=building/part.parquet")
+
+
+def test_stac_request_uses_fresh_tls_and_closes_connection(monkeypatch):
+    import overture.http as http
+
+    contexts = []
+    captured = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"stac"
+
+    def fake_context():
+        ctx = object()
+        contexts.append(ctx)
+        return ctx
+
+    def fake_urlopen(request, timeout, context):
+        captured.append((request.headers.get("Connection"), timeout, context))
+        return Response()
+
+    monkeypatch.setattr(http.ssl, "create_default_context", fake_context)
+    monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+
+    assert http._http_get_url("https://stac.overturemaps.org/x.parquet", 120.0, contexts[0] if contexts else None) == b"stac"
+    assert captured == [("close", 120.0, None)]
+
+
+def test_stac_retry_refreshes_tls_context(monkeypatch):
+    import overture.http as http
+
+    contexts = []
+    calls = []
+
+    def fake_context():
+        ctx = object()
+        contexts.append(ctx)
+        return ctx
+
+    def fake_get(url, timeout, context):
+        calls.append((url, timeout, context))
+        if len(calls) == 1:
+            raise TimeoutError("read operation timed out")
+        return b"stac"
+
+    monkeypatch.setattr(http.ssl, "create_default_context", fake_context)
+    monkeypatch.setattr(http, "_http_get_url", fake_get)
+
+    assert http._http_get_stac(
+        "https://stac.overturemaps.org/x.parquet",
+        timeout=7,
+        retries=1,
+        retry_delay=0,
+    ) == b"stac"
+    assert len(contexts) == 2
+    assert calls[0][2] is contexts[0]
+    assert calls[1][2] is contexts[1]
