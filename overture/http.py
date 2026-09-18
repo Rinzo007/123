@@ -641,10 +641,10 @@ def _http_resolve_stac_part_files_via_collection(
     def fetch_item(item_url: str) -> str | None:
         import urllib.parse
 
+        item_path = urllib.parse.urlsplit(item_url).path
+        relative_path = item_path.split(f"/{release}/", 1)[-1]
         item_urls = [
-            urllib.parse.urljoin(base, urllib.parse.urlsplit(item_url).path.split(
-                f"/{release}/", 1
-            )[-1])
+            f"{base}/{release}/{relative_path.lstrip('/')}"
             for base in collection_urls
         ]
         item_data = _http_get_stac(
