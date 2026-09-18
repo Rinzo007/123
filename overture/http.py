@@ -46,6 +46,7 @@ _CHUNK_RETRY_DELAY_S = 2.0
 # Таймаут одного STAC-запроса. Каталог небольшой, но на Windows/прокси
 # чтение может подвисать заметно дольше обычного HTTP GET.
 _STAC_TIMEOUT_S = 120.0
+_STAC_CHUNK_BYTES = 1024 * 1024
 
 
 def _http_get_url(
@@ -75,6 +76,7 @@ def _http_get_range(
     # Точный диапазон позволяет отличать конец файла от укороченного ответа.
     end = start + max(1, chunk) - 1
     req.add_header("Range", f"bytes={start}-{end}")
+    req.add_header("Connection", "close")
     with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
         status = getattr(resp, "status", 200)
         data = resp.read(chunk if status == 206 else None)
@@ -457,34 +459,51 @@ def _log_stac_retry(
 
 
 def _http_get_stac(
-    url: str, timeout: float = 60.0, retries: int = 0, retry_delay: float = 2.0
+    url: str, timeout: float = _STAC_TIMEOUT_S, retries: int = 0, retry_delay: float = 2.0
 ) -> bytes:
-    """Скачивает STAC collections.parquet с повторами и экспоненциальной паузой.
+    """Скачивает STAC ``collections.parquet`` короткими HTTP Range-запросами.
 
-    Соединение к STAC — единая точка входа в автозагрузку; транзитные сбои
-    TLS (в т.ч. WinError 10054) не должны обрушивать весь POI-расчёт.
-    При HTTP 429 ждём ``Retry-After`` из ответа (или минимум 30 секунд).
+    Полный GET оказался чувствителен к зависанию чтения тела на Windows и
+    сетевых прокси: timeout возникал внутри ``resp.read()`` даже после успешного
+    TLS-handshake. Здесь каждый диапазон ограничен ``_STAC_CHUNK_BYTES`` и
+    получает новый TLS-сеанс; уже полученные диапазоны не теряются.
     """
-    import urllib.error
+    chunks: list[bytes] = []
+    start = 0
+    total_size: int | None = None
 
-    last_exc: Exception | None = None
-    for attempt in range(retries + 1):
-        try:
-            context = ssl.create_default_context()
-            return _http_get_url(url, timeout, context)
-        except urllib.error.HTTPError as exc:
-            last_exc = exc
-            rate_limited = exc.code == 429
-        except Exception as exc:  # noqa: BLE001 — внешняя сетевая граница
-            last_exc = exc
-            rate_limited = False
-        if attempt >= retries:
-            continue
-        delay = _stac_retry_delay(last_exc, attempt, retry_delay)
-        _log_stac_retry(url, attempt, retries, delay, last_exc, rate_limited)
-        time.sleep(delay)
-    raise last_exc if last_exc is not None else RuntimeError("Overture: STAC-загрузка не удалась")
+    while True:
+        status, data, reported_total = _fetch_chunk(
+            url,
+            start=start,
+            timeout=timeout,
+            chunk=_STAC_CHUNK_BYTES,
+            retries=retries,
+            retry_delay=retry_delay,
+        )
+        if status != 206:
+            if start == 0:
+                return data
+            raise IOError(
+                "Overture STAC перестал поддерживать Range после частичного чтения "
+                f"({status} для offset {start})"
+            )
+        if not data:
+            raise IOError(f"Пустой Range-ответ STAC для offset {start}")
 
+        chunks.append(data)
+        total_size = reported_total or total_size
+        start += len(data)
+
+        if total_size is not None:
+            if start >= total_size:
+                if start != total_size:
+                    raise IOError(
+                        f"STAC Range превысил размер файла: {start} из {total_size} байт"
+                    )
+                return b"".join(chunks)
+        elif len(data) < _STAC_CHUNK_BYTES:
+            return b"".join(chunks)
 
 def _http_resolve_stac_part_files(
     release: str,
@@ -629,6 +648,7 @@ def _read_overture_parts(local_files: list[str], bbox_filter: tuple, gpd: Any) -
 __all__ = [
     "_CHUNK_RETRY_DELAY_S",
     "_STAC_TIMEOUT_S",
+    "_STAC_CHUNK_BYTES",
     "_OVERTURE_CHUNK_BYTES",
     "_OVERTURE_HTTP_HOSTS",
     "_PartProgress",
