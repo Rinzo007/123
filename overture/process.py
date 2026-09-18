@@ -247,7 +247,7 @@ def _aggregate_route_stats(
 
 
 def _process_single_route(
-    rd: RouteData,
+    rd: RoutePort,
     state: _WorkerState,
 ) -> tuple[
     OvertureStats, dict[tuple[int, int], OvertureStats], dict[str, dict[str, Any]]
