@@ -12,7 +12,8 @@ import shapely
 from shapely.errors import GEOSException
 from shapely.geometry import LineString
 
-from .adapters import JsonCache, OvertureStats, RouteData, dir_geo_sig
+from .adapters import OvertureStats, dir_geo_sig
+from .ports import CachePort, RoutePort
 from .cache import (
     LRUCache,
     _cache_get,
@@ -92,7 +93,7 @@ class _WorkerState:
 
     ctx: _OvertureContext
     transformer: Any
-    cache: JsonCache | None
+    cache: CachePort | None
     write_cache: bool
     cache_lock: threading.RLock | None
     buffer_cache: LRUCache
@@ -114,7 +115,7 @@ def _get_thread_transformer(epsg: int) -> Any:
     return current
 
 
-def _direction_signatures(rd: RouteData) -> list[str]:
+def _direction_signatures(rd: RoutePort) -> list[str]:
     """Геометрические подписи направлений маршрута."""
     dir_sigs: list[str] = []
     for d in rd.directions:
@@ -205,7 +206,7 @@ def _process_direction(
 
 
 def _aggregate_route_stats(
-    rd: RouteData,
+    rd: RoutePort,
     route_buffers: list[Any],
     direction_stats: list[OvertureStats],
     route_buffer_missing: bool,
@@ -351,7 +352,7 @@ def _chunks(seq: Any, size: int) -> Any:
 
 
 def _thread_batch_worker(
-    batch: list[RouteData],
+    batch: list[RoutePort],
     state: _WorkerState,
 ) -> tuple[
     dict[int, OvertureStats],
