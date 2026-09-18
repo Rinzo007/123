@@ -761,13 +761,18 @@ def _duckdb_read_overture(
     import geopandas as gpd
     import duckdb
 
-    if provider != "s3":
+    if provider == "s3":
+        source = (
+            f"s3://overturemaps-us-west-2/release/{release}/"
+            f"theme={theme}/type={overture_type}/*"
+        )
+    elif provider == "azure":
+        source = (
+            f"az://overturemapswestus2.blob.core.windows.net/release/{release}/"
+            f"theme={theme}/type={overture_type}/*"
+        )
+    else:
         raise ValueError(f"Неизвестный DuckDB provider: {provider!r}")
-
-    source = (
-        f"s3://overturemaps-us-west-2/release/{release}/"
-        f"theme={theme}/type={overture_type}/*"
-    )
     min_lat, min_lon, max_lat, max_lon = bbox
     target = Path.cwd() / f".overture_duckdb_{uuid.uuid4().hex}.parquet"
 
@@ -777,9 +782,17 @@ def _duckdb_read_overture(
     conn = duckdb.connect(":memory:")
     try:
         conn.execute("LOAD spatial")
-        conn.execute("LOAD httpfs")
-        conn.execute("SET s3_region='us-west-2'")
-        conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+        if provider == "s3":
+            conn.execute("LOAD httpfs")
+            conn.execute("SET s3_region='us-west-2'")
+            conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+        else:
+            conn.execute("LOAD azure")
+            conn.execute("SET azure_transport_option_type='curl'")
+            conn.execute(
+                "CREATE SECRET overture_azure (TYPE azure, PROVIDER config, "
+                "ACCOUNT_NAME 'overturemapswestus2')"
+            )
 
         query = (
             "COPY ("
