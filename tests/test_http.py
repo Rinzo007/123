@@ -130,10 +130,9 @@ def test_overture_http_includes_official_azure_mirrors():
     assert dfs.endswith("/release/2026-01-21.0/theme=buildings/type=building/part.parquet")
 
 
-def test_stac_request_uses_fresh_tls_and_closes_connection(monkeypatch):
+def test_stac_request_closes_connection(monkeypatch):
     import overture.http as http
 
-    contexts = []
     captured = []
 
     class Response:
@@ -146,48 +145,40 @@ def test_stac_request_uses_fresh_tls_and_closes_connection(monkeypatch):
         def read(self):
             return b"stac"
 
-    def fake_context():
-        ctx = object()
-        contexts.append(ctx)
-        return ctx
-
     def fake_urlopen(request, timeout, context):
         captured.append((request.headers.get("Connection"), timeout, context))
         return Response()
 
-    monkeypatch.setattr(http.ssl, "create_default_context", fake_context)
     monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+    context = object()
+    assert http._http_get_url("https://stac.overturemaps.org/x.parquet", 120.0, context) == b"stac"
+    assert captured == [("close", 120.0, context)]
 
-    assert http._http_get_url("https://stac.overturemaps.org/x.parquet", 120.0) == b"stac"
-    assert captured == [("close", 120.0, None)]
 
-
-def test_stac_retry_refreshes_tls_context(monkeypatch):
+def test_stac_downloads_ranges_and_retries_failed_chunk(monkeypatch):
     import overture.http as http
 
-    contexts = []
     calls = []
 
-    def fake_context():
-        ctx = object()
-        contexts.append(ctx)
-        return ctx
-
-    def fake_get(url, timeout, context):
-        calls.append((url, timeout, context))
+    def fake_fetch_chunk(url, start, timeout, chunk, retries, retry_delay):
+        calls.append((start, timeout, chunk, retries))
         if len(calls) == 1:
             raise TimeoutError("read operation timed out")
-        return b"stac"
+        if len(calls) == 2:
+            return 206, b"abcd", 8
+        return 206, b"efgh", 8
 
-    monkeypatch.setattr(http.ssl, "create_default_context", fake_context)
-    monkeypatch.setattr(http, "_http_get_url", fake_get)
+    monkeypatch.setattr(http, "_fetch_chunk", fake_fetch_chunk)
+    monkeypatch.setattr(http, "_STAC_CHUNK_BYTES", 4)
 
     assert http._http_get_stac(
         "https://stac.overturemaps.org/x.parquet",
         timeout=7,
         retries=1,
         retry_delay=0,
-    ) == b"stac"
-    assert len(contexts) == 2
-    assert calls[0][2] is contexts[0]
-    assert calls[1][2] is contexts[1]
+    ) == b"abcdefgh"
+    assert calls[0][0] == 0
+    assert calls[1][0] == 0
+    assert calls[2][0] == 4
+    assert all(call[1] == 7 for call in calls)
+    assert all(call[3] == 1 for call in calls)
