@@ -305,6 +305,33 @@ def test_stac_item_fetch_does_not_include_collection_json(monkeypatch):
     assert item_urls[0].endswith("/2026-08-19.0/transportation/segment/00002/00002.json")
 
 
+def test_stac_fetch_normalizes_duplicate_release_and_collection_json(monkeypatch):
+    import json
+    import overture.http as http
+
+    calls = []
+    collection = {
+        "extent": {"spatial": {"bbox": [[30.0, 50.0, 40.0, 60.0], [37.0, 54.0, 38.0, 55.0]]}},
+        "links": [{"rel": "item", "href": "./2026-08-19.0/transportation/segment/00000/00000.json"}],
+    }
+    item = {"assets": {"aws": {"alternate": {"s3": {"href": "s3://bucket/object.parquet"}}}}}
+
+    def fake_get_stac(url, timeout, retries, retry_delay):
+        calls.append(url)
+        if isinstance(url, list):
+            return json.dumps(collection).encode()
+        return json.dumps(item).encode()
+
+    monkeypatch.setattr(http, "_http_get_stac", fake_get_stac)
+    keys = http._http_resolve_stac_part_files_via_collection(
+        "2026-08-19.0", "transportation", "segment",
+        (54.5, 37.5, 55.5, 38.5), retries=0, retry_delay=0,
+    )
+    assert keys == ["bucket/object.parquet"]
+    assert calls[1][0].endswith("/2026-08-19.0/transportation/segment/00000/00000.json")
+    assert "collection.json" not in calls[1][0]
+
+
 def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
     import overture.http as http
 

@@ -36,7 +36,7 @@ def load_overture_segments(
     retry_delay: float = 2.0,
     classes: frozenset[str] | None = None,
 ) -> Any | None:
-    """Скачивает тему ``segment`` (транспортные отрезки дорог) через STAC/HTTP.
+    """Загружает тему ``segment`` через DuckDB cloud scan с HTTP fallback.
 
     Возвращает ``GeoDataFrame`` с ``LineString``/``MultiLineString``
     геометриями в EPSG:4326 или ``None`` при ошибке/пустом результате.
@@ -48,6 +48,43 @@ def load_overture_segments(
     except OvertureReleaseError as exc:
         logger.warning("Overture: %s", exc)
         return None
+
+    # Для segment сначала используем официальный DuckDB/S3 путь с
+    # пространственным pushdown. Это не требует скачивания целых parquet-part
+    # файлов через urllib и избегает типичных Windows TLS EOF.
+    try:
+        from .http import _duckdb_read_overture
+
+        for provider in ("s3", "azure"):
+            try:
+                gdf = _duckdb_read_overture(
+                    release,
+                    "transportation",
+                    "segment",
+                    bbox,
+                    provider=provider,
+                )
+            except ImportError as exc:
+                logger.warning("Overture: DuckDB/%s для segment недоступен: %s", provider, exc)
+                continue
+            except Exception as exc:
+                logger.warning("Overture: DuckDB/%s segment не сработал: %s", provider, exc)
+                continue
+
+            if gdf is not None and len(gdf) > 0:
+                if "geometry" in gdf.columns:
+                    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+                if len(gdf) > 0:
+                    if "class" in gdf.columns and "subtype" in gdf.columns:
+                        gdf = gdf[gdf["subtype"] == "road"]
+                    if len(gdf) > 0:
+                        gdf = gdf[gdf.geometry.geom_type.isin(("LineString", "MultiLineString"))]
+                    gdf = _keep_road_segments(gdf, classes=classes)
+                    return gdf if len(gdf) > 0 else None
+    except ImportError as exc:
+        logger.warning("Overture: DuckDB для segment недоступен: %s", exc)
+    except Exception as exc:
+        logger.warning("Overture: DuckDB segment fallback завершился ошибкой: %s", exc)
 
     keys = _http_resolve_stac_part_files(
         release,
