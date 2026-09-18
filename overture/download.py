@@ -153,6 +153,76 @@ def _prepare_auto_download(
     )
 
 
+
+def _duckdb_download_overture_place(
+    theme: str,
+    bbox: tuple[float, float, float, float],
+    release: str,
+    output_dir: str | Path,
+    *,
+    provider: str,
+) -> Any | None:
+    """Читает Overture напрямую из облака через DuckDB, без STAC."""
+    import geopandas as gpd
+    import duckdb
+
+    if theme != "place":
+        raise ValueError(f"DuckDB-загрузка поддерживает только тему place, получено {theme!r}")
+
+    min_lat, min_lon, max_lat, max_lon = bbox
+    target = Path(output_dir) / f".overture_{uuid.uuid4().hex}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if provider == "duckdb_s3":
+        source = (
+            f"s3://overturemaps-us-west-2/release/{release}/"
+            "theme=places/type=place/*"
+        )
+    elif provider == "duckdb_azure":
+        source = (
+            f"az://overturemapswestus2.blob.core.windows.net/release/{release}/"
+            "theme=places/type=place/*"
+        )
+    else:
+        raise ValueError(f"Неизвестный DuckDB provider: {provider}")
+
+    def sql_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute("LOAD spatial")
+        if provider == "duckdb_s3":
+            conn.execute("LOAD httpfs")
+            conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+        else:
+            conn.execute("LOAD azure")
+            conn.execute("SET azure_transport_option_type='curl'")
+            conn.execute("CREATE SECRET overture_azure (TYPE azure, PROVIDER config, ACCOUNT_NAME 'overturemapswestus2')")
+
+        query = (
+            "COPY ("
+            " SELECT *"
+            f" FROM read_parquet({sql_literal(source)}, filename=true, hive_partitioning=1)"
+            f" WHERE bbox.xmin < {max_lon}"
+            f"   AND bbox.xmax > {min_lon}"
+            f"   AND bbox.ymin < {max_lat}"
+            f"   AND bbox.ymax > {min_lat}"
+            f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
+        )
+        logger.info("Overture: DuckDB %s → %s", provider, source)
+        conn.execute(query)
+        if not target.exists() or target.stat().st_size <= 0:
+            return None
+
+        gdf = gpd.read_parquet(target)
+        return gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+    finally:
+        conn.close()
+        with contextlib.suppress(OSError):
+            target.unlink()
+
+
 def _http_download_overture_place(
     theme: str,
     bbox: tuple[float, float, float, float],
