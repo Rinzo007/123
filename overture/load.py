@@ -156,10 +156,19 @@ _OVERTURE_PARQUET_COLUMN_SETS = (
 )
 
 
-def _read_parquet_any_columns(path: str, gpd: Any) -> Any:
+def _read_parquet_any_columns(path: str, gpd: Any, bbox_geom: Any | None = None) -> Any:
+    bbox = None
+    if bbox_geom is not None:
+        try:
+            bbox = tuple(map(float, bbox_geom.bounds))
+        except (AttributeError, TypeError, ValueError):
+            bbox = None
     for columns in _OVERTURE_PARQUET_COLUMN_SETS:
         try:
-            return gpd.read_parquet(path, columns=list(columns))
+            kwargs = {"columns": list(columns)}
+            if bbox is not None:
+                kwargs["bbox"] = bbox
+            return gpd.read_parquet(path, **kwargs)
         except Exception:  # noqa: BLE001, S112 — пробуем следующий набор колонок
             continue
     return gpd.read_parquet(path)
@@ -179,7 +188,7 @@ def _read_vector_any_engine(path: str, bbox_geom: Any, gpd: Any) -> Any:
 def _read_overture_file(path: str, bbox_geom: Any, gpd: Any) -> Any:
     try:
         if path.lower().endswith((".parquet", ".geoparquet")):
-            return _read_parquet_any_columns(path, gpd)
+            return _read_parquet_any_columns(path, gpd, bbox_geom)
         return _read_vector_any_engine(path, bbox_geom, gpd)
     except Exception as exc:  # noqa: BLE001 — внешний файл может быть битым/несовместимым
         logger.warning("Overture: пропущен %s: %s", path, exc)
