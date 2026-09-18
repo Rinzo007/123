@@ -579,6 +579,15 @@ def _stac_item_hrefs(
     # .../segment/collection.json/2026-08-19.0/transportation/segment/00002/00002.json
     collection_dir = base_url.rsplit("/", 1)[0] + "/"
 
+    def resolve_item_href(href: str) -> str:
+        # Some published Overture STAC collections contain an href prefixed
+        # with collection.json/. That is the collection filename, not a
+        # directory, and must not become part of the request URL.
+        normalized = href.lstrip("./")
+        if normalized.startswith("collection.json/"):
+            normalized = normalized[len("collection.json/") :]
+        return urllib.parse.urljoin(collection_dir, normalized)
+
     # Overture's published collections currently carry one union bbox followed
     # by one bbox per Item, in the same order as the item links. Use that
     # spatial index to avoid fetching every Item JSON.
@@ -590,12 +599,12 @@ def _stac_item_hrefs(
                 continue
             xmin, ymin, xmax, ymax = map(float, item_bbox)
             if xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat:
-                candidate_links.append(urllib.parse.urljoin(collection_dir, href))
+                candidate_links.append(resolve_item_href(href))
         return candidate_links
 
     # Be conservative if a future STAC writer changes the extent layout.
     return [
-        urllib.parse.urljoin(base_url, href)
+        resolve_item_href(href)
         for href in item_links
     ]
 
