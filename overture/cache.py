@@ -42,15 +42,38 @@ def _safe_bbox_key(bbox: tuple[float, float, float, float]) -> str:
     ).hexdigest()[:12]
 
 
+_FILE_HASH_CHUNK = 1024 * 1024
+
+
+def _file_content_hash(path: Path) -> str:
+    """Считает BLAKE2b-хеш содержимого файла потоково."""
+    digest = hashlib.blake2b(digest_size=20)
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(_FILE_HASH_CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _file_signature(paths: list[str]) -> str:
+    """Подпись источников с хешем содержимого, а не только mtime/size."""
     parts: list[str] = []
     for raw_path in sorted(paths):
         path = Path(raw_path)
+        resolved = str(path.resolve())
         try:
             stat = path.stat()
-            parts.append(f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}")
-        except OSError:
-            parts.append(str(path.resolve()))
+            content_hash = _file_content_hash(path)
+            parts.append(
+                f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}|{content_hash}"
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Overture: не удалось получить сигнатуру %s: %s", path, exc
+            )
+            parts.append(f"{resolved}|missing")
     return hashlib.sha256(";".join(parts).encode()).hexdigest()[:16]
 
 
