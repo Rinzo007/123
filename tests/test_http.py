@@ -274,7 +274,7 @@ def test_stac_item_href_strips_collection_json_prefix():
         (54.5, 37.5, 55.5, 38.5),
         "https://stac.overturemaps.org/2026-08-19.0/transportation/segment/collection.json",
     ) == [
-        "https://stac.overturemaps.org/2026-08-19.0/transportation/segment/2026-08-19.0/transportation/segment/00002/00002.json"
+        "https://stac.overturemaps.org/2026-08-19.0/transportation/segment/00002/00002.json"
     ]
 
 def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
