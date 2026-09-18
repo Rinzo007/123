@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import _safe_bbox_key
+from .release import OvertureReleaseError, resolve_overture_release
 from .http import (
     _download_overture_parts,
     _http_resolve_stac_part_files,
@@ -19,7 +20,6 @@ from .http import (
 from .settings import (
     OVERTURE_CACHE_VERSION,
     OVERTURE_THEME_ALIASES,
-    _resolve_overture_release,
 )
 
 logger = logging.getLogger("wikiroutes.gis.overture")
@@ -128,16 +128,11 @@ def _prepare_auto_download(
 
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_key = _safe_bbox_key((min_lat, min_lon, max_lat, max_lon))
-    effective_release = _resolve_overture_release(release)
-    if effective_release is None or effective_release.lower() == "latest":
-        try:
-            # Разрешаем latest до формирования имени кэша, чтобы каждое обновление
-            # Overture получало новый cache key, а не застывало под "latest".
-            effective_release = overturemaps.core.get_latest_release()
-        except Exception as exc:
-            logger.warning("Overture: не удалось определить latest release: %s", exc)
-            return None
-    release_key = effective_release
+    try:
+        effective_release = resolve_overture_release(release)
+    except OvertureReleaseError as exc:
+        logger.warning("Overture: %s", exc)
+        return None
     package_version = getattr(overturemaps, "__version__", "unknown")
 
     cache_name = build_overture_cache_name(
