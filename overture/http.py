@@ -498,6 +498,7 @@ def _http_get_stac(
     chunks: list[bytes] = []
     start = 0
     total_size: int | None = None
+    progress = _PartProgress(url.rsplit("/", 1)[-1] or "STAC")
 
     while True:
         status, data, reported_total = _fetch_chunk(
@@ -510,6 +511,8 @@ def _http_get_stac(
         )
         if status != 206:
             if start == 0:
+                progress.update(data)
+                logger.info("Overture: STAC %s", progress.summary())
                 return data
             raise IOError(
                 "Overture STAC перестал поддерживать Range после частичного чтения "
@@ -520,6 +523,8 @@ def _http_get_stac(
 
         chunks.append(data)
         total_size = reported_total or total_size
+        progress.set_total(total_size)
+        progress.update(data)
         start += len(data)
 
         if total_size is not None:
@@ -528,8 +533,10 @@ def _http_get_stac(
                     raise IOError(
                         f"STAC Range превысил размер файла: {start} из {total_size} байт"
                     )
+                logger.info("Overture: STAC %s", progress.summary())
                 return b"".join(chunks)
         elif len(data) < _STAC_CHUNK_BYTES:
+            logger.info("Overture: STAC %s", progress.summary())
             return b"".join(chunks)
 
 def _stac_item_hrefs(
