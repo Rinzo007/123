@@ -505,6 +505,102 @@ def _http_get_stac(
         elif len(data) < _STAC_CHUNK_BYTES:
             return b"".join(chunks)
 
+def _stac_item_hrefs(collection: dict[str, Any], bbox: tuple[float, float, float, float]) -> list[str]:
+    """Возвращает href'ы STAC Item, чьи bbox пересекают заданный bbox."""
+    import urllib.parse
+
+    min_lat, min_lon, max_lat, max_lon = bbox
+    item_links = [
+        link.get("href")
+        for link in collection.get("links", [])
+        if link.get("rel") == "item" and link.get("href")
+    ]
+    extent_boxes = (
+        collection.get("extent", {})
+        .get("spatial", {})
+        .get("bbox", [])
+    )
+
+    # Overture's published collections currently carry one union bbox followed
+    # by one bbox per Item, in the same order as the item links. Use that
+    # spatial index to avoid fetching every Item JSON.
+    candidate_links: list[str] = []
+    if len(extent_boxes) == len(item_links) + 1:
+        extent_boxes = extent_boxes[1:]
+        for href, item_bbox in zip(item_links, extent_boxes):
+            if len(item_bbox) != 4:
+                continue
+            xmin, ymin, xmax, ymax = map(float, item_bbox)
+            if xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat:
+                candidate_links.append(urllib.parse.urljoin(
+                    "https://stac.overturemaps.org/", href
+                ))
+        return candidate_links
+
+    # Be conservative if a future STAC writer changes the extent layout.
+    return [
+        urllib.parse.urljoin("https://stac.overturemaps.org/", href)
+        for href in item_links
+    ]
+
+
+def _s3_key_from_stac_item(item: dict[str, Any]) -> str | None:
+    """Извлекает канонический S3 object key из STAC Item assets."""
+    assets = item.get("assets", {})
+    aws = assets.get("aws", {})
+    alternate = aws.get("alternate", {})
+    s3 = alternate.get("s3", {})
+    href = s3.get("href")
+    if not href:
+        href = aws.get("href")
+    if not isinstance(href, str):
+        return None
+    if href.startswith("s3://"):
+        return href[5:]
+    return None
+
+
+def _http_resolve_stac_part_files_via_collection(
+    release: str,
+    theme: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float],
+    retries: int,
+    retry_delay: float,
+) -> list[str]:
+    """Резервный STAC-резолвер через collection.json и Item JSON."""
+    import concurrent.futures
+    import json as json_module
+
+    import urllib.parse
+
+    url = f"https://stac.overturemaps.org/{release}/{theme}/{overture_type}/collection.json"
+    collection_data = _http_get_stac(
+        url,
+        timeout=_STAC_TIMEOUT_S,
+        retries=retries,
+        retry_delay=retry_delay,
+    )
+    collection = json_module.loads(collection_data)
+    item_hrefs = _stac_item_hrefs(collection, bbox)
+    if not item_hrefs:
+        return []
+
+    def fetch_item(item_url: str) -> str | None:
+        item_data = _http_get_stac(
+            urllib.parse.urljoin(item_url, ""),
+            timeout=_STAC_TIMEOUT_S,
+            retries=retries,
+            retry_delay=retry_delay,
+        )
+        return _s3_key_from_stac_item(json_module.loads(item_data))
+
+    max_workers = min(8, len(item_hrefs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return [key for key in executor.map(fetch_item, item_hrefs) if key]
+
+
+
 def _http_resolve_stac_part_files(
     release: str,
     theme: str,
@@ -518,13 +614,49 @@ def _http_resolve_stac_part_files(
     from pyarrow import parquet as pq
 
     stac_url = f"https://stac.overturemaps.org/{release}/collections.parquet"
-    data = _http_get_stac(
-        stac_url,
-        timeout=_STAC_TIMEOUT_S,
-        retries=retries,
-        retry_delay=retry_delay,
-    )
-    table = pq.read_table(io.BytesIO(data))
+    try:
+        data = _http_get_stac(
+            stac_url,
+            timeout=_STAC_TIMEOUT_S,
+            retries=retries,
+            retry_delay=retry_delay,
+        )
+        import pyarrow.compute as pc
+        from pyarrow import parquet as pq
+
+        table = pq.read_table(io.BytesIO(data))
+
+        feature_type_filter = (pc.field("collection") == overture_type) & (
+            pc.field("type") == "Feature"
+        )
+        min_lat, min_lon, max_lat, max_lon = bbox
+        bbox_filter = (
+            (pc.field("bbox", "xmin") < max_lon)
+            & (pc.field("bbox", "xmax") > min_lon)
+            & (pc.field("bbox", "ymin") < max_lat)
+            & (pc.field("bbox", "ymax") > min_lat)
+        )
+        table = table.filter(feature_type_filter & bbox_filter)
+        keys: list[str] = []
+        for path in table.column("assets").to_pylist():
+            href = path["aws"]["alternate"]["s3"]["href"]
+            if href.startswith("s3://"):
+                keys.append(href[len("s3://") :])
+        return keys
+    except Exception as exc:  # noqa: BLE001 — сетевой/форматный fallback
+        logger.warning(
+            "Overture: STAC collections.parquet недоступен (%s); "
+            "переключаемся на collection.json",
+            exc,
+        )
+        return _http_resolve_stac_part_files_via_collection(
+            release,
+            f"{'addresses' if theme == 'addresses' else 'places' if theme == 'places' else theme}",
+            overture_type,
+            bbox,
+            retries,
+            retry_delay,
+        )
 
     feature_type_filter = (pc.field("collection") == overture_type) & (
         pc.field("type") == "Feature"
