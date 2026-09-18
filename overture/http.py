@@ -670,23 +670,30 @@ def _http_resolve_stac_part_files(
     retries: int = 0,
     retry_delay: float = 2.0,
 ) -> list[str]:
-    """Возвращает список ключей S3 частей, пересекающих bbox (через STAC по HTTP)."""
-    stac_urls = [
-        f"{host}/{release}/collections.parquet"
-        for host in _STAC_HTTP_HOSTS
-    ]
+    """Возвращает ключи частей через STAC.
+
+    Сначала используем компактный collection.json, затем
+    collections.parquet как резерв.
+    """
+    try:
+        return _http_resolve_stac_part_files_via_collection(
+            release, theme, overture_type, bbox, retries, retry_delay
+        )
+    except Exception as exc:  # noqa: BLE001 — сетевой/форматный fallback
+        logger.warning(
+            "Overture: STAC collection.json недоступен (%s); "
+            "переключаемся на collections.parquet",
+            exc,
+        )
+
+    stac_urls = [f"{host}/{release}/collections.parquet" for host in _STAC_HTTP_HOSTS]
     try:
         data = _http_get_stac(
-            stac_urls,
-            timeout=_STAC_TIMEOUT_S,
-            retries=retries,
-            retry_delay=retry_delay,
+            stac_urls, timeout=_STAC_TIMEOUT_S, retries=retries, retry_delay=retry_delay
         )
         import pyarrow.compute as pc
         from pyarrow import parquet as pq
-
         table = pq.read_table(io.BytesIO(data))
-
         feature_type_filter = (pc.field("collection") == overture_type) & (
             pc.field("type") == "Feature"
         )
@@ -704,21 +711,9 @@ def _http_resolve_stac_part_files(
             if href.startswith("s3://"):
                 keys.append(href[len("s3://") :])
         return keys
-    except Exception as exc:  # noqa: BLE001 — сетевой/форматный fallback
-        logger.warning(
-            "Overture: STAC collections.parquet недоступен (%s); "
-            "переключаемся на collection.json",
-            exc,
-        )
-        return _http_resolve_stac_part_files_via_collection(
-            release,
-            theme,
-            overture_type,
-            bbox,
-            retries,
-            retry_delay,
-        )
-
+    except Exception as exc:  # noqa: BLE001 — последний STAC fallback
+        logger.warning("Overture: STAC не удалось разрешить: %s", exc)
+        return []
 
 def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     safe = key.replace("/", "__").replace("=", "_")
