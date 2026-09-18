@@ -673,7 +673,8 @@ def _http_resolve_stac_part_files_via_collection(
         marker = f"/{release}/"
         if marker not in item_path:
             raise ValueError(f"Некорректный STAC Item URL: {item_url}")
-        relative_path = item_path.split(marker, 1)[1]
+        relative_path = item_path.rsplit(marker, 1)[1]
+        relative_path = relative_path.replace("collection.json/", "", 1)
         item_urls = [
             f"{host}/{release}/{relative_path.lstrip('/')}"
             for host in _STAC_HTTP_HOSTS
