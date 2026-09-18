@@ -36,7 +36,17 @@ def _state(cache):
 
 
 def test_route_cache_hit_avoids_rebuilding_geometry(monkeypatch):
-    cache = __import__("tests.conftest", fromlist=["JsonCache"]).JsonCache()
+    class _Cache:
+        def __init__(self):
+            self.data = {}
+
+        def get(self, namespace, key):
+            return self.data.get((namespace, key))
+
+        def put(self, namespace, key, value):
+            self.data[(namespace, key)] = value
+
+    cache = _Cache()
     state = _state(cache)
     route = _Route(42, (_Direction("dir-a"),))
     dir_sig = process._direction_signatures(route)[0]
