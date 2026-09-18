@@ -22,7 +22,7 @@ from .cache import (
     _stats_to_cached,
 )
 from .context import _OvertureContext
-from .geometry import _intersection_union_area, _query_tree
+from .geometry import _intersection_union_area_and_count, _query_tree
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 _TRANSFORMER_LOCAL = threading.local()
@@ -191,11 +191,13 @@ def _process_direction(
         return OvertureStats(ok=False), None, None
 
     idxs = _query_tree(buffered, state.ctx)
-    area, had_error = _intersection_union_area(buffered, idxs, state.ctx)
+    area, had_error, count = _intersection_union_area_and_count(
+        buffered, idxs, state.ctx
+    )
     st = OvertureStats(
         total_area_m2=area,
         corridor_m2=float(shapely.area(buffered)),
-        count=len(idxs),
+        count=count,
         ok=not had_error,
     )
     entry = _stats_to_cached(st) if st.ok else None
@@ -221,7 +223,7 @@ def _aggregate_route_stats(
                 shapely.prepare(route_buffer)
 
         idxs = _query_tree(route_buffer, state.ctx)
-        route_area, route_error = _intersection_union_area(
+        route_area, route_error, route_count = _intersection_union_area_and_count(
             route_buffer, idxs, state.ctx
         )
         route_ok = (
@@ -229,12 +231,12 @@ def _aggregate_route_stats(
             and all(st.ok for st in direction_stats)
             and not route_buffer_missing
         )
-        # count имеет ту же семантику, что и route_area: уникальные здания
-        # внутри объединённого коридора маршрута.
+        # count и площадь используют один и тот же набор зданий с
+        # положительной площадью пересечения, без «касания границы».
         route_stats = OvertureStats(
             total_area_m2=route_area,
             corridor_m2=float(shapely.area(route_buffer)),
-            count=len(idxs),
+            count=route_count,
             ok=route_ok,
         )
         return route_stats, _stats_to_cached(route_stats) if route_stats.ok else None
