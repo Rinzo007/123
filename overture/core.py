@@ -38,6 +38,7 @@ from .settings import (
     OVERTURE_UNION_GRID_SIZE,
     OVERTURE_USE_COVERAGE_UNION,
     _resolve_overture_release,
+    overture_algorithm_signature,
 )
 
 logger = logging.getLogger("wikiroutes.gis.overture")
@@ -144,7 +145,8 @@ def _pipeline_signature(
             f"bbox={tuple(float(v) for v in qbbox)}|"
             f"buffer={buffer_m:.6f}|"
             f"limit={int(limit or 0)}|"
-            f"epsg={epsg}"
+            f"epsg={epsg}|"
+            f"algorithm={overture_algorithm_signature()}"
         ).encode()
     ).hexdigest()[:16]
 
@@ -426,10 +428,15 @@ def compute_overture(
     except MemoryError:
         logger.warning("Overture: недостаточно памяти для обработки зданий")
         logger.exception("Overture: MemoryError")
-        return {}, None, {}
+        return {}, {"status": "error", "error_type": "MemoryError"}, {}
     except Exception as exc:
         logger.warning("Overture: ошибка при вычислении: %s", exc)
         logger.exception("Overture: исключение")
-        return {}, None, {}
+        return {}, {
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "cache_signature": getattr(locals().get("ctx"), "sig", None),
+        }, {}
     else:
         return stats, meta, dir_stats_map
