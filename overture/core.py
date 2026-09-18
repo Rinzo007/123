@@ -286,14 +286,10 @@ def _run_parallel(
         batch_size,
     )
     cache_lock = threading.RLock()
-    from pyproj import Transformer
-
-    transformer = Transformer.from_crs(
-        "EPSG:4326", f"EPSG:{ctx.epsg}", always_xy=True
-    )
     state = _WorkerState(
         ctx=ctx,
-        transformer=transformer,
+        transformer=None,
+        transformer_local=threading.local(),
         cache=cache,
         write_cache=False,
         cache_lock=cache_lock,
@@ -329,6 +325,7 @@ def _run_sequential(
     state = _WorkerState(
         ctx=ctx,
         transformer=transformer,
+        transformer_local=None,
         cache=cache,
         write_cache=True,
         cache_lock=None,
