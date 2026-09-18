@@ -255,6 +255,28 @@ def test_stac_collection_json_fallback_filters_by_bbox(monkeypatch):
     ]
 
 
+
+def test_stac_item_href_strips_collection_json_prefix():
+    from overture.http import _stac_item_hrefs
+
+    collection = {
+        "extent": {"spatial": {"bbox": [[30.0, 50.0, 40.0, 60.0], [37.0, 54.0, 38.0, 55.0]]}},
+        "links": [
+            {
+                "rel": "item",
+                "href": "collection.json/2026-08-19.0/transportation/segment/00002/00002.json",
+            }
+        ],
+    }
+
+    assert _stac_item_hrefs(
+        collection,
+        (54.5, 37.5, 55.5, 38.5),
+        "https://stac.overturemaps.org/2026-08-19.0/transportation/segment/collection.json",
+    ) == [
+        "https://stac.overturemaps.org/2026-08-19.0/transportation/segment/2026-08-19.0/transportation/segment/00002/00002.json"
+    ]
+
 def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
     import overture.http as http
 
