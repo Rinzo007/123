@@ -24,6 +24,7 @@ CACHE_KINDS = [
     "osm_boundary",
     "osm_routes",
     "overture_auto",
+    "od_roads",
     "parts",
     "poi",
     "poi_stops",
