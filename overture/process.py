@@ -4,7 +4,7 @@ import contextlib
 import hashlib
 import logging
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -193,10 +193,11 @@ def _aggregate_route_stats(
         route_stats = OvertureStats(
             total_area_m2=route_area,
             corridor_m2=float(shapely.area(route_buffer)),
-            count=sum(st.count for st in direction_stats),
+            # Count follows the same route-level geometry as area: unique building candidates.
+            count=len(idxs),
             ok=route_ok,
         )
-        route_entry = {
+            route_entry = {
             "total_area_m2": route_stats.total_area_m2,
             "corridor_m2": route_stats.corridor_m2,
             "count": route_stats.count,
@@ -291,13 +292,6 @@ def _thread_batch_worker(
     dict[tuple[int, int], OvertureStats],
     dict[str, dict[str, Any]],
 ]:
-    from pyproj import Transformer
-
-    transformer = Transformer.from_crs(
-        "EPSG:4326", f"EPSG:{state.ctx.epsg}", always_xy=True
-    )
-    state = replace(state, transformer=transformer)
-
     stats: dict[int, OvertureStats] = {}
     dir_stats_map: dict[tuple[int, int], OvertureStats] = {}
     cache_entries: dict[str, dict[str, Any]] = {}
