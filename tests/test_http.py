@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from overture.http import (
@@ -72,7 +70,7 @@ def test_invalid_content_range_is_rejected(monkeypatch):
 
 
 def test_part_manifest_detects_tampering(tmp_path):
-    pyarrow = pytest.importorskip("pyarrow")
+    pytest.importorskip("pyarrow")
     path = tmp_path / "part.parquet"
     import pyarrow.parquet as pq
     import pyarrow as pa
