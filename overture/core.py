@@ -22,13 +22,13 @@ from .context import _OvertureContext
 from .config import OvertureConfig
 from .geometry import _validate_bbox
 from .load import load_overture_geometries, overture_resolve_sources
+from .release import resolve_overture_release
 from .process import (
     _chunks,
     _process_single_route,
     _thread_batch_worker,
     _WorkerState,
 )
-from .settings import _resolve_overture_release
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -373,7 +373,11 @@ def _overture_meta(
         "buildings": n_buildings,
         "epsg": epsg,
         "cache_version": config.cache_version,
-        "release": _resolve_overture_release(release) or "latest",
+        "release": (
+            resolve_overture_release(release)
+            if release is not None
+            else None
+        ),
         "shapely_version": str(shapely.__version__),
         "assume_no_overlap": config.assume_no_overlap,
         "use_coverage_union": config.use_coverage_union,
