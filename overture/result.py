@@ -70,6 +70,23 @@ class OvertureResult(Generic[StatsT]):
         )
 
     @classmethod
+    def partial(
+        cls,
+        stats: StatsT,
+        meta: dict[str, Any],
+        direction_stats: dict[tuple[int, int], OvertureStats],
+        *,
+        warnings: tuple[str, ...] = (),
+    ) -> "OvertureResult[StatsT]":
+        return cls(
+            stats=stats,
+            meta=meta,
+            direction_stats=direction_stats,
+            status=OvertureStatus.PARTIAL,
+            warnings=warnings,
+        )
+
+    @classmethod
     def no_data(
         cls,
         *,
