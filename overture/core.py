@@ -363,20 +363,16 @@ def _overture_meta(
     buffer_m: float,
     n_buildings: int,
     epsg: int,
-    release: str | None,
+    effective_release: str | None,
     config: OvertureConfig,
 ) -> dict[str, Any]:
-    """Метаданные расчёта для отчёта/кэша."""
+    """Метаданные расчёта; release здесь уже разрешён на входе."""
     return {
         "buffer_m": buffer_m,
         "buildings": n_buildings,
         "epsg": epsg,
         "cache_version": config.cache_version,
-        "release": (
-            resolve_overture_release(release)
-            if release is not None
-            else None
-        ),
+        "release": effective_release,
         "shapely_version": str(shapely.__version__),
         "assume_no_overlap": config.assume_no_overlap,
         "use_coverage_union": config.use_coverage_union,
@@ -418,6 +414,16 @@ def compute_overture_result(
         return OvertureResult.invalid_input(reason="invalid_routes")
     if not routes_value:
         return OvertureResult.skipped(reason="no_routes")
+
+    try:
+        effective_release = (
+            resolve_overture_release(release)
+            if release is not None
+            else None
+        )
+    except Exception as exc:
+        logger.warning("Overture: не удалось определить release: %s", exc)
+        return OvertureResult.error_result(exc)
 
     try:
         limit_value = int(limit or 0)
@@ -464,7 +470,7 @@ def compute_overture_result(
             )
 
         meta = _overture_meta(
-            buffer_value, len(polygon_geometries), epsg, release, config
+            buffer_value, len(polygon_geometries), epsg, effective_release, config
         )
         failed_routes = sum(
             not stat.ok for stat in stats.values()
