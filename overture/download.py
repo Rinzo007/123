@@ -265,7 +265,21 @@ def auto_download_overture(
         return None
 
 
-def resolve_poi_place_file(\n    override: str | None,\n    configured: str | None,\n    bbox: tuple[float, float, float, float] | None,\n    cache_dir: str | Path,\n    release: str | None,\n    retries: int,\n    warn: Callable[[str], None],\n) -> str | None:\n    """Совместимый прокси к POI-слою."""\n    from .poi import resolve_poi_place_file as _resolve_poi_place_file\n\n    return _resolve_poi_place_file(\n        override, configured, bbox, cache_dir, release, retries, warn\n    )
+def resolve_poi_place_file(
+    override: str | None,
+    configured: str | None,
+    bbox: tuple[float, float, float, float] | None,
+    cache_dir: str | Path,
+    release: str | None,
+    retries: int,
+    warn: Callable[[str], None],
+) -> str | None:
+    """Совместимый прокси к POI-слою."""
+    from .poi import resolve_poi_place_file as _resolve_poi_place_file
+
+    return _resolve_poi_place_file(
+        override, configured, bbox, cache_dir, release, retries, warn
+    )
 
 __all__ = [
     "_SAFE_COMPONENT_RE",
