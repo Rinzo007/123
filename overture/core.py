@@ -144,7 +144,7 @@ def _pipeline_signature(
     """Стабильная сигнатура контекста для кэша Overture."""
     return hashlib.sha256(
         (
-            f"v={OVERTURE_CACHE_VERSION}|"
+            f"v={config.cache_version}|"
             f"files={_file_signature(paths)}|"
             f"bbox={tuple(float(v) for v in qbbox)}|"
             f"buffer={buffer_m:.6f}|"
@@ -430,7 +430,7 @@ def compute_overture(
             return {}, None, {}
         ctx, polygon_geometries, epsg = pipeline
 
-        buffer_cache = LRUCache(max_size=OVERTURE_BUFFER_CACHE_MAX_SIZE)
+        buffer_cache = LRUCache(max_size=config.buffer_cache_max_size)
         buffer_cache_lock = threading.RLock()
 
         if parallel and len(routes) > 1:
