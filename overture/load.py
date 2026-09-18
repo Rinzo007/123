@@ -13,7 +13,6 @@ import shapely
 from shapely.geometry import box as shapely_box
 
 from .adapters import resolve_sources, utm_epsg
-from .download import resolve_poi_place_file
 from .release import OvertureReleaseError, resolve_overture_release
 from .config import OvertureConfig
 from .geometry import _geometry_hashes, _repair_polygonal_geometries
@@ -275,11 +274,14 @@ def _deduplicate_buildings(
     return gdf
 
 
-def _read_bbox_filtered_sources(
+def _iter_bbox_filtered_sources(
     paths: list[str], bbox_geom: Any, gpd: Any
-) -> list[Any]:
-    """Читает источники и оставляет геометрии, пересекающие bbox."""
-    all_gdfs: list[Any] = []
+):
+    """Потоково читает источники и отдаёт только строки, пересекающие bbox.
+
+    Каждый GeoDataFrame живёт только во время обработки одного источника,
+    поэтому loader больше не удерживает все parquet/vector frames одновременно.
+    """
     for p in paths:
         gdf = _overture_read_source(p, bbox_geom, gpd)
         if gdf is None:
@@ -289,12 +291,89 @@ def _read_bbox_filtered_sources(
         except Exception as exc:  # noqa: BLE001 — внешняя геометрия bbox
             logger.warning("Overture: ошибка bbox-фильтра для %s: %s", p, exc)
             continue
-        if len(gdf) > 0:
-            keep_cols = ["geometry"] + [
-                c for c in ("id", "version") if c in gdf.columns
-            ]
-            all_gdfs.append(gdf[keep_cols])
-    return all_gdfs
+        if len(gdf) == 0:
+            continue
+        keep_cols = ["geometry"] + [
+            c for c in ("id", "version") if c in gdf.columns
+        ]
+        yield gdf[keep_cols]
+
+
+def _read_bbox_filtered_sources(
+    paths: list[str], bbox_geom: Any, gpd: Any
+) -> list[Any]:
+    """Совместимый списоковый API поверх потокового чтения источников."""
+    return list(_iter_bbox_filtered_sources(paths, bbox_geom, gpd))
+
+
+def _coerce_version(value: Any) -> float:
+    """Возвращает числовой ранг версии здания, либо -1 для неизвестной."""
+    try:
+        version = float(value)
+    except (TypeError, ValueError):
+        return -1.0
+    return version if np.isfinite(version) else -1.0
+
+
+def _deduplicate_geometry_chunks(
+    chunks: Any,
+    *,
+    dedupe_by_geometry: bool,
+) -> np.ndarray:
+    """Собирает геометрии из потоковых чанков без накопления GeoDataFrame.
+
+    Для зданий с id сохраняется запись с максимальной version.
+    Строки без валидного id сохраняются и затем дедуплицируются по
+    геометрии тем же правилом, что и старый DataFrame-путь.
+    """
+    by_id: dict[str, tuple[float, Any]] = {}
+    anonymous: list[Any] = []
+
+    for gdf in chunks:
+        geometries = list(gdf.geometry.array)
+        id_values = list(gdf["id"]) if "id" in gdf.columns else [None] * len(gdf)
+        version_values = (
+            list(gdf["version"]) if "version" in gdf.columns else [-1.0] * len(gdf)
+        )
+
+        for geom, raw_id, raw_version in zip(
+            geometries, id_values, version_values
+        ):
+            if raw_id is None:
+                anonymous.append(geom)
+                continue
+            id_value = str(raw_id).strip()
+            if not id_value or id_value.lower() == "<na>":
+                anonymous.append(geom)
+                continue
+
+            version = _coerce_version(raw_version)
+            current = by_id.get(id_value)
+            if current is None or version > current[0]:
+                by_id[id_value] = (version, geom)
+
+        del geometries, id_values, version_values, gdf
+
+    selected = [geom for _version, geom in by_id.values()]
+    selected.extend(anonymous)
+    if not selected:
+        return np.asarray([], dtype=object)
+
+    result = np.asarray(selected, dtype=object)
+    if not dedupe_by_geometry or len(result) <= 1:
+        return result
+
+    hashes = _geometry_hashes(result)
+    seen: set[bytes] = set()
+    keep = np.empty(len(hashes), dtype=bool)
+    for i, hash_value in enumerate(hashes):
+        keep[i] = hash_value not in seen
+        seen.add(hash_value)
+
+    removed = len(result) - int(keep.sum())
+    if removed:
+        logger.info("Overture: удалено дублей зданий по геометрии: %d", removed)
+    return result[keep]
 
 
 def _validate_or_repair(
@@ -346,23 +425,26 @@ def load_overture_geometries(
     config: OvertureConfig | None = None,
 ) -> tuple[np.ndarray, int | None]:
     import geopandas as gpd
-    import pandas as pd
 
     config = config or OvertureConfig.from_env()
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_geom = shapely_box(min_lon, min_lat, max_lon, max_lat)
 
-    all_gdfs = _read_bbox_filtered_sources(paths, bbox_geom, gpd)
-    if not all_gdfs:
+    geometry_chunks = _iter_bbox_filtered_sources(paths, bbox_geom, gpd)
+    polygon_candidates = _deduplicate_geometry_chunks(
+        geometry_chunks,
+        dedupe_by_geometry=config.dedupe_by_geometry,
+    )
+    if polygon_candidates.size == 0:
         return np.asarray([], dtype=object), None
 
-    gdf = gpd.GeoDataFrame(pd.concat(all_gdfs, ignore_index=True), crs="EPSG:4326")
-    del all_gdfs
-
-    gdf = _deduplicate_buildings(
-        gdf, dedupe_by_geometry=config.dedupe_by_geometry
-    )
-    gdf = _apply_overture_limit(gdf, limit)
+    if limit < 0:
+        raise ValueError("limit должен быть >= 0")
+    if limit and len(polygon_candidates) > limit:
+        logger.warning(
+            "Overture: применён limit=%d; расчёт неполный", limit
+        )
+        polygon_candidates = polygon_candidates[:limit]
 
     if epsg is None:
         epsg = utm_epsg([min_lon, max_lon], [min_lat, max_lat])
@@ -371,9 +453,9 @@ def load_overture_geometries(
         return np.asarray([], dtype=object), None
 
     valid_geometries, invalid_count = _validate_or_repair(
-        gdf.geometry.values, skip_repair=config.skip_repair
+        polygon_candidates, skip_repair=config.skip_repair
     )
-    del gdf
+    del polygon_candidates
 
     if invalid_count:
         logger.warning(
@@ -401,6 +483,7 @@ __all__ = [
     "_keep_road_segments",
     "_overture_read_source",
     "_project_geometries_to_epsg",
+    "_iter_bbox_filtered_sources",
     "_read_bbox_filtered_sources",
     "_read_overture_file",
     "_read_parquet_any_columns",
@@ -409,5 +492,4 @@ __all__ = [
     "load_overture_geometries",
     "load_overture_segments",
     "overture_resolve_sources",
-    "resolve_poi_place_file",
 ]
