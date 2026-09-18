@@ -746,6 +746,85 @@ def _http_resolve_stac_part_files(
         logger.warning("Overture: STAC не удалось разрешить: %s", exc)
         return []
 
+
+def _duckdb_read_overture(
+    release: str,
+    theme: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float],
+    *,
+    provider: str = "s3",
+) -> Any | None:
+    """Извлекает bbox-подмножество Overture через DuckDB cloud scan."""
+    import uuid
+
+    import geopandas as gpd
+    import duckdb
+
+    if provider != "s3":
+        raise ValueError(f"Неизвестный DuckDB provider: {provider!r}")
+
+    source = (
+        f"s3://overturemaps-us-west-2/release/{release}/"
+        f"theme={theme}/type={overture_type}/*"
+    )
+    min_lat, min_lon, max_lat, max_lon = bbox
+    target = Path.cwd() / f".overture_duckdb_{uuid.uuid4().hex}.parquet"
+
+    def sql_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute("LOAD spatial")
+        conn.execute("LOAD httpfs")
+        conn.execute("SET s3_region='us-west-2'")
+        conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+
+        query = (
+            "COPY ("
+            " SELECT *"
+            f" FROM read_parquet({sql_literal(source)}, filename=true, hive_partitioning=1)"
+            f" WHERE bbox.xmin < {max_lon}"
+            f"   AND bbox.xmax > {min_lon}"
+            f"   AND bbox.ymin < {max_lat}"
+            f"   AND bbox.ymax > {min_lat}"
+            f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
+        )
+        logger.info(
+            "Overture: DuckDB %s/%s/%s → %s",
+            theme,
+            overture_type,
+            provider,
+            source,
+        )
+        started = time.monotonic()
+        conn.execute(query)
+        elapsed = max(time.monotonic() - started, 1e-9)
+
+        if not target.exists() or target.stat().st_size <= 0:
+            return None
+
+        size_mb = target.stat().st_size / (1024 * 1024)
+        logger.info(
+            "Overture: DuckDB %s/%s: %.1f МБ за %.1f с (%.2f МБ/с)",
+            theme,
+            overture_type,
+            size_mb,
+            elapsed,
+            size_mb / elapsed,
+        )
+
+        gdf = gpd.read_parquet(target)
+        if "geometry" in gdf.columns:
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+        return gdf if len(gdf) > 0 else None
+    finally:
+        conn.close()
+        with contextlib.suppress(OSError):
+            target.unlink()
+
+
 def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     safe = key.replace("/", "__").replace("=", "_")
     return Path(cache_dir) / "parts" / safe
@@ -857,6 +936,7 @@ __all__ = [
     "_append_chunk",
     "_concat_part_frames",
     "_download_overture_parts",
+    "_duckdb_read_overture",
     "_download_part_from_host",
     "_download_part_once",
     "_is_valid_cached_part",
