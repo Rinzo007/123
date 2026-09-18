@@ -241,7 +241,7 @@ def _is_valid_cached_part(
         if path.stat().st_size <= 0:
             return False
         manifest = _read_part_manifest(path)
-        if manifest is None:
+        if manifest is None or manifest.get("version") != 1:
             return False
         if key is not None and manifest.get("key") != key:
             return False
