@@ -129,7 +129,15 @@ def _prepare_auto_download(
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_key = _safe_bbox_key((min_lat, min_lon, max_lat, max_lon))
     effective_release = _resolve_overture_release(release)
-    release_key = effective_release or "latest"
+    if effective_release is None or effective_release.lower() == "latest":
+        try:
+            # Разрешаем latest до формирования имени кэша, чтобы каждое обновление
+            # Overture получало новый cache key, а не застывало под "latest".
+            effective_release = overturemaps.core.get_latest_release()
+        except Exception as exc:
+            logger.warning("Overture: не удалось определить latest release: %s", exc)
+            return None
+    release_key = effective_release
     package_version = getattr(overturemaps, "__version__", "unknown")
 
     cache_name = build_overture_cache_name(
@@ -168,9 +176,7 @@ def _http_download_overture_place(
         raise ValueError(f"HTTP-загрузка поддерживает только тему 'place', получено {theme!r}")
 
     if release is None:
-        import overturemaps
-
-        release = overturemaps.core.get_latest_release()
+        raise ValueError("effective release должен быть разрешён до HTTP-загрузки")
 
     keys = _http_resolve_stac_part_files(
         release,
