@@ -55,8 +55,9 @@ def _http_get_range(
     на новом контексте исключает повтор этой ошибки.
     """
     req = urllib.request.Request(url, method="GET")
-    if start > 0:
-        req.add_header("Range", f"bytes={start}-")
+    # Точный диапазон позволяет отличать конец файла от укороченного ответа.
+    end = start + max(1, chunk) - 1
+    req.add_header("Range", f"bytes={start}-{end}")
     with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
         status = getattr(resp, "status", 200)
         data = resp.read(chunk if status == 206 else None)
