@@ -14,6 +14,7 @@ from shapely.geometry import box as shapely_box
 
 from ..common import resolve_sources, utm_epsg
 from .download import resolve_poi_place_file
+from .release import OvertureReleaseError, resolve_overture_release
 from .config import OvertureConfig
 from .geometry import _geometry_hashes, _repair_polygonal_geometries
 from .http import (
@@ -43,13 +44,11 @@ def load_overture_segments(
     """
     import geopandas as gpd
 
-    if release is None:
-        try:
-            import overturemaps
-            release = overturemaps.core.get_latest_release()
-        except Exception as exc:  # noqa: BLE001 — внешняя зависимость
-            logger.warning("Overture: не удалось определить release: %s", exc)
-            return None
+    try:
+        release = resolve_overture_release(release)
+    except OvertureReleaseError as exc:
+        logger.warning("Overture: %s", exc)
+        return None
 
     keys = _http_resolve_stac_part_files(
         release,
