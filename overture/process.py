@@ -197,13 +197,7 @@ def _aggregate_route_stats(
             count=len(idxs),
             ok=route_ok,
         )
-        route_entry = {
-            "total_area_m2": route_stats.total_area_m2,
-            "corridor_m2": route_stats.corridor_m2,
-            "count": route_stats.count,
-            "ok": route_stats.ok,
-        }
-        return route_stats, route_entry
+        return route_stats, None
     except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
         logger.exception("Overture: ошибка агрегации маршрута %s", rd.route_id)
         return OvertureStats(ok=False), None
