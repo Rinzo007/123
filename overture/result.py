@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
-from .adapters import OvertureStats
+from .ports import StatsPort
 
 
 class OvertureStatus(str, Enum):
