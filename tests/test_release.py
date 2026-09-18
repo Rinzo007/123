@@ -27,5 +27,27 @@ def test_latest_release_failure_is_explicit(monkeypatch):
         "overturemaps",
         SimpleNamespace(core=fake_core),
     )
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("network")))
     with pytest.raises(OvertureReleaseError):
         resolve_overture_release("latest")
+
+
+def test_latest_release_falls_back_to_stac_catalog(monkeypatch):
+    import json
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"links": [{"rel": "child", "href": "https://example.test/2026-08-19.0/catalog.json"}]}).encode()
+
+    def boom():
+        raise RuntimeError("api changed")
+
+    monkeypatch.setitem(__import__("sys").modules, "overturemaps", SimpleNamespace(core=SimpleNamespace(get_latest_release=boom)))
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response())
+    assert resolve_overture_release("latest") == "2026-08-19.0"
