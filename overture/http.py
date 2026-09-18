@@ -5,6 +5,7 @@
 читаются с локального диска через geopandas/pyarrow.
 """
 
+import contextlib
 import datetime as datetime_module
 import email.utils
 import io
@@ -43,7 +44,7 @@ def _http_get_url(url: str, timeout: float) -> bytes:
 
 def _http_get_range(
     url: str, start: int, timeout: float, chunk: int, context: ssl.SSLContext | None
-) -> tuple[int, bytes]:
+) -> tuple[int, bytes, int | None]:
     """GET ``bytes=start-`` на URL; возвращает (статус, байты).
 
     При поддержке Range (206) отдаёт до ``chunk`` байт от смещения ``start``.
@@ -54,12 +55,33 @@ def _http_get_range(
     на новом контексте исключает повтор этой ошибки.
     """
     req = urllib.request.Request(url, method="GET")
-    if start > 0:
-        req.add_header("Range", f"bytes={start}-")
+    # Точный диапазон позволяет отличать конец файла от укороченного ответа.
+    end = start + max(1, chunk) - 1
+    req.add_header("Range", f"bytes={start}-{end}")
     with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
         status = getattr(resp, "status", 200)
         data = resp.read(chunk if status == 206 else None)
-    return status, data
+        total_size: int | None = None
+        if status == 206:
+            content_range = resp.headers.get("Content-Range")
+            if content_range:
+                import re
+                match = re.match(r"^bytes\s+(\d+)-(\d+)/(\d+)$", content_range.strip())
+                if match:
+                    range_start, range_end, total = map(int, match.groups())
+                    if range_start != start or range_end < range_start:
+                        raise IOError(
+                            f"Некорректный Content-Range: {content_range!r}, ожидался offset {start}"
+                        )
+                    total_size = total
+        else:
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                try:
+                    total_size = int(content_length)
+                except ValueError:
+                    total_size = None
+    return status, data, total_size
 
 
 def _overture_host_url(host: str, bucket: str, bucket_key: str, obj_path: str) -> str:
@@ -75,7 +97,7 @@ def _fetch_chunk(
     chunk: int,
     retries: int,
     retry_delay: float = 2.0,
-) -> tuple[int, bytes]:
+) -> tuple[int, bytes, int | None]:
     """Один Range-GET на URL с повторами; при исчерпании — последняя ошибка.
 
     ``urls`` может быть одним URL или списком хост-вариантов одного объекта:
@@ -185,17 +207,26 @@ def _download_part_from_host(
     progress = _PartProgress(part.name)
     start = part.stat().st_size if part.exists() else 0
     while True:
-        status, data = _fetch_chunk(
+        status, data, total_size = _fetch_chunk(
             list_urls, start, timeout, chunk, per_chunk_retries, retry_delay
         )
         if status != 206:
             # Хост не поддержал Range — получено всё тело файла; докачки нет.
+            if total_size is not None and len(data) != total_size:
+                raise IOError(
+                    f"Неполный HTTP 200 для {part.name}: {len(data)} из {total_size} байт"
+                )
             with part.open("wb") as fh:
                 fh.write(data)
+            start = len(data)
         else:
             start = _append_chunk(part, start, data, chunk)
         progress.update(data)
-        complete = len(data) < chunk or status != 206
+        complete = (
+            status != 206
+            or (total_size is not None and start >= total_size)
+            or (total_size is None and len(data) < chunk)
+        )
         if complete:
             logger.info("Overture: %s", progress.summary())
             return
@@ -334,6 +365,16 @@ def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     return Path(cache_dir) / "parts" / safe
 
 
+def _is_valid_cached_part(path: Path) -> bool:
+    """Проверяет существующий part-файл чтением parquet footer."""
+    try:
+        from pyarrow.parquet import ParquetFile
+        ParquetFile(path)
+        return path.stat().st_size > 0
+    except Exception:
+        return False
+
+
 def _download_part_once(key: str, cache_dir: str | Path) -> None:
     """Скачивает одну часть атомарно (tmp + replace), пропуская готовые.
 
@@ -342,8 +383,12 @@ def _download_part_once(key: str, cache_dir: str | Path) -> None:
     полного скачивания атомарно переименовывается в целевой.
     """
     dest = _part_local_path(key, cache_dir)
-    if dest.exists() and dest.stat().st_size > 0:
+    if dest.exists() and _is_valid_cached_part(dest):
         return
+    if dest.exists():
+        logger.warning("Overture: повреждённый part-кэш, перекачиваем: %s", dest)
+        with contextlib.suppress(OSError):
+            dest.unlink()
 
     bucket, _, obj_path = key.partition("/")
     part = dest.with_name(dest.name + ".part")
@@ -435,6 +480,7 @@ __all__ = [
     "_download_overture_parts",
     "_download_part_from_host",
     "_download_part_once",
+    "_is_valid_cached_part",
     "_download_part_round",
     "_fetch_chunk",
     "_http_get_range",
