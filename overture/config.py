@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 
 @dataclass(frozen=True, slots=True)
 class OvertureConfig:
-    cache_version: int = 11
+    cache_version: int = 12
     thread_batch_size: int = 0
     thread_batch_max: int = 64
     dedupe_by_geometry: bool = True
