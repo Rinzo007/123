@@ -161,48 +161,74 @@ def _append_chunk(part: Path, start: int, data: bytes, chunk: int) -> int:
 
 
 class _PartProgress:
-    """Замер скорости докачки парт-файла по HTTP (байты и время).
-
-    Логирует ход каждые ``log_interval_s`` секунд; ``summary()`` отдаёт
-    итоговую строку со средней скоростью за всю загрузку части (вместе с
-    паузами между повторами — видна реальная эффективность).
-    """
+    """Показывает текущую скорость, прогресс и среднюю скорость загрузки."""
 
     _MB = 1024 * 1024
 
-    def __init__(self, name: str, log_interval_s: float = 10.0) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        initial_bytes: int = 0,
+        total_bytes: int | None = None,
+        log_interval_s: float = 5.0,
+    ) -> None:
         self._name = name
         self._log_interval_s = log_interval_s or float("inf")
         self._t0 = time.monotonic()
         self._last_log = self._t0
-        self._bytes = 0
+        self._last_bytes = initial_bytes
+        self._bytes = initial_bytes
+        self._total_bytes = total_bytes
+
+    def set_total(self, total_bytes: int | None) -> None:
+        """Запоминает полный размер, когда сервер сообщил его."""
+        if total_bytes is not None and total_bytes >= self._bytes:
+            self._total_bytes = total_bytes
 
     def update(self, data: bytes) -> None:
-        """Принимает очередной скачанный кусок, изредка логирует прогресс."""
+        """Принимает очередной кусок и периодически выводит скорость."""
         self._bytes += len(data)
         now = time.monotonic()
         if now - self._last_log >= self._log_interval_s:
-            logger.info(
-                "Overture: %s — скачано %.1f МБ, скорость %.2f МБ/с",
-                self._name,
-                self._bytes / self._MB,
-                self._megabytes_per_sec(now),
-            )
+            current_speed = self._current_speed(now)
+            logger.info("Overture: %s — %s", self._name, self._format_status(now, current_speed))
             self._last_log = now
+            self._last_bytes = self._bytes
 
-    def _megabytes_per_sec(self, now: float) -> float:
+    def _current_speed(self, now: float) -> float:
+        elapsed = now - self._last_log
+        if elapsed <= 0:
+            return 0.0
+        return ((self._bytes - self._last_bytes) / self._MB) / elapsed
+
+    def _average_speed(self, now: float) -> float:
         elapsed = now - self._t0
         if elapsed <= 0:
             return 0.0
         return (self._bytes / self._MB) / elapsed
 
+    def _format_status(self, now: float, speed: float) -> str:
+        downloaded_mb = self._bytes / self._MB
+        if self._total_bytes:
+            total_mb = self._total_bytes / self._MB
+            percent = min(100.0, self._bytes * 100.0 / self._total_bytes)
+            remaining_mb = max(0.0, total_mb - downloaded_mb)
+            eta = remaining_mb / speed if speed > 0 else None
+            eta_text = f", осталось {remaining_mb:.1f} МБ, ETA {eta:.1f} с" if eta is not None else ""
+            return (
+                f"{downloaded_mb:.1f}/{total_mb:.1f} МБ ({percent:.1f}%), "
+                f"скорость {speed:.2f} МБ/с{eta_text}"
+            )
+        return f"скачано {downloaded_mb:.1f} МБ, скорость {speed:.2f} МБ/с"
+
     def summary(self) -> str:
-        """Итоговая строка: имя, объём, время, средняя скорость."""
+        """Итоговая строка с объёмом и средней скоростью."""
         now = time.monotonic()
         return (
-            f"{self._name}: скачано {self._bytes / self._MB:.1f} МБ "
+            f"{self._name}: {self._bytes / self._MB:.1f} МБ "
             f"за {now - self._t0:.1f} с "
-            f"({self._megabytes_per_sec(now):.2f} МБ/с)"
+            f"(средняя скорость {self._average_speed(now):.2f} МБ/с)"
         )
 
 
@@ -292,8 +318,8 @@ def _download_part_from_host(
     list_urls = [urls] if isinstance(urls, str) else list(urls)
     if not list_urls:
         raise ValueError("Overture: не переданы HTTP-хосты")
-    progress = _PartProgress(part.name)
     start = part.stat().st_size if part.exists() else 0
+    progress = _PartProgress(part.name, initial_bytes=start)
     total_size: int | None = None
     while True:
         status, data, chunk_total = _fetch_chunk(
@@ -301,6 +327,7 @@ def _download_part_from_host(
         )
         if chunk_total is not None:
             total_size = chunk_total
+            progress.set_total(total_size)
             if total_size < start:
                 raise IOError(
                     f"Некорректный размер Overture part: {total_size} < {start}"
