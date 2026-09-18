@@ -134,6 +134,7 @@ def _prepare_auto_download(
         logger.warning("Overture: %s", exc)
         return None
     package_version = getattr(overturemaps, "__version__", "unknown")
+    release_key = effective_release
 
     cache_name = build_overture_cache_name(
         normalized_theme, package_version, release_key, bbox_key
