@@ -14,9 +14,7 @@ from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry import box as shapely_box
 
-from ..cache import JsonCache
-from ..common import utm_epsg
-from ..metrics import OvertureStats
+from .adapters import JsonCache, OvertureStats, utm_epsg
 from .cache import LRUCache, _file_signature
 from .context import _OvertureContext
 from .config import OvertureConfig
