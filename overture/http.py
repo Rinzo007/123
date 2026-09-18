@@ -48,6 +48,16 @@ _CHUNK_RETRY_DELAY_S = 2.0
 _STAC_TIMEOUT_S = 120.0
 _STAC_CHUNK_BYTES = 1024 * 1024
 
+# STAC публикуется через CloudFront и синхронизируется в публичный
+# extras S3-бакет под префиксом ``stac/``. Используем оба пути для
+# устойчивости к блокировке/таймауту одного CDN endpoint.
+_STAC_HTTP_HOSTS: tuple[str, ...] = (
+    "https://stac.overturemaps.org",
+    "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac",
+    "https://overturemaps-extras-us-west-2.s3.amazonaws.com/stac",
+    "https://s3.us-west-2.amazonaws.com/overturemaps-extras-us-west-2/stac",
+)
+
 
 def _http_get_url(
     url: str, timeout: float, context: ssl.SSLContext | None = None
@@ -486,7 +496,10 @@ def _log_stac_retry(
 
 
 def _http_get_stac(
-    url: str, timeout: float = _STAC_TIMEOUT_S, retries: int = 0, retry_delay: float = 2.0
+    url: str | list[str] | tuple[str, ...],
+    timeout: float = _STAC_TIMEOUT_S,
+    retries: int = 0,
+    retry_delay: float = 2.0,
 ) -> bytes:
     """Скачивает STAC ``collections.parquet`` короткими HTTP Range-запросами.
 
@@ -610,21 +623,32 @@ def _http_resolve_stac_part_files_via_collection(
 
     import urllib.parse
 
-    url = f"https://stac.overturemaps.org/{release}/{theme}/{overture_type}/collection.json"
+    collection_urls = [
+        f"{host}/{release}/{theme}/{overture_type}/collection.json"
+        for host in _STAC_HTTP_HOSTS
+    ]
     collection_data = _http_get_stac(
-        url,
+        collection_urls,
         timeout=_STAC_TIMEOUT_S,
         retries=retries,
         retry_delay=retry_delay,
     )
     collection = json_module.loads(collection_data)
-    item_hrefs = _stac_item_hrefs(collection, bbox, url)
+    item_hrefs = _stac_item_hrefs(collection, bbox, collection_urls[0])
     if not item_hrefs:
         return []
 
     def fetch_item(item_url: str) -> str | None:
+        import urllib.parse
+
+        item_urls = [
+            urllib.parse.urljoin(base, urllib.parse.urlsplit(item_url).path.split(
+                f"/{release}/", 1
+            )[-1])
+            for base in collection_urls
+        ]
         item_data = _http_get_stac(
-            item_url,
+            item_urls,
             timeout=_STAC_TIMEOUT_S,
             retries=retries,
             retry_delay=retry_delay,
@@ -646,10 +670,13 @@ def _http_resolve_stac_part_files(
     retry_delay: float = 2.0,
 ) -> list[str]:
     """Возвращает список ключей S3 частей, пересекающих bbox (через STAC по HTTP)."""
-    stac_url = f"https://stac.overturemaps.org/{release}/collections.parquet"
+    stac_urls = [
+        f"{host}/{release}/collections.parquet"
+        for host in _STAC_HTTP_HOSTS
+    ]
     try:
         data = _http_get_stac(
-            stac_url,
+            stac_urls,
             timeout=_STAC_TIMEOUT_S,
             retries=retries,
             retry_delay=retry_delay,
@@ -796,6 +823,7 @@ __all__ = [
     "_CHUNK_RETRY_DELAY_S",
     "_STAC_TIMEOUT_S",
     "_STAC_CHUNK_BYTES",
+    "_STAC_HTTP_HOSTS",
     "_OVERTURE_CHUNK_BYTES",
     "_OVERTURE_HTTP_HOSTS",
     "_PartProgress",
