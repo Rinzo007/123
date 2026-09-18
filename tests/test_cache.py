@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import os
 
 from overture.cache import (
@@ -8,6 +10,7 @@ from overture.cache import (
     _stats_to_cached,
 )
 
+@dataclass(frozen=True)
 class _Stats:
     total_area_m2: float = 0.0
     corridor_m2: float = 0.0
