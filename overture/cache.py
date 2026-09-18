@@ -7,8 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from ..cache import JsonCache
-from ..metrics import OvertureStats
+from .adapters import JsonCache, OvertureStats
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
