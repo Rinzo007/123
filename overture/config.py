@@ -28,7 +28,6 @@ class OvertureConfig:
     skip_repair: bool = False
     buffer_cache_max_size: int = 5_000
     projection_chunk_size: int = 50_000
-    download_backend: str = "auto"
 
     @classmethod
     def from_env(cls) -> "OvertureConfig":
@@ -62,7 +61,6 @@ class OvertureConfig:
             skip_repair=os.getenv("OVERTURE_SKIP_REPAIR", "0") == "1",
             buffer_cache_max_size=max(1, _int("OVERTURE_BUFFER_CACHE_MAX_SIZE", 5_000)),
             projection_chunk_size=max(0, _int("OVERTURE_PROJECTION_CHUNK_SIZE", 50_000)),
-            download_backend=os.getenv("OVERTURE_DOWNLOAD_BACKEND", "auto").strip().lower() or "auto",
         )
 
     def algorithm_signature(self) -> str:
