@@ -158,7 +158,7 @@ def test_stac_request_uses_fresh_tls_and_closes_connection(monkeypatch):
     monkeypatch.setattr(http.ssl, "create_default_context", fake_context)
     monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
 
-    assert http._http_get_url("https://stac.overturemaps.org/x.parquet", 120.0, contexts[0] if contexts else None) == b"stac"
+    assert http._http_get_url("https://stac.overturemaps.org/x.parquet", 120.0) == b"stac"
     assert captured == [("close", 120.0, None)]
 
 
