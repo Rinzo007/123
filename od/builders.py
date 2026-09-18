@@ -168,15 +168,22 @@ def _sparse_gravity_seed(
     Значения ниже ``_GRAVITY_KERNEL_EPS`` (порог ``t > ln(1/eps)/beta``)
     отбрасываются; диагональ обнуляется, не-конечные стоимости дают 0.
     """
-    kernel = np.exp(-beta * impedance)
-    kernel[kernel < _GRAVITY_KERNEL_EPS] = 0.0
-    np.fill_diagonal(kernel, 0.0)
-    kernel[~np.isfinite(impedance)] = 0.0
-    seed = (
-        sparse.diags(production) @ sparse.csr_matrix(kernel) @ sparse.diags(attraction)
-    )
-    seed.eliminate_zeros()
-    return seed.tocsr()
+    # Не создаём вторую плотную матрицу экспоненты: для больших сетей
+    # достаточно выбрать пары, для которых расстояние не превышает
+    # эффективный радиус ядра.
+    threshold = -math.log(_GRAVITY_KERNEL_EPS) / beta
+    finite = np.isfinite(impedance) & (impedance <= threshold)
+    finite &= ~np.eye(impedance.shape[0], dtype=bool)
+    rows, cols = np.nonzero(finite)
+    if rows.size == 0:
+        return sparse.csr_matrix(impedance.shape, dtype=np.float64)
+    values = np.exp(-beta * impedance[rows, cols])
+    values *= production[rows]
+    values *= attraction[cols]
+    return sparse.csr_matrix((
+        values,
+        (rows, cols),
+    ), shape=impedance.shape)
 
 
 def periods_from_purpose_blend(
