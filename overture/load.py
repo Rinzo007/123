@@ -12,7 +12,7 @@ import numpy as np
 import shapely
 from shapely.geometry import box as shapely_box
 
-from ..common import resolve_sources, utm_epsg
+from .adapters import resolve_sources, utm_epsg
 from .download import resolve_poi_place_file
 from .release import OvertureReleaseError, resolve_overture_release
 from .config import OvertureConfig
