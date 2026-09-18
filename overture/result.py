@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Единый контракт результата расчёта Overture."""
 
 from dataclasses import dataclass
@@ -27,7 +29,7 @@ class OvertureResult(Generic[StatsT]):
 
     stats: StatsT
     meta: dict[str, Any] | None
-    direction_stats: dict[tuple[int, int], OvertureStats]
+    direction_stats: dict[tuple[int, int], StatsPort]
     status: OvertureStatus
     reason: str | None = None
     error_type: str | None = None
@@ -47,7 +49,7 @@ class OvertureResult(Generic[StatsT]):
     ) -> tuple[
         StatsT,
         dict[str, Any] | None,
-        dict[tuple[int, int], OvertureStats],
+        dict[tuple[int, int], StatsPort],
     ]:
         """Возвращает старый tuple-API для существующих вызывающих кодов."""
         return self.stats, self.meta, self.direction_stats
@@ -57,7 +59,7 @@ class OvertureResult(Generic[StatsT]):
         cls,
         stats: StatsT,
         meta: dict[str, Any],
-        direction_stats: dict[tuple[int, int], OvertureStats],
+        direction_stats: dict[tuple[int, int], StatsPort],
         *,
         warnings: tuple[str, ...] = (),
     ) -> "OvertureResult[StatsT]":
@@ -74,7 +76,7 @@ class OvertureResult(Generic[StatsT]):
         cls,
         stats: StatsT,
         meta: dict[str, Any],
-        direction_stats: dict[tuple[int, int], OvertureStats],
+        direction_stats: dict[tuple[int, int], StatsPort],
         *,
         warnings: tuple[str, ...] = (),
     ) -> "OvertureResult[StatsT]":
@@ -92,7 +94,7 @@ class OvertureResult(Generic[StatsT]):
         *,
         reason: str = "no_data",
         meta: dict[str, Any] | None = None,
-    ) -> "OvertureResult[dict[int, OvertureStats]]":
+    ) -> "OvertureResult[dict[int, StatsPort]]":
         return cls(
             stats={},
             meta=meta,
@@ -104,7 +106,7 @@ class OvertureResult(Generic[StatsT]):
     @classmethod
     def invalid_input(
         cls, *, reason: str
-    ) -> "OvertureResult[dict[int, OvertureStats]]":
+    ) -> "OvertureResult[dict[int, StatsPort]]":
         return cls(
             stats={},
             meta={"status": OvertureStatus.INVALID_INPUT.value},
@@ -116,7 +118,7 @@ class OvertureResult(Generic[StatsT]):
     @classmethod
     def skipped(
         cls, *, reason: str
-    ) -> "OvertureResult[dict[int, OvertureStats]]":
+    ) -> "OvertureResult[dict[int, StatsPort]]":
         return cls(
             stats={},
             meta={"status": OvertureStatus.SKIPPED.value},
@@ -131,7 +133,7 @@ class OvertureResult(Generic[StatsT]):
         exc: BaseException,
         *,
         cache_signature: str | None = None,
-    ) -> "OvertureResult[dict[int, OvertureStats]]":
+    ) -> "OvertureResult[dict[int, StatsPort]]":
         return cls(
             stats={},
             meta={
