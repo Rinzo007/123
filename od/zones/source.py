@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 from scipy.spatial import cKDTree
-from shapely.geometry import Point, box
+from shapely.geometry import Point, box, shape
 from shapely.ops import transform as geom_transform
 
 from ...common import open_raster_index, raster_stack, resolve_sources
@@ -104,6 +104,10 @@ def load_districts(path: str | Path) -> list[tuple[str, Any]]:
             name = str(props.get("name") or props.get("NAME") or "").strip()
             geometry = feature.get("geometry")
             if not name or geometry is None:
+                continue
+            try:
+                geometry = shape(geometry)
+            except (TypeError, ValueError):
                 continue
             places.append((name, geometry))
     seen: set[str] = set()
@@ -197,8 +201,8 @@ def _tile_overlaps_bounds(
 
 def _reproject_polygon(poly: Any, warp: Any, target_crs: Any) -> Any:
     def _apply(x: Any, y: Any) -> tuple[Any, Any]:
-        tx, ty = warp.transform("EPSG:4326", target_crs, x.tolist(), y.tolist())
-        return np.asarray(tx), np.asarray(ty)
+        tx, ty = warp.transform("EPSG:4326", target_crs, x, y)
+        return tx, ty
 
     return geom_transform(_apply, poly)
 
