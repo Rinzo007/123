@@ -103,3 +103,28 @@ def test_fetch_chunk_attempts_at_least_once_when_retries_zero(monkeypatch):
     )
     assert result == (206, b"x", 1)
     assert calls == [("https://a.test/object", 0)]
+
+
+def test_overture_http_includes_official_azure_mirrors():
+    from overture.http import _OVERTURE_HTTP_HOSTS, _overture_host_url
+
+    assert "https://overturemapswestus2.blob.core.windows.net" in _OVERTURE_HTTP_HOSTS
+    assert "https://overturemapswestus2.dfs.core.windows.net" in _OVERTURE_HTTP_HOSTS
+
+    key = "overturemaps-us-west-2/release/2026-01-21.0/theme=buildings/type=building/part.parquet"
+    bucket, _, obj_path = key.partition("/")
+
+    blob = _overture_host_url(
+        "https://overturemapswestus2.blob.core.windows.net",
+        bucket,
+        key,
+        obj_path,
+    )
+    dfs = _overture_host_url(
+        "https://overturemapswestus2.dfs.core.windows.net",
+        bucket,
+        key,
+        obj_path,
+    )
+    assert blob.endswith("/release/2026-01-21.0/theme=buildings/type=building/part.parquet")
+    assert dfs.endswith("/release/2026-01-21.0/theme=buildings/type=building/part.parquet")
