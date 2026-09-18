@@ -456,6 +456,26 @@ def compute_overture_result(
         meta = _overture_meta(
             buffer_value, len(polygon_geometries), epsg, release, config
         )
+        failed_routes = sum(
+            not stat.ok for stat in stats.values()
+        )
+        failed_directions = sum(
+            not stat.ok for stat in dir_stats_map.values()
+        )
+        failed_items = failed_routes + failed_directions
+        if failed_items:
+            meta["status"] = "partial"
+            meta["failed_items"] = failed_items
+            warning = (
+                f"частичный результат: {failed_items} элементов маршрутов "
+                "не удалось посчитать"
+            )
+            return OvertureResult.partial(
+                stats,
+                meta,
+                dir_stats_map,
+                warnings=(warning,),
+            )
         meta["status"] = "success"
         return OvertureResult.success(stats, meta, dir_stats_map)
     except MemoryError as exc:
