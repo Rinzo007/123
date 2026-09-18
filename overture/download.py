@@ -155,6 +155,16 @@ def _prepare_auto_download(
 
 
 
+def _download_backend_order(backend: str) -> list[str]:
+    """Возвращает каскад транспортов для выбранного режима."""
+    normalized = backend.strip().lower()
+    if normalized == "auto":
+        return ["duckdb_s3", "duckdb_azure", "http"]
+    if normalized in {"duckdb_s3", "duckdb_azure", "http"}:
+        return [normalized]
+    raise ValueError(f"Неизвестный Overture download backend: {backend!r}")
+
+
 def _duckdb_download_overture_place(
     theme: str,
     bbox: tuple[float, float, float, float],
@@ -283,7 +293,7 @@ def _fetch_and_write_auto(
     """Скачивает тему выбранным транспортом, пишет атомарный локальный кэш."""
     spec.cache_file.parent.mkdir(parents=True, exist_ok=True)
 
-    backends = ["duckdb_s3", "duckdb_azure", "http"] if backend == "auto" else [backend]
+    backends = _download_backend_order(backend)
     last_exc: Exception | None = None
     for current in backends:
         try:
