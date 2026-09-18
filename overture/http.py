@@ -43,10 +43,19 @@ _OVERTURE_CHUNK_BYTES = 4 * 1024 * 1024
 # даёт S3 время сбросить повреждённую сессию до полного handshake.
 _CHUNK_RETRY_DELAY_S = 2.0
 
+# Таймаут одного STAC-запроса. Каталог небольшой, но на Windows/прокси
+# чтение может подвисать заметно дольше обычного HTTP GET.
+_STAC_TIMEOUT_S = 120.0
 
-def _http_get_url(url: str, timeout: float) -> bytes:
+
+def _http_get_url(
+    url: str, timeout: float, context: ssl.SSLContext | None = None
+) -> bytes:
     req = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    # Не удерживаем потенциально зависшее keep-alive-соединение между
+    # попытками: STAC-попытка должна начинаться с чистого HTTP/TLS-сеанса.
+    req.add_header("Connection", "close")
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
         return resp.read()
 
 
@@ -461,7 +470,8 @@ def _http_get_stac(
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            return _http_get_url(url, timeout)
+            context = ssl.create_default_context()
+            return _http_get_url(url, timeout, context)
         except urllib.error.HTTPError as exc:
             last_exc = exc
             rate_limited = exc.code == 429
@@ -489,7 +499,12 @@ def _http_resolve_stac_part_files(
     from pyarrow import parquet as pq
 
     stac_url = f"https://stac.overturemaps.org/{release}/collections.parquet"
-    data = _http_get_stac(stac_url, timeout=60.0, retries=retries, retry_delay=retry_delay)
+    data = _http_get_stac(
+        stac_url,
+        timeout=_STAC_TIMEOUT_S,
+        retries=retries,
+        retry_delay=retry_delay,
+    )
     table = pq.read_table(io.BytesIO(data))
 
     feature_type_filter = (pc.field("collection") == overture_type) & (
@@ -613,6 +628,7 @@ def _read_overture_parts(local_files: list[str], bbox_filter: tuple, gpd: Any) -
 
 __all__ = [
     "_CHUNK_RETRY_DELAY_S",
+    "_STAC_TIMEOUT_S",
     "_OVERTURE_CHUNK_BYTES",
     "_OVERTURE_HTTP_HOSTS",
     "_PartProgress",
