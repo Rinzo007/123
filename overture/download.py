@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import os
 import re
 import uuid
 from collections.abc import Callable
@@ -272,31 +273,58 @@ def _http_download_overture_place(
     return _read_overture_parts(local_files, bbox_filter, gpd)
 
 
+
 def _fetch_and_write_auto(
     spec: _AutoDownloadSpec,
     retries: int,
     retry_delay: float,
+    backend: str,
 ) -> str | None:
-    """Скачивает тему по HTTP, пишет атомарно в кэш и возвращает путь к файлу."""
+    """Скачивает тему выбранным транспортом, пишет атомарный локальный кэш."""
     spec.cache_file.parent.mkdir(parents=True, exist_ok=True)
-    gdf = _http_download_overture_place(
-        spec.theme,
-        bbox=spec.bbox,
-        release=spec.effective_release,
-        cache_dir=spec.cache_file.parent,
-        retries=retries,
-        retry_delay=retry_delay,
-    )
-    if gdf is None:
-        logger.warning("Overture: не удалось загрузить данные '%s'", spec.theme)
-        return None
-    if len(gdf) == 0:
-        logger.warning("Overture: не найдено объектов в bbox")
-        return None
 
-    _write_geoparquet_atomic(gdf, spec.cache_file)
-    logger.info("Overture: %d объектов → %s", len(gdf), spec.cache_file)
-    return str(spec.cache_file)
+    backends = ["duckdb_s3", "duckdb_azure", "http"] if backend == "auto" else [backend]
+    last_exc: Exception | None = None
+    for current in backends:
+        try:
+            if current in {"duckdb_s3", "duckdb_azure"}:
+                gdf = _duckdb_download_overture_place(
+                    spec.theme,
+                    bbox=spec.bbox,
+                    release=spec.effective_release or spec.release_key,
+                    output_dir=spec.cache_file.parent,
+                    provider=current,
+                )
+            elif current == "http":
+                gdf = _http_download_overture_place(
+                    spec.theme,
+                    bbox=spec.bbox,
+                    release=spec.effective_release,
+                    cache_dir=spec.cache_file.parent,
+                    retries=retries,
+                    retry_delay=retry_delay,
+                )
+            else:
+                raise ValueError(f"Неизвестный Overture download backend: {backend!r}")
+
+            if gdf is not None:
+                if len(gdf) == 0:
+                    return None
+                _write_geoparquet_atomic(gdf, spec.cache_file)
+                logger.info("Overture: %d объектов → %s", len(gdf), spec.cache_file)
+                return str(spec.cache_file)
+        except ImportError as exc:
+            last_exc = exc
+            logger.warning("Overture: транспорт %s недоступен: %s", current, exc)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("Overture: транспорт %s не сработал: %s", current, exc)
+            if backend != "auto":
+                raise
+
+    if last_exc is not None and backend != "auto":
+        raise last_exc
+    return None
 
 
 def auto_download_overture(
@@ -306,12 +334,17 @@ def auto_download_overture(
     release: str | None = None,
     retries: int = 0,
     retry_delay: float = 2.0,
+    backend: str | None = None,
 ) -> str | None:
     """Автоматически скачивает тему Overture в локальный кэш (или читает кэш)."""
     spec = _prepare_auto_download(bbox, theme, release, cache_dir)
     if spec is None:
         return None
     retries = max(retries, 0)
+    backend = (backend or os.getenv("OVERTURE_DOWNLOAD_BACKEND", "auto")).strip().lower()
+    if backend not in {"auto", "duckdb_s3", "duckdb_azure", "http"}:
+        logger.warning("Overture: неизвестный download backend %r; используем auto", backend)
+        backend = "auto"
 
     if spec.cache_file.exists():
         logger.info("Overture: кэш найден: %s", spec.cache_file)
@@ -325,7 +358,7 @@ def auto_download_overture(
     )
 
     try:
-        return _fetch_and_write_auto(spec, retries, retry_delay)
+        return _fetch_and_write_auto(spec, retries, retry_delay, backend)
     except KeyError:
         logger.warning("Overture: неизвестная тема '%s'", theme)
         return None
