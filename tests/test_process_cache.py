@@ -3,8 +3,6 @@ from types import SimpleNamespace
 
 import overture.process as process
 from overture.cache import LRUCache
-from overture.result import OvertureStatus
-
 
 @dataclass(frozen=True)
 class _Direction:
