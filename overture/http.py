@@ -8,7 +8,9 @@
 import contextlib
 import datetime as datetime_module
 import email.utils
+import hashlib
 import io
+import json
 import logging
 import ssl
 import time
@@ -184,6 +186,79 @@ class _PartProgress:
         )
 
 
+def _sha256_file(path: Path) -> str:
+    """Считает SHA-256 файла потоково."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _part_manifest_path(path: Path) -> Path:
+    return path.with_name(path.name + ".meta.json")
+
+
+def _write_part_manifest(path: Path, *, key: str, size: int, sha256: str) -> None:
+    """Атомарно сохраняет метаданные завершённой части."""
+    target = _part_manifest_path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    payload = {
+        "version": 1,
+        "key": key,
+        "size": int(size),
+        "sha256": sha256,
+    }
+    try:
+        tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        tmp.replace(target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def _read_part_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(_part_manifest_path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _is_valid_cached_part(
+    path: Path,
+    *,
+    key: str | None = None,
+) -> bool:
+    """Проверяет parquet-footer, размер и checksum сохранённого part-файла."""
+    try:
+        from pyarrow.parquet import ParquetFile
+
+        if path.stat().st_size <= 0:
+            return False
+        manifest = _read_part_manifest(path)
+        if manifest is None:
+            return False
+        if key is not None and manifest.get("key") != key:
+            return False
+        expected_size = int(manifest.get("size", -1))
+        if expected_size != path.stat().st_size:
+            return False
+        expected_hash = str(manifest.get("sha256", "")).strip().lower()
+        if not expected_hash:
+            return False
+        if _sha256_file(path) != expected_hash:
+            return False
+        ParquetFile(path)
+        return True
+    except (OSError, ValueError, TypeError, OverflowError):
+        return False
+
+
 def _download_part_from_host(
     urls: str | list[str],
     part: Path,
@@ -192,26 +267,26 @@ def _download_part_from_host(
     chunk: int = _OVERTURE_CHUNK_BYTES,
     per_chunk_retries: int = 3,
     retry_delay: float = _CHUNK_RETRY_DELAY_S,
-) -> None:
-    """Докачивает объект в ``part`` чанками с Range, переживая TLS-обрывы.
-
-    ``urls`` — один URL или список хост-вариантов одного объекта S3: DPI
-    периодически рвёт TLS только к части хостов (``INVALID_SESSION_ID``),
-    поэтому каждый чанк по кругу пробует все хосты и уходит через живой.
-
-    Каждый чанк — отдельный GET. Смещение продолжается со следующего после
-    записанных байт, поэтому обрыв соединения на середине файла не требует
-    перекачки с нуля; повторный запуск продолжает с сохранённого ``part``.
-    """
+) -> int:
+    """Докачивает объект в part чанками и возвращает полный размер."""
     list_urls = [urls] if isinstance(urls, str) else list(urls)
+    if not list_urls:
+        raise ValueError("Overture: не переданы HTTP-хосты")
     progress = _PartProgress(part.name)
     start = part.stat().st_size if part.exists() else 0
+    total_size: int | None = None
     while True:
-        status, data, total_size = _fetch_chunk(
+        status, data, chunk_total = _fetch_chunk(
             list_urls, start, timeout, chunk, per_chunk_retries, retry_delay
         )
+        if chunk_total is not None:
+            total_size = chunk_total
+            if total_size < start:
+                raise IOError(
+                    f"Некорректный размер Overture part: {total_size} < {start}"
+                )
+
         if status != 206:
-            # Хост не поддержал Range — получено всё тело файла; докачки нет.
             if total_size is not None and len(data) != total_size:
                 raise IOError(
                     f"Неполный HTTP 200 для {part.name}: {len(data)} из {total_size} байт"
@@ -220,17 +295,67 @@ def _download_part_from_host(
                 fh.write(data)
             start = len(data)
         else:
+            if total_size is not None and start + len(data) > total_size:
+                raise IOError(
+                    f"Range-ответ выходит за конец Overture part {part.name}"
+                )
             start = _append_chunk(part, start, data, chunk)
+
         progress.update(data)
+
         complete = (
             status != 206
-            or (total_size is not None and start >= total_size)
+            or (total_size is not None and start == total_size)
             or (total_size is None and len(data) < chunk)
         )
         if complete:
+            if total_size is not None and start != total_size:
+                raise IOError(
+                    f"Неполная Overture part: {start} из {total_size} байт"
+                )
             logger.info("Overture: %s", progress.summary())
-            return
+            return start
 
+
+def _download_part_once(key: str, cache_dir: str | Path) -> None:
+    """Скачивает одну часть атомарно и валидирует локальный cache-entry."""
+    dest = _part_local_path(key, cache_dir)
+    if dest.exists() and _is_valid_cached_part(dest, key=key):
+        return
+    if dest.exists():
+        logger.warning("Overture: невалидный part-кэш, перекачиваем: %s", dest)
+        with contextlib.suppress(OSError):
+            dest.unlink()
+        with contextlib.suppress(OSError):
+            _part_manifest_path(dest).unlink()
+
+    bucket, _, obj_path = key.partition("/")
+    part = dest.with_name(dest.name + ".part")
+    urls = [
+        _overture_host_url(host, bucket, key, obj_path)
+        for host in _OVERTURE_HTTP_HOSTS
+    ]
+    _download_part_from_host(urls, part, timeout=120.0)
+    if not _is_valid_cached_part(part):
+        # part ещё не имеет manifest, поэтому валидируем его хотя бы как parquet
+        # перед публикацией; checksum записывается ниже.
+        try:
+            from pyarrow.parquet import ParquetFile
+
+            if part.stat().st_size <= 0:
+                raise IOError("Пустой Overture part")
+            ParquetFile(part)
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            with contextlib.suppress(OSError):
+                part.unlink()
+            raise IOError(f"Невалидный скачанный Overture part {key!r}") from exc
+
+    size = part.stat().st_size
+    if size <= 0:
+        raise IOError(f"Пустой Overture part после скачивания: {key!r}")
+    sha256 = _sha256_file(part)
+    part.replace(dest)
+    _write_part_manifest(dest, key=key, size=size, sha256=sha256)
 
 def _retry_after_value(retry_after: str) -> float | None:
     """Парсит ``Retry-After`` как число секунд; None при нечисловом значении."""
