@@ -201,7 +201,7 @@ def _process_direction(
         count=len(idxs),
         ok=not had_error,
     )
-    entry = _stats_to_cached(st)
+    entry = _stats_to_cached(st) if st.ok else None
     return st, entry, buffered
 
 
@@ -240,7 +240,7 @@ def _aggregate_route_stats(
             count=len(idxs),
             ok=route_ok,
         )
-        return route_stats, _stats_to_cached(route_stats)
+        return route_stats, _stats_to_cached(route_stats) if route_stats.ok else None
     except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
         logger.exception("Overture: ошибка агрегации маршрута %s", rd.route_id)
         return OvertureStats(ok=False), None
@@ -270,13 +270,16 @@ def _process_single_route(
         parsed = _route_stats_from_cached(cached_route)
         if parsed is not None:
             route_stats, cached_dirs = parsed
-            # Кэш содержит route-id независимо от геометрического ключа; при чтении
-            # подставляем фактический id текущего маршрута.
-            dir_stats_map = {
-                (rd.route_id, di): st
-                for di, st in cached_dirs.items()
-            }
-            return route_stats, dir_stats_map, {}
+            if route_stats.ok and len(cached_dirs) == len(rd.directions) and all(
+                st.ok for st in cached_dirs.values()
+            ):
+                # Кэш содержит только успешный результат; route_id подставляется
+                # на чтении, потому что ключ построен по геометрии.
+                dir_stats_map = {
+                    (rd.route_id, di): st
+                    for di, st in cached_dirs.items()
+                }
+                return route_stats, dir_stats_map, {}
 
     direction_stats: list[OvertureStats] = []
     dir_stats_map: dict[tuple[int, int], OvertureStats] = {}
@@ -303,7 +306,7 @@ def _process_single_route(
             seen_buffer_ids.add(id(used_buf))
             route_buffers.append(used_buf)
         if entry is not None:
-            cache_entries[key] = entry
+            _store_cache_entry(state, key, entry, cache_entries)
 
     if not route_buffers:
         return OvertureStats(ok=False), dir_stats_map, cache_entries
@@ -313,13 +316,18 @@ def _process_single_route(
     )
     if route_entry is not None:
         # route cache хранит обе части результата в одном атомарном payload.
-        cache_entries[route_key] = {
-            "route": route_entry,
-            "directions": {
-                str(di): _stats_to_cached(st)
-                for di, st in enumerate(direction_stats)
+        _store_cache_entry(
+            state,
+            route_key,
+            {
+                "route": route_entry,
+                "directions": {
+                    str(di): _stats_to_cached(st)
+                    for di, st in enumerate(direction_stats)
+                },
             },
-        }
+            cache_entries,
+        )
     return route_stats, dir_stats_map, cache_entries
 
 
