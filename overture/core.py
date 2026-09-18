@@ -19,6 +19,7 @@ from ..common import utm_epsg
 from ..metrics import OvertureStats
 from .cache import LRUCache, _file_signature
 from .context import _OvertureContext
+from .config import OvertureConfig
 from .geometry import _validate_bbox
 from .load import load_overture_geometries, overture_resolve_sources
 from .process import (
@@ -27,18 +28,7 @@ from .process import (
     _thread_batch_worker,
     _WorkerState,
 )
-from .settings import (
-    OVERTURE_ASSUME_NO_OVERLAP,
-    OVERTURE_BUFFER_CACHE_MAX_SIZE,
-    OVERTURE_CACHE_VERSION,
-    OVERTURE_MIN_BUILDING_AREA_M2,
-    OVERTURE_PROJECTION_CHUNK_SIZE,
-    OVERTURE_THREAD_BATCH_MAX,
-    OVERTURE_THREAD_BATCH_SIZE,
-    OVERTURE_UNION_GRID_SIZE,
-    OVERTURE_USE_COVERAGE_UNION,
-    _resolve_overture_release,
-)
+from .settings import _resolve_overture_release
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -117,12 +107,14 @@ def _utm_project_bbox(
     return epsg, qbbox
 
 
-def _filter_buildings(polygon_geometries: np.ndarray) -> np.ndarray:
-    """Удаляет здания площади меньше минимальной (если лимит задан)."""
-    if OVERTURE_MIN_BUILDING_AREA_M2 <= 0 or polygon_geometries.size == 0:
+def _filter_buildings(
+    polygon_geometries: np.ndarray, min_building_area_m2: float
+) -> np.ndarray:
+    """Удаляет здания площади меньше минимальной."""
+    if min_building_area_m2 <= 0 or polygon_geometries.size == 0:
         return polygon_geometries
     areas = shapely.area(polygon_geometries)
-    mask = areas >= OVERTURE_MIN_BUILDING_AREA_M2
+    mask = areas >= min_building_area_m2
     if not mask.all():
         polygon_geometries = polygon_geometries[mask]
     del areas
@@ -135,16 +127,18 @@ def _pipeline_signature(
     buffer_m: float,
     limit: int,
     epsg: int,
+    config: OvertureConfig,
 ) -> str:
     """Стабильная сигнатура контекста для кэша Overture."""
     return hashlib.sha256(
         (
-            f"v={OVERTURE_CACHE_VERSION}|"
+            f"v={config.cache_version}|"
             f"files={_file_signature(paths)}|"
             f"bbox={tuple(float(v) for v in qbbox)}|"
             f"buffer={buffer_m:.6f}|"
             f"limit={int(limit or 0)}|"
-            f"epsg={epsg}"
+            f"epsg={epsg}|"
+            f"algorithm={config.algorithm_signature()}"
         ).encode()
     ).hexdigest()[:16]
 
@@ -155,6 +149,7 @@ def _build_pipeline(
     buffer_m: float,
     limit: int,
     city: str,
+    config: OvertureConfig,
 ) -> tuple[_OvertureContext, np.ndarray, int] | None:
     """Проецирует bbox, загружает и фильтрует здания, строит индекс и контекст.
 
@@ -167,7 +162,7 @@ def _build_pipeline(
     epsg, qbbox = projected
 
     polygon_geometries, epsg_loaded = load_overture_geometries(
-        paths, qbbox, limit, epsg
+        paths, qbbox, limit, epsg, config=config
     )
     if (
         polygon_geometries is None
@@ -178,7 +173,9 @@ def _build_pipeline(
         return None
 
     polygon_geometries = np.asarray(polygon_geometries, dtype=object)
-    polygon_geometries = _filter_buildings(polygon_geometries)
+    polygon_geometries = _filter_buildings(
+        polygon_geometries, config.min_building_area_m2
+    )
     if len(polygon_geometries) == 0:
         logger.warning("Overture: после фильтрации зданий не осталось")
         return None
@@ -187,9 +184,11 @@ def _build_pipeline(
         "Overture: %d зданий, строим пространственный индекс...",
         len(polygon_geometries),
     )
+    polygon_geometries = np.asarray(polygon_geometries, dtype=object)
+    polygon_geometries.flags.writeable = False
     tree = STRtree(polygon_geometries)
 
-    sig = _pipeline_signature(paths, qbbox, buffer_m, limit, epsg)
+    sig = _pipeline_signature(paths, qbbox, buffer_m, limit, epsg, config)
 
     ctx = _OvertureContext(
         polygon_geometries=polygon_geometries,
@@ -198,9 +197,7 @@ def _build_pipeline(
         buffer_m=buffer_m,
         city=city,
         sig=sig,
-        assume_no_overlap=OVERTURE_ASSUME_NO_OVERLAP,
-        use_coverage_union=OVERTURE_USE_COVERAGE_UNION,
-        union_grid_size=OVERTURE_UNION_GRID_SIZE,
+        config=config,
     )
     return ctx, polygon_geometries, epsg
 
@@ -257,11 +254,13 @@ def _effective_workers(num_workers: int | None, route_count: int) -> int:
     return max(1, int(num_workers))
 
 
-def _thread_batch_size(route_count: int, num_workers: int) -> int:
-    if OVERTURE_THREAD_BATCH_SIZE > 0:
-        return OVERTURE_THREAD_BATCH_SIZE
+def _thread_batch_size(
+    route_count: int, num_workers: int, config: OvertureConfig
+) -> int:
+    if config.thread_batch_size > 0:
+        return config.thread_batch_size
     auto_size = route_count // (num_workers * 4)
-    return max(1, min(OVERTURE_THREAD_BATCH_MAX, auto_size))
+    return max(1, min(config.thread_batch_max, auto_size))
 
 
 def _run_parallel(
@@ -274,7 +273,7 @@ def _run_parallel(
 ) -> tuple[dict[int, OvertureStats], dict[tuple[int, int], OvertureStats]]:
     """Параллельная потоковая обработка батчей маршрутов."""
     num_workers = _effective_workers(num_workers, len(routes))
-    batch_size = _thread_batch_size(len(routes), num_workers)
+    batch_size = _thread_batch_size(len(routes), num_workers, ctx.config)
     batches = list(_chunks(routes, batch_size))
     logger.info(
         "Overture: параллельная обработка %d маршрутов, %d потоков, %d батчей по ~%d маршрутов...",
@@ -287,6 +286,7 @@ def _run_parallel(
     state = _WorkerState(
         ctx=ctx,
         transformer=None,
+        transformer_local=threading.local(),
         cache=cache,
         write_cache=False,
         cache_lock=cache_lock,
@@ -322,6 +322,7 @@ def _run_sequential(
     state = _WorkerState(
         ctx=ctx,
         transformer=transformer,
+        transformer_local=None,
         cache=cache,
         write_cache=True,
         cache_lock=None,
@@ -362,23 +363,28 @@ def _normalize_inputs(
 
 
 def _overture_meta(
-    buffer_m: float, n_buildings: int, epsg: int, release: str | None
+    buffer_m: float,
+    n_buildings: int,
+    epsg: int,
+    release: str | None,
+    config: OvertureConfig,
 ) -> dict[str, Any]:
     """Метаданные расчёта для отчёта/кэша."""
     return {
         "buffer_m": buffer_m,
         "buildings": n_buildings,
         "epsg": epsg,
-        "cache_version": OVERTURE_CACHE_VERSION,
+        "cache_version": config.cache_version,
         "release": _resolve_overture_release(release) or "latest",
         "shapely_version": str(shapely.__version__),
-        "assume_no_overlap": OVERTURE_ASSUME_NO_OVERLAP,
-        "use_coverage_union": OVERTURE_USE_COVERAGE_UNION,
-        "union_grid_size": OVERTURE_UNION_GRID_SIZE,
-        "min_building_area_m2": OVERTURE_MIN_BUILDING_AREA_M2,
-        "thread_batch_size": OVERTURE_THREAD_BATCH_SIZE,
-        "buffer_cache_max_size": OVERTURE_BUFFER_CACHE_MAX_SIZE,
-        "projection_chunk_size": OVERTURE_PROJECTION_CHUNK_SIZE,
+        "assume_no_overlap": config.assume_no_overlap,
+        "use_coverage_union": config.use_coverage_union,
+        "union_grid_size": config.union_grid_size,
+        "min_building_area_m2": config.min_building_area_m2,
+        "thread_batch_size": config.thread_batch_size,
+        "buffer_cache_max_size": config.buffer_cache_max_size,
+        "projection_chunk_size": config.projection_chunk_size,
+        "algorithm_signature": config.algorithm_signature(),
     }
 
 
@@ -393,24 +399,26 @@ def compute_overture(
     parallel: bool = True,
     num_workers: int | None = None,
     release: str | None = None,
+    config: OvertureConfig | None = None,
 ) -> tuple[
     dict[int, OvertureStats],
     dict[str, Any] | None,
     dict[tuple[int, int], OvertureStats],
 ]:
     """Считает площади зданий Overture в буферах маршрутов города."""
+    config = config or OvertureConfig.from_env()
     normalized = _normalize_inputs(buffer_m, bbox, routes, overture_path)
     if normalized is None:
         return {}, None, {}
     buffer_m, bbox_val, routes, paths = normalized
 
     try:
-        pipeline = _build_pipeline(paths, bbox_val, buffer_m, limit, city)
+        pipeline = _build_pipeline(paths, bbox_val, buffer_m, limit, city, config)
         if pipeline is None:
             return {}, None, {}
         ctx, polygon_geometries, epsg = pipeline
 
-        buffer_cache = LRUCache(max_size=OVERTURE_BUFFER_CACHE_MAX_SIZE)
+        buffer_cache = LRUCache(max_size=config.buffer_cache_max_size)
         buffer_cache_lock = threading.RLock()
 
         if parallel and len(routes) > 1:
@@ -422,14 +430,21 @@ def compute_overture(
                 routes, ctx, cache, epsg, buffer_cache, buffer_cache_lock
             )
 
-        meta = _overture_meta(buffer_m, len(polygon_geometries), epsg, release)
+        meta = _overture_meta(
+            buffer_m, len(polygon_geometries), epsg, release, config
+        )
     except MemoryError:
         logger.warning("Overture: недостаточно памяти для обработки зданий")
         logger.exception("Overture: MemoryError")
-        return {}, None, {}
+        return {}, {"status": "error", "error_type": "MemoryError"}, {}
     except Exception as exc:
         logger.warning("Overture: ошибка при вычислении: %s", exc)
         logger.exception("Overture: исключение")
-        return {}, None, {}
+        return {}, {
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "cache_signature": getattr(locals().get("ctx"), "sig", None),
+        }, {}
     else:
         return stats, meta, dir_stats_map
