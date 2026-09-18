@@ -286,7 +286,6 @@ def _run_parallel(
     state = _WorkerState(
         ctx=ctx,
         transformer=None,
-        transformer_local=threading.local(),
         cache=cache,
         write_cache=False,
         cache_lock=cache_lock,
@@ -322,7 +321,6 @@ def _run_sequential(
     state = _WorkerState(
         ctx=ctx,
         transformer=transformer,
-        transformer_local=None,
         cache=cache,
         write_cache=True,
         cache_lock=None,
