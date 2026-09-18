@@ -179,3 +179,107 @@ def test_stac_downloads_ranges_and_passes_retry_budget(monkeypatch):
     assert calls[1][0] == 4
     assert all(call[1] == 7 for call in calls)
     assert all(call[3] == 1 for call in calls)
+
+def test_stac_collection_json_fallback_filters_by_bbox(monkeypatch):
+    import json
+    import overture.http as http
+
+    collection_url = "https://stac.overturemaps.org/2026-08-19.0/places/place/collection.json"
+    collection = {
+        "extent": {
+            "spatial": {
+                "bbox": [
+                    [-10.0, -10.0, 20.0, 20.0],
+                    [37.0, 54.0, 38.0, 55.0],
+                    [40.0, 56.0, 41.0, 57.0],
+                ]
+            }
+        },
+        "links": [
+            {"rel": "item", "href": "./part-a/part-a.json"},
+            {"rel": "item", "href": "./part-b/part-b.json"},
+        ],
+    }
+    item_a = {
+        "assets": {
+            "aws": {
+                "alternate": {
+                    "s3": {
+                        "href": "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/part-a.parquet"
+                    }
+                }
+            }
+        }
+    }
+    item_b = {
+        "assets": {
+            "aws": {
+                "alternate": {
+                    "s3": {
+                        "href": "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/part-b.parquet"
+                    }
+                }
+            }
+        }
+    }
+
+    payloads = {
+        collection_url: collection,
+        "https://stac.overturemaps.org/2026-08-19.0/places/place/part-a/part-a.json": item_a,
+        "https://stac.overturemaps.org/2026-08-19.0/places/place/part-b/part-b.json": item_b,
+    }
+
+    calls = []
+
+    def fake_get(url, timeout, retries, retry_delay):
+        calls.append(url)
+        return json.dumps(payloads[url]).encode()
+
+    monkeypatch.setattr(http, "_http_get_stac", fake_get)
+
+    keys = http._http_resolve_stac_part_files_via_collection(
+        "2026-08-19.0",
+        "places",
+        "place",
+        (54.5, 37.5, 55.5, 38.5),
+        retries=1,
+        retry_delay=0,
+    )
+
+    assert keys == [
+        "overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/part-a.parquet"
+    ]
+    assert calls == [
+        collection_url,
+        "https://stac.overturemaps.org/2026-08-19.0/places/place/part-a/part-a.json",
+    ]
+
+
+def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
+    import overture.http as http
+
+    calls = []
+
+    def fake_get_stac(url, timeout, retries, retry_delay):
+        calls.append(url)
+        raise TimeoutError("read operation timed out")
+
+    def fake_collection(*args, **kwargs):
+        calls.append("collection-fallback")
+        return ["bucket/relevant.parquet"]
+
+    monkeypatch.setattr(http, "_http_get_stac", fake_get_stac)
+    monkeypatch.setattr(http, "_http_resolve_stac_part_files_via_collection", fake_collection)
+
+    keys = http._http_resolve_stac_part_files(
+        "2026-08-19.0",
+        "places",
+        "place",
+        (54.5, 37.5, 55.5, 38.5),
+        retries=1,
+        retry_delay=0,
+    )
+
+    assert keys == ["bucket/relevant.parquet"]
+    assert calls[0].endswith("/2026-08-19.0/collections.parquet")
+    assert calls[1] == "collection-fallback"
