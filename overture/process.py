@@ -1,4 +1,4 @@
-"""Построение буферов направлений и потоковая обработка маршрутов Overture."""
+"""Построение буферов направлений и обработка маршрутов Overture."""
 
 import contextlib
 import hashlib
@@ -12,28 +12,29 @@ import shapely
 from shapely.errors import GEOSException
 from shapely.geometry import LineString
 
-from ..cache import JsonCache
-from ..metrics import OvertureStats
-from ..models import RouteData
-from ..units import dir_geo_sig
-from .cache import LRUCache, _cache_get, _cache_put, _stats_from_cached
-from .context import _OvertureContext
-from .geometry import _intersection_union_area, _query_tree
-from .settings import (
-    OVERTURE_BUFFER_QUAD_SEGS,
-    OVERTURE_DIRECTIONS_LATLON,
-    OVERTURE_LINE_SIMPLIFY_M,
+from .adapters import OvertureStats, dir_geo_sig
+from .ports import CachePort, RoutePort
+from .cache import (
+    LRUCache,
+    _cache_get,
+    _cache_put,
+    _route_stats_from_cached,
+    _stats_from_cached,
+    _stats_to_cached,
 )
+from .context import _OvertureContext
+from .geometry import _intersection_union_area_and_count, _query_tree
 
 logger = logging.getLogger("wikiroutes.gis.overture")
+_TRANSFORMER_LOCAL = threading.local()
 
 
-def _direction_xy(direction: Any) -> np.ndarray | None:
+def _direction_xy(direction: Any, directions_latlon: bool) -> np.ndarray | None:
     """Координаты направления в порядке (lon, lat) как numpy-массив."""
     coords = list(getattr(direction, "coords", []))
     if len(coords) < 2:
         return None
-    if OVERTURE_DIRECTIONS_LATLON:
+    if directions_latlon:
         return np.asarray([(float(c[1]), float(c[0])) for c in coords], dtype=float)
     return np.asarray([(float(c[0]), float(c[1])) for c in coords], dtype=float)
 
@@ -47,47 +48,75 @@ def _utm_line_for(xy: np.ndarray, transformer: Any) -> Any | None:
     return line_utm
 
 
-def _buffer_utm_line(line_utm: Any, buffer_m: float) -> Any | None:
+def _buffer_utm_line(
+    line_utm: Any,
+    buffer_m: float,
+    line_simplify_m: float,
+    buffer_quad_segs: int,
+) -> Any | None:
     """Упрощает линию (при необходимости) и строит буфер направления."""
-    if OVERTURE_LINE_SIMPLIFY_M > 0 and line_utm.length > OVERTURE_LINE_SIMPLIFY_M * 2:
+    if line_simplify_m > 0 and line_utm.length > line_simplify_m * 2:
         with contextlib.suppress(GEOSException, TypeError, ValueError, RuntimeError):
             line_utm = line_utm.simplify(
-                OVERTURE_LINE_SIMPLIFY_M, preserve_topology=True
+                line_simplify_m, preserve_topology=True
             )
-    buf = line_utm.buffer(buffer_m, quad_segs=OVERTURE_BUFFER_QUAD_SEGS)
+    buf = line_utm.buffer(buffer_m, quad_segs=buffer_quad_segs)
     return buf if buf is not None and not buf.is_empty else None
 
 
 def _overture_direction_buffer(
-    direction: Any, transformer: Any, buffer_m: float
+    direction: Any,
+    transformer: Any,
+    buffer_m: float,
+    *,
+    directions_latlon: bool,
+    line_simplify_m: float,
+    buffer_quad_segs: int,
 ) -> Any:
-    xy = _direction_xy(direction)
+    xy = _direction_xy(direction, directions_latlon)
     if xy is None:
         return None
     line_utm = _utm_line_for(xy, transformer)
     if line_utm is None:
         return None
-    return _buffer_utm_line(line_utm, buffer_m)
+    return _buffer_utm_line(
+        line_utm,
+        buffer_m,
+        line_simplify_m,
+        buffer_quad_segs,
+    )
 
 
-# ---------------------------------------------------------------------------
-# Обработка одного маршрута
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class _WorkerState:
-    """Потоковое состояние батча, общее для всех обрабатываемых маршрутов."""
+    """Состояние обработки батча, общее для всех маршрутов батча."""
 
     ctx: _OvertureContext
     transformer: Any
-    cache: JsonCache | None
+    cache: CachePort | None
     write_cache: bool
     cache_lock: threading.RLock | None
     buffer_cache: LRUCache
     buffer_cache_lock: threading.RLock
 
 
-def _direction_signatures(rd: RouteData) -> list[str]:
-    """Геометрические подписи направлений маршрута (с фолбэком на хеш coords)."""
+def _get_thread_transformer(epsg: int) -> Any:
+    """Кэширует Transformer на рабочий поток вместо создания на каждый батч."""
+    current = getattr(_TRANSFORMER_LOCAL, "transformer", None)
+    current_epsg = getattr(_TRANSFORMER_LOCAL, "epsg", None)
+    if current is None or current_epsg != epsg:
+        from pyproj import Transformer
+
+        current = Transformer.from_crs(
+            "EPSG:4326", f"EPSG:{epsg}", always_xy=True
+        )
+        _TRANSFORMER_LOCAL.transformer = current
+        _TRANSFORMER_LOCAL.epsg = epsg
+    return current
+
+
+def _direction_signatures(rd: RoutePort) -> list[str]:
+    """Геометрические подписи направлений маршрута."""
     dir_sigs: list[str] = []
     for d in rd.directions:
         try:
@@ -99,17 +128,37 @@ def _direction_signatures(rd: RouteData) -> list[str]:
     return dir_sigs
 
 
+def _route_cache_key(ctx: _OvertureContext, route_geo_sig: str) -> str:
+    """Ключ результата маршрута не зависит от route_id: важна только геометрия."""
+    return f"route_{ctx.sig}_{route_geo_sig}"
+
+
+def _direction_cache_key(
+    ctx: _OvertureContext, direction_geo_sig: str
+) -> str:
+    """Ключ результата направления не зависит от номера маршрута."""
+    return f"direction_{ctx.sig}_{direction_geo_sig}"
+
+
 def _build_cached_direction_buffer(
     d: Any, sig: str, key: str, state: _WorkerState
 ) -> Any | None:
-    """Возвращает канонический буфер направления (общий LRU, double-checked lock)."""
+    """Возвращает канонический буфер направления из общего LRU."""
     with state.buffer_cache_lock:
         buf = state.buffer_cache.get(sig)
     if buf is not None:
         return buf
 
     try:
-        buf = _overture_direction_buffer(d, state.transformer, state.ctx.buffer_m)
+        cfg = state.ctx.config
+        buf = _overture_direction_buffer(
+            d,
+            state.transformer,
+            state.ctx.buffer_m,
+            directions_latlon=cfg.directions_latlon,
+            line_simplify_m=cfg.line_simplify_m,
+            buffer_quad_segs=cfg.buffer_quad_segs,
+        )
     except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
         logger.exception("Overture: ошибка построения буфера для %s", key)
         return None
@@ -120,8 +169,7 @@ def _build_cached_direction_buffer(
         GEOSException, TypeError, ValueError, AttributeError, RuntimeError
     ):
         shapely.prepare(buf)
-    # Вставляем в кэш под локом с повторной проверкой (double-checked locking):
-    # если другой поток уже построил тот же буфер — переиспользуем канонический.
+
     with state.buffer_cache_lock:
         existing = state.buffer_cache.get(sig)
         if existing is None:
@@ -144,24 +192,21 @@ def _process_direction(
         return OvertureStats(ok=False), None, None
 
     idxs = _query_tree(buffered, state.ctx)
-    area, had_error = _intersection_union_area(buffered, idxs, state.ctx)
+    area, had_error, count = _intersection_union_area_and_count(
+        buffered, idxs, state.ctx
+    )
     st = OvertureStats(
         total_area_m2=area,
         corridor_m2=float(shapely.area(buffered)),
-        count=len(idxs),
+        count=count,
         ok=not had_error,
     )
-    entry = {
-        "total_area_m2": st.total_area_m2,
-        "corridor_m2": st.corridor_m2,
-        "count": st.count,
-        "ok": st.ok,
-    }
+    entry = _stats_to_cached(st) if st.ok else None
     return st, entry, buffered
 
 
 def _aggregate_route_stats(
-    rd: RouteData,
+    rd: RoutePort,
     route_buffers: list[Any],
     direction_stats: list[OvertureStats],
     route_buffer_missing: bool,
@@ -173,16 +218,13 @@ def _aggregate_route_stats(
             route_buffer = route_buffers[0]
         else:
             route_buffer = shapely.union_all(route_buffers)
-            # ИСПРАВЛЕНО (M-02): prepare только для свеже-созданного union.
-            # Одиночный буфер — это разделяемый кэшированный объект, он уже
-            # подготовлен при вставке в кэш; повторный prepare вызывал гонку.
             with contextlib.suppress(
                 GEOSException, TypeError, ValueError, AttributeError, RuntimeError
             ):
                 shapely.prepare(route_buffer)
 
         idxs = _query_tree(route_buffer, state.ctx)
-        route_area, route_error = _intersection_union_area(
+        route_area, route_error, route_count = _intersection_union_area_and_count(
             route_buffer, idxs, state.ctx
         )
         route_ok = (
@@ -190,26 +232,22 @@ def _aggregate_route_stats(
             and all(st.ok for st in direction_stats)
             and not route_buffer_missing
         )
+        # count и площадь используют один и тот же набор зданий с
+        # положительной площадью пересечения, без «касания границы».
         route_stats = OvertureStats(
             total_area_m2=route_area,
             corridor_m2=float(shapely.area(route_buffer)),
-            count=sum(st.count for st in direction_stats),
+            count=route_count,
             ok=route_ok,
         )
-        route_entry = {
-            "total_area_m2": route_stats.total_area_m2,
-            "corridor_m2": route_stats.corridor_m2,
-            "count": route_stats.count,
-            "ok": route_stats.ok,
-        }
-        return route_stats, route_entry
+        return route_stats, _stats_to_cached(route_stats) if route_stats.ok else None
     except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
         logger.exception("Overture: ошибка агрегации маршрута %s", rd.route_id)
         return OvertureStats(ok=False), None
 
 
 def _process_single_route(
-    rd: RouteData,
+    rd: RoutePort,
     state: _WorkerState,
 ) -> tuple[
     OvertureStats, dict[tuple[int, int], OvertureStats], dict[str, dict[str, Any]]
@@ -219,7 +257,29 @@ def _process_single_route(
 
     dir_sigs = _direction_signatures(rd)
     route_geo_sig = hashlib.sha256(";".join(dir_sigs).encode()).hexdigest()[:16]
-    route_key = f"{state.ctx.city}_{rd.route_id}_route_{state.ctx.sig}_{route_geo_sig}"
+    route_key = _route_cache_key(state.ctx, route_geo_sig)
+
+    # Route-cache теперь полноценный: при попадании не требуется даже строить
+    # буферы — ключ определяется только dataset/config + геометрией маршрута.
+    cached_route = (
+        _cache_get(state.cache, state.cache_lock, route_key)
+        if state.cache is not None
+        else None
+    )
+    if cached_route is not None:
+        parsed = _route_stats_from_cached(cached_route)
+        if parsed is not None:
+            route_stats, cached_dirs = parsed
+            if route_stats.ok and len(cached_dirs) == len(rd.directions) and all(
+                st.ok for st in cached_dirs.values()
+            ):
+                # Кэш содержит только успешный результат; route_id подставляется
+                # на чтении, потому что ключ построен по геометрии.
+                dir_stats_map = {
+                    (rd.route_id, di): st
+                    for di, st in cached_dirs.items()
+                }
+                return route_stats, dir_stats_map, {}
 
     direction_stats: list[OvertureStats] = []
     dir_stats_map: dict[tuple[int, int], OvertureStats] = {}
@@ -229,7 +289,7 @@ def _process_single_route(
     route_buffer_missing = False
 
     for di, d in enumerate(rd.directions):
-        key = f"{state.ctx.city}_{rd.route_id}_{di}_{state.ctx.sig}_{dir_sigs[di]}"
+        key = _direction_cache_key(state.ctx, dir_sigs[di])
         cached = (
             _cache_get(state.cache, state.cache_lock, key)
             if state.cache is not None
@@ -255,7 +315,19 @@ def _process_single_route(
         rd, route_buffers, direction_stats, route_buffer_missing, state
     )
     if route_entry is not None:
-        _store_cache_entry(state, route_key, route_entry, cache_entries)
+        # route cache хранит обе части результата в одном атомарном payload.
+        _store_cache_entry(
+            state,
+            route_key,
+            {
+                "route": route_entry,
+                "directions": {
+                    str(di): _stats_to_cached(st)
+                    for di, st in enumerate(direction_stats)
+                },
+            },
+            cache_entries,
+        )
     return route_stats, dir_stats_map, cache_entries
 
 
@@ -265,16 +337,12 @@ def _store_cache_entry(
     entry: dict[str, Any],
     cache_entries: dict[str, dict[str, Any]],
 ) -> None:
-    """Кладёт cache-entry в общий кэш (write-режим) или в отложенные записи."""
     if state.write_cache and state.cache is not None:
         _cache_put(state.cache, state.cache_lock, key, entry)
     else:
         cache_entries[key] = entry
 
 
-# ---------------------------------------------------------------------------
-# Батчи для потоковой обработки
-# ---------------------------------------------------------------------------
 def _chunks(seq: Any, size: int) -> Any:
     if size <= 0:
         yield seq
@@ -284,18 +352,14 @@ def _chunks(seq: Any, size: int) -> Any:
 
 
 def _thread_batch_worker(
-    batch: list[RouteData],
+    batch: list[RoutePort],
     state: _WorkerState,
 ) -> tuple[
     dict[int, OvertureStats],
     dict[tuple[int, int], OvertureStats],
     dict[str, dict[str, Any]],
 ]:
-    from pyproj import Transformer
-
-    transformer = Transformer.from_crs(
-        "EPSG:4326", f"EPSG:{state.ctx.epsg}", always_xy=True
-    )
+    transformer = _get_thread_transformer(state.ctx.epsg)
     state = replace(state, transformer=transformer)
 
     stats: dict[int, OvertureStats] = {}
@@ -314,3 +378,4 @@ def _thread_batch_worker(
             )
             stats[rd.route_id] = OvertureStats(ok=False)
     return stats, dir_stats_map, cache_entries
+

@@ -5,13 +5,16 @@ from dataclasses import dataclass
 import numpy as np
 from shapely import STRtree
 
+from .config import OvertureConfig
 
-# ---------------------------------------------------------------------------
-# Контекст вычислений (shared между потоками, read-only)
-# ---------------------------------------------------------------------------
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class _OvertureContext:
-    """Неизменяемый контекст вычислений, разделяемый между потоками."""
+    """Неизменяемый контекст вычислений, разделяемый между потоками.
+
+    Массив геометрий делается read-only перед публикацией контекста; конфигурация
+    и индекс входят в единый снимок состояния pipeline.
+    """
 
     polygon_geometries: np.ndarray
     tree: STRtree
@@ -19,6 +22,4 @@ class _OvertureContext:
     buffer_m: float
     city: str
     sig: str
-    assume_no_overlap: bool = False
-    use_coverage_union: bool = False
-    union_grid_size: float | None = None
+    config: OvertureConfig

@@ -474,44 +474,68 @@ def _intersection_union_area_loop(
     return 0.0, True
 
 
+def _count_positive_intersections_loop(
+    buf: Any,
+    candidate_indices: np.ndarray,
+    ctx: _OvertureContext,
+) -> int:
+    """Скалярно считает здания, дающие положительную площадь пересечения."""
+    idxs = np.asarray(candidate_indices, dtype=np.intp)
+    if idxs.size == 0:
+        return 0
+    geoms = ctx.polygon_geometries[idxs]
+    count = 0
+    for position in range(len(idxs)):
+        try:
+            inter = shapely.intersection(geoms[position], buf)
+            if inter is not None and not shapely.is_empty(inter) and shapely.area(inter) > 0:
+                count += 1
+        except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
+            continue
+    return count
+
+
+def _intersection_union_area_and_count(
+    buf: Any,
+    candidate_indices: np.ndarray,
+    ctx: _OvertureContext,
+) -> tuple[float, bool, int]:
+    """Вычисляет площадь объединения и число зданий с положительной площадью пересечения."""
+    idxs = np.asarray(candidate_indices, dtype=np.intp)
+    if idxs.size == 0:
+        return 0.0, False, 0
+
+    try:
+        candidates = ctx.polygon_geometries[idxs]
+        valid_intersections, areas = _compute_intersections_and_areas(candidates, buf)
+        count = int(valid_intersections.size)
+        if count == 0:
+            return 0.0, False, 0
+
+        if ctx.assume_no_overlap:
+            return float(areas.sum()), False, count
+
+        if count == 1:
+            return float(areas[0]), False, 1
+
+        merged = _union_intersections(valid_intersections, ctx)
+        if merged is None or shapely.is_empty(merged):
+            return 0.0, False, count
+
+        return float(shapely.area(merged)), False, count
+    except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
+        logger.exception("Overture: vectorized intersection failed, fallback to loop")
+        area, had_error = _intersection_union_area_loop(buf, idxs, ctx)
+        return area, had_error, _count_positive_intersections_loop(buf, idxs, ctx)
+
+
 def _intersection_union_area(
     buf: Any,
     candidate_indices: np.ndarray,
     ctx: _OvertureContext,
 ) -> tuple[float, bool]:
-    """
-    Вычисляет площадь объединения пересечений буфера с геометриями.
-    Возвращает (площадь, флаг ошибки).
-    """
-    idxs = np.asarray(candidate_indices, dtype=np.intp)
-    if idxs.size == 0:
-        return 0.0, False
-
-    try:
-        # Получаем геометрии кандидатов
-        candidates = ctx.polygon_geometries[idxs]
-
-        # Векторизованное пересечение и площади
-        valid_intersections, areas = _compute_intersections_and_areas(candidates, buf)
-
-        if valid_intersections.size == 0:
-            return 0.0, False
-
-        # Если предполагаем отсутствие перекрытий, суммируем площади
-        if ctx.assume_no_overlap:
-            return float(areas.sum()), False
-
-        # Оптимизация для одного объекта
-        if valid_intersections.size == 1:
-            return float(areas[0]), False
-
-        # Объединение пересечений с учётом перекрытий
-        merged = _union_intersections(valid_intersections, ctx)
-        if merged is None or shapely.is_empty(merged):
-            return 0.0, False
-
-        return float(shapely.area(merged)), False
-
-    except (GEOSException, TypeError, ValueError, AttributeError, RuntimeError):
-        logger.exception("Overture: vectorized intersection failed, fallback to loop")
-        return _intersection_union_area_loop(buf, idxs, ctx)
+    """Совместимый API площади: площадь объединения + флаг ошибки."""
+    area, had_error, _count = _intersection_union_area_and_count(
+        buf, candidate_indices, ctx
+    )
+    return area, had_error

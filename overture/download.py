@@ -2,7 +2,9 @@
 
 import contextlib
 import logging
+import os
 import re
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import _safe_bbox_key
+from .release import OvertureReleaseError, resolve_overture_release
 from .http import (
     _download_overture_parts,
     _http_resolve_stac_part_files,
@@ -19,7 +22,6 @@ from .http import (
 from .settings import (
     OVERTURE_CACHE_VERSION,
     OVERTURE_THEME_ALIASES,
-    _resolve_overture_release,
 )
 
 logger = logging.getLogger("wikiroutes.gis.overture")
@@ -128,9 +130,13 @@ def _prepare_auto_download(
 
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_key = _safe_bbox_key((min_lat, min_lon, max_lat, max_lon))
-    effective_release = _resolve_overture_release(release)
-    release_key = effective_release or "latest"
+    try:
+        effective_release = resolve_overture_release(release)
+    except OvertureReleaseError as exc:
+        logger.warning("Overture: %s", exc)
+        return None
     package_version = getattr(overturemaps, "__version__", "unknown")
+    release_key = effective_release
 
     cache_name = build_overture_cache_name(
         normalized_theme, package_version, release_key, bbox_key
@@ -147,6 +153,96 @@ def _prepare_auto_download(
         release_key=release_key,
         cache_file=cache_file,
     )
+
+
+
+def _download_backend_order(backend: str) -> list[str]:
+    """Возвращает каскад транспортов для выбранного режима."""
+    normalized = backend.strip().lower()
+    if normalized == "auto":
+        return ["duckdb_s3", "duckdb_azure", "http"]
+    if normalized in {"duckdb_s3", "duckdb_azure", "http"}:
+        return [normalized]
+    raise ValueError(f"Неизвестный Overture download backend: {backend!r}")
+
+
+def _duckdb_download_overture_place(
+    theme: str,
+    bbox: tuple[float, float, float, float],
+    release: str,
+    output_dir: str | Path,
+    *,
+    provider: str,
+) -> Any | None:
+    """Читает Overture напрямую из облака через DuckDB, без STAC."""
+    import geopandas as gpd
+    import duckdb
+
+    if theme != "place":
+        raise ValueError(f"DuckDB-загрузка поддерживает только тему place, получено {theme!r}")
+
+    min_lat, min_lon, max_lat, max_lon = bbox
+    target = Path(output_dir) / f".overture_{uuid.uuid4().hex}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if provider == "duckdb_s3":
+        source = (
+            f"s3://overturemaps-us-west-2/release/{release}/"
+            "theme=places/type=place/*"
+        )
+    elif provider == "duckdb_azure":
+        source = (
+            f"az://overturemapswestus2.blob.core.windows.net/release/{release}/"
+            "theme=places/type=place/*"
+        )
+    else:
+        raise ValueError(f"Неизвестный DuckDB provider: {provider}")
+
+    def sql_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute("LOAD spatial")
+        if provider == "duckdb_s3":
+            conn.execute("LOAD httpfs")
+            conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+        else:
+            conn.execute("LOAD azure")
+            conn.execute("SET azure_transport_option_type='curl'")
+            conn.execute("CREATE SECRET overture_azure (TYPE azure, PROVIDER config, ACCOUNT_NAME 'overturemapswestus2')")
+
+        query = (
+            "COPY ("
+            " SELECT *"
+            f" FROM read_parquet({sql_literal(source)}, filename=true, hive_partitioning=1)"
+            f" WHERE bbox.xmin < {max_lon}"
+            f"   AND bbox.xmax > {min_lon}"
+            f"   AND bbox.ymin < {max_lat}"
+            f"   AND bbox.ymax > {min_lat}"
+            f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
+        )
+        logger.info("Overture: DuckDB %s → %s", provider, source)
+        started = time.monotonic()
+        conn.execute(query)
+        elapsed = max(time.monotonic() - started, 1e-9)
+        if not target.exists() or target.stat().st_size <= 0:
+            return None
+        size_mb = target.stat().st_size / (1024 * 1024)
+        logger.info(
+            "Overture: DuckDB %s: %.1f МБ за %.1f с (%.2f МБ/с)",
+            provider,
+            size_mb,
+            elapsed,
+            size_mb / elapsed,
+        )
+
+        gdf = gpd.read_parquet(target)
+        return gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
+    finally:
+        conn.close()
+        with contextlib.suppress(OSError):
+            target.unlink()
 
 
 def _http_download_overture_place(
@@ -168,9 +264,7 @@ def _http_download_overture_place(
         raise ValueError(f"HTTP-загрузка поддерживает только тему 'place', получено {theme!r}")
 
     if release is None:
-        import overturemaps
-
-        release = overturemaps.core.get_latest_release()
+        raise ValueError("effective release должен быть разрешён до HTTP-загрузки")
 
     keys = _http_resolve_stac_part_files(
         release,
@@ -200,31 +294,58 @@ def _http_download_overture_place(
     return _read_overture_parts(local_files, bbox_filter, gpd)
 
 
+
 def _fetch_and_write_auto(
     spec: _AutoDownloadSpec,
     retries: int,
     retry_delay: float,
+    backend: str,
 ) -> str | None:
-    """Скачивает тему по HTTP, пишет атомарно в кэш и возвращает путь к файлу."""
+    """Скачивает тему выбранным транспортом, пишет атомарный локальный кэш."""
     spec.cache_file.parent.mkdir(parents=True, exist_ok=True)
-    gdf = _http_download_overture_place(
-        spec.theme,
-        bbox=spec.bbox,
-        release=spec.effective_release,
-        cache_dir=spec.cache_file.parent,
-        retries=retries,
-        retry_delay=retry_delay,
-    )
-    if gdf is None:
-        logger.warning("Overture: не удалось загрузить данные '%s'", spec.theme)
-        return None
-    if len(gdf) == 0:
-        logger.warning("Overture: не найдено объектов в bbox")
-        return None
 
-    _write_geoparquet_atomic(gdf, spec.cache_file)
-    logger.info("Overture: %d объектов → %s", len(gdf), spec.cache_file)
-    return str(spec.cache_file)
+    backends = _download_backend_order(backend)
+    last_exc: Exception | None = None
+    for current in backends:
+        try:
+            if current in {"duckdb_s3", "duckdb_azure"}:
+                gdf = _duckdb_download_overture_place(
+                    spec.theme,
+                    bbox=spec.bbox,
+                    release=spec.effective_release or spec.release_key,
+                    output_dir=spec.cache_file.parent,
+                    provider=current,
+                )
+            elif current == "http":
+                gdf = _http_download_overture_place(
+                    spec.theme,
+                    bbox=spec.bbox,
+                    release=spec.effective_release,
+                    cache_dir=spec.cache_file.parent,
+                    retries=retries,
+                    retry_delay=retry_delay,
+                )
+            else:
+                raise ValueError(f"Неизвестный Overture download backend: {backend!r}")
+
+            if gdf is not None:
+                if len(gdf) == 0:
+                    return None
+                _write_geoparquet_atomic(gdf, spec.cache_file)
+                logger.info("Overture: %d объектов → %s", len(gdf), spec.cache_file)
+                return str(spec.cache_file)
+        except ImportError as exc:
+            last_exc = exc
+            logger.warning("Overture: транспорт %s недоступен: %s", current, exc)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("Overture: транспорт %s не сработал: %s", current, exc)
+            if backend != "auto":
+                raise
+
+    if last_exc is not None and backend != "auto":
+        raise last_exc
+    return None
 
 
 def auto_download_overture(
@@ -234,12 +355,17 @@ def auto_download_overture(
     release: str | None = None,
     retries: int = 0,
     retry_delay: float = 2.0,
+    backend: str | None = None,
 ) -> str | None:
     """Автоматически скачивает тему Overture в локальный кэш (или читает кэш)."""
     spec = _prepare_auto_download(bbox, theme, release, cache_dir)
     if spec is None:
         return None
     retries = max(retries, 0)
+    backend = (backend or os.getenv("OVERTURE_DOWNLOAD_BACKEND", "auto")).strip().lower()
+    if backend not in {"auto", "duckdb_s3", "duckdb_azure", "http"}:
+        logger.warning("Overture: неизвестный download backend %r; используем auto", backend)
+        backend = "auto"
 
     if spec.cache_file.exists():
         logger.info("Overture: кэш найден: %s", spec.cache_file)
@@ -253,7 +379,7 @@ def auto_download_overture(
     )
 
     try:
-        return _fetch_and_write_auto(spec, retries, retry_delay)
+        return _fetch_and_write_auto(spec, retries, retry_delay, backend)
     except KeyError:
         logger.warning("Overture: неизвестная тема '%s'", theme)
         return None
@@ -272,26 +398,12 @@ def resolve_poi_place_file(
     retries: int,
     warn: Callable[[str], None],
 ) -> str | None:
-    """Разрешает файл POI place: переопределение → конфиг → автозагрузка Overture."""
-    if override is not None:
-        return override
-    if configured is not None:
-        return configured
-    if bbox is None:
-        warn("  ⚠ POI-stops: bbox не определён — расчёт пропущен")
-        return None
-    warn("  POI по остановкам: автозагрузка Overture place...")
-    poi_stops_file = auto_download_overture(
-        bbox,
-        cache_dir,
-        theme="place",
-        release=release,
-        retries=retries,
-    )
-    if poi_stops_file is None:
-        warn("  ⚠ POI-stops: не удалось загрузить Overture place — пропущено")
-    return poi_stops_file
+    """Совместимый прокси к POI-слою."""
+    from .poi import resolve_poi_place_file as _resolve_poi_place_file
 
+    return _resolve_poi_place_file(
+        override, configured, bbox, cache_dir, release, retries, warn
+    )
 
 __all__ = [
     "_SAFE_COMPONENT_RE",

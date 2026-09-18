@@ -14,30 +14,20 @@ from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry import box as shapely_box
 
-from ..cache import JsonCache
-from ..common import utm_epsg
-from ..metrics import OvertureStats
+from .adapters import OvertureStats, utm_epsg
+from .ports import CachePort
 from .cache import LRUCache, _file_signature
 from .context import _OvertureContext
+from .config import OvertureConfig
 from .geometry import _validate_bbox
 from .load import load_overture_geometries, overture_resolve_sources
+from .release import resolve_overture_release
+from .result import OvertureResult
 from .process import (
     _chunks,
     _process_single_route,
     _thread_batch_worker,
     _WorkerState,
-)
-from .settings import (
-    OVERTURE_ASSUME_NO_OVERLAP,
-    OVERTURE_BUFFER_CACHE_MAX_SIZE,
-    OVERTURE_CACHE_VERSION,
-    OVERTURE_MIN_BUILDING_AREA_M2,
-    OVERTURE_PROJECTION_CHUNK_SIZE,
-    OVERTURE_THREAD_BATCH_MAX,
-    OVERTURE_THREAD_BATCH_SIZE,
-    OVERTURE_UNION_GRID_SIZE,
-    OVERTURE_USE_COVERAGE_UNION,
-    _resolve_overture_release,
 )
 
 logger = logging.getLogger("wikiroutes.gis.overture")
@@ -117,12 +107,14 @@ def _utm_project_bbox(
     return epsg, qbbox
 
 
-def _filter_buildings(polygon_geometries: np.ndarray) -> np.ndarray:
-    """Удаляет здания площади меньше минимальной (если лимит задан)."""
-    if OVERTURE_MIN_BUILDING_AREA_M2 <= 0 or polygon_geometries.size == 0:
+def _filter_buildings(
+    polygon_geometries: np.ndarray, min_building_area_m2: float
+) -> np.ndarray:
+    """Удаляет здания площади меньше минимальной."""
+    if min_building_area_m2 <= 0 or polygon_geometries.size == 0:
         return polygon_geometries
     areas = shapely.area(polygon_geometries)
-    mask = areas >= OVERTURE_MIN_BUILDING_AREA_M2
+    mask = areas >= min_building_area_m2
     if not mask.all():
         polygon_geometries = polygon_geometries[mask]
     del areas
@@ -135,16 +127,18 @@ def _pipeline_signature(
     buffer_m: float,
     limit: int,
     epsg: int,
+    config: OvertureConfig,
 ) -> str:
     """Стабильная сигнатура контекста для кэша Overture."""
     return hashlib.sha256(
         (
-            f"v={OVERTURE_CACHE_VERSION}|"
+            f"v={config.cache_version}|"
             f"files={_file_signature(paths)}|"
             f"bbox={tuple(float(v) for v in qbbox)}|"
             f"buffer={buffer_m:.6f}|"
             f"limit={int(limit or 0)}|"
-            f"epsg={epsg}"
+            f"epsg={epsg}|"
+            f"algorithm={config.algorithm_signature()}"
         ).encode()
     ).hexdigest()[:16]
 
@@ -155,6 +149,7 @@ def _build_pipeline(
     buffer_m: float,
     limit: int,
     city: str,
+    config: OvertureConfig,
 ) -> tuple[_OvertureContext, np.ndarray, int] | None:
     """Проецирует bbox, загружает и фильтрует здания, строит индекс и контекст.
 
@@ -167,7 +162,7 @@ def _build_pipeline(
     epsg, qbbox = projected
 
     polygon_geometries, epsg_loaded = load_overture_geometries(
-        paths, qbbox, limit, epsg
+        paths, qbbox, limit, epsg, config=config
     )
     if (
         polygon_geometries is None
@@ -178,7 +173,9 @@ def _build_pipeline(
         return None
 
     polygon_geometries = np.asarray(polygon_geometries, dtype=object)
-    polygon_geometries = _filter_buildings(polygon_geometries)
+    polygon_geometries = _filter_buildings(
+        polygon_geometries, config.min_building_area_m2
+    )
     if len(polygon_geometries) == 0:
         logger.warning("Overture: после фильтрации зданий не осталось")
         return None
@@ -187,9 +184,11 @@ def _build_pipeline(
         "Overture: %d зданий, строим пространственный индекс...",
         len(polygon_geometries),
     )
+    polygon_geometries = np.asarray(polygon_geometries, dtype=object)
+    polygon_geometries.flags.writeable = False
     tree = STRtree(polygon_geometries)
 
-    sig = _pipeline_signature(paths, qbbox, buffer_m, limit, epsg)
+    sig = _pipeline_signature(paths, qbbox, buffer_m, limit, epsg, config)
 
     ctx = _OvertureContext(
         polygon_geometries=polygon_geometries,
@@ -198,9 +197,7 @@ def _build_pipeline(
         buffer_m=buffer_m,
         city=city,
         sig=sig,
-        assume_no_overlap=OVERTURE_ASSUME_NO_OVERLAP,
-        use_coverage_union=OVERTURE_USE_COVERAGE_UNION,
-        union_grid_size=OVERTURE_UNION_GRID_SIZE,
+        config=config,
     )
     return ctx, polygon_geometries, epsg
 
@@ -228,7 +225,7 @@ class _BatchAccumulator:
 
 
 def _flush_pending(
-    cache: JsonCache | None, cache_lock, pending: list[tuple[str, Any]]
+    cache: CachePort | None, cache_lock, pending: list[tuple[str, Any]]
 ) -> None:
     """Пачкой записывает отложенные записи кэша."""
     if cache and pending:
@@ -257,24 +254,26 @@ def _effective_workers(num_workers: int | None, route_count: int) -> int:
     return max(1, int(num_workers))
 
 
-def _thread_batch_size(route_count: int, num_workers: int) -> int:
-    if OVERTURE_THREAD_BATCH_SIZE > 0:
-        return OVERTURE_THREAD_BATCH_SIZE
+def _thread_batch_size(
+    route_count: int, num_workers: int, config: OvertureConfig
+) -> int:
+    if config.thread_batch_size > 0:
+        return config.thread_batch_size
     auto_size = route_count // (num_workers * 4)
-    return max(1, min(OVERTURE_THREAD_BATCH_MAX, auto_size))
+    return max(1, min(config.thread_batch_max, auto_size))
 
 
 def _run_parallel(
     routes: list[Any],
     ctx: _OvertureContext,
-    cache: JsonCache | None,
+    cache: CachePort | None,
     num_workers: int | None,
     buffer_cache: LRUCache,
     buffer_cache_lock: threading.RLock,
 ) -> tuple[dict[int, OvertureStats], dict[tuple[int, int], OvertureStats]]:
     """Параллельная потоковая обработка батчей маршрутов."""
     num_workers = _effective_workers(num_workers, len(routes))
-    batch_size = _thread_batch_size(len(routes), num_workers)
+    batch_size = _thread_batch_size(len(routes), num_workers, ctx.config)
     batches = list(_chunks(routes, batch_size))
     logger.info(
         "Overture: параллельная обработка %d маршрутов, %d потоков, %d батчей по ~%d маршрутов...",
@@ -308,7 +307,7 @@ def _run_parallel(
 def _run_sequential(
     routes: list[Any],
     ctx: _OvertureContext,
-    cache: JsonCache | None,
+    cache: CachePort | None,
     epsg: int,
     buffer_cache: LRUCache,
     buffer_cache_lock: threading.RLock,
@@ -362,24 +361,156 @@ def _normalize_inputs(
 
 
 def _overture_meta(
-    buffer_m: float, n_buildings: int, epsg: int, release: str | None
+    buffer_m: float,
+    n_buildings: int,
+    epsg: int,
+    effective_release: str | None,
+    config: OvertureConfig,
 ) -> dict[str, Any]:
-    """Метаданные расчёта для отчёта/кэша."""
+    """Метаданные расчёта; release здесь уже разрешён на входе."""
     return {
         "buffer_m": buffer_m,
         "buildings": n_buildings,
         "epsg": epsg,
-        "cache_version": OVERTURE_CACHE_VERSION,
-        "release": _resolve_overture_release(release) or "latest",
+        "cache_version": config.cache_version,
+        "release": effective_release,
         "shapely_version": str(shapely.__version__),
-        "assume_no_overlap": OVERTURE_ASSUME_NO_OVERLAP,
-        "use_coverage_union": OVERTURE_USE_COVERAGE_UNION,
-        "union_grid_size": OVERTURE_UNION_GRID_SIZE,
-        "min_building_area_m2": OVERTURE_MIN_BUILDING_AREA_M2,
-        "thread_batch_size": OVERTURE_THREAD_BATCH_SIZE,
-        "buffer_cache_max_size": OVERTURE_BUFFER_CACHE_MAX_SIZE,
-        "projection_chunk_size": OVERTURE_PROJECTION_CHUNK_SIZE,
+        "assume_no_overlap": config.assume_no_overlap,
+        "use_coverage_union": config.use_coverage_union,
+        "union_grid_size": config.union_grid_size,
+        "min_building_area_m2": config.min_building_area_m2,
+        "thread_batch_size": config.thread_batch_size,
+        "buffer_cache_max_size": config.buffer_cache_max_size,
+        "projection_chunk_size": config.projection_chunk_size,
+        "algorithm_signature": config.algorithm_signature(),
     }
+
+
+def compute_overture_result(
+    routes: Any,
+    overture_path: str | None,
+    buffer_m: float | None,
+    bbox: Any,
+    city: str,
+    cache: CachePort | None,
+    limit: int = 0,
+    parallel: bool = True,
+    num_workers: int | None = None,
+    release: str | None = None,
+    config: OvertureConfig | None = None,
+) -> OvertureResult[dict[int, OvertureStats]]:
+    """Считает Overture и возвращает единый результат с явным статусом."""
+    config = config or OvertureConfig.from_env()
+
+    buffer_value = _coerce_buffer_m(buffer_m)
+    if buffer_value is None:
+        return OvertureResult.invalid_input(reason="invalid_buffer_m")
+
+    bbox_value = _coerce_bbox(bbox)
+    if bbox_value is None:
+        return OvertureResult.invalid_input(reason="invalid_bbox")
+
+    routes_value = _coerce_routes(routes)
+    if routes_value is None:
+        return OvertureResult.invalid_input(reason="invalid_routes")
+    if not routes_value:
+        return OvertureResult.skipped(reason="no_routes")
+
+    try:
+        effective_release = (
+            resolve_overture_release(release)
+            if release is not None
+            else None
+        )
+    except Exception as exc:
+        logger.warning("Overture: не удалось определить release: %s", exc)
+        return OvertureResult.error_result(exc)
+
+    try:
+        limit_value = int(limit or 0)
+    except (TypeError, ValueError, OverflowError):
+        return OvertureResult.invalid_input(reason="invalid_limit")
+    if limit_value < 0:
+        return OvertureResult.invalid_input(reason="invalid_limit")
+
+    try:
+        paths = _resolve_overture_paths(overture_path)
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        return OvertureResult.error_result(exc)
+    if paths is None:
+        return OvertureResult.skipped(reason="overture_source_not_found")
+
+    try:
+        pipeline = _build_pipeline(
+            paths, bbox_value, buffer_value, limit_value, city, config
+        )
+        if pipeline is None:
+            return OvertureResult.no_data(reason="no_buildings")
+        ctx, polygon_geometries, epsg = pipeline
+
+        buffer_cache = LRUCache(max_size=config.buffer_cache_max_size)
+        buffer_cache_lock = threading.RLock()
+
+        if parallel and len(routes_value) > 1:
+            stats, dir_stats_map = _run_parallel(
+                routes_value,
+                ctx,
+                cache,
+                num_workers,
+                buffer_cache,
+                buffer_cache_lock,
+            )
+        else:
+            stats, dir_stats_map = _run_sequential(
+                routes_value,
+                ctx,
+                cache,
+                epsg,
+                buffer_cache,
+                buffer_cache_lock,
+            )
+
+        meta = _overture_meta(
+            buffer_value, len(polygon_geometries), epsg, effective_release, config
+        )
+        failed_routes = sum(
+            not stat.ok for stat in stats.values()
+        )
+        failed_directions = sum(
+            not stat.ok for stat in dir_stats_map.values()
+        )
+        failed_items = failed_routes + failed_directions
+        if failed_items:
+            meta["status"] = "partial"
+            meta["failed_items"] = failed_items
+            warning = (
+                f"частичный результат: {failed_items} элементов маршрутов "
+                "не удалось посчитать"
+            )
+            return OvertureResult.partial(
+                stats,
+                meta,
+                dir_stats_map,
+                warnings=(warning,),
+            )
+        meta["status"] = "success"
+        return OvertureResult.success(stats, meta, dir_stats_map)
+    except MemoryError as exc:
+        logger.warning("Overture: недостаточно памяти для обработки зданий")
+        logger.exception("Overture: MemoryError")
+        ctx = locals().get("ctx")
+        return OvertureResult.error_result(
+            exc,
+            cache_signature=ctx.sig if ctx is not None else None,
+        )
+    except Exception as exc:
+        logger.warning("Overture: ошибка при вычислении: %s", exc)
+        logger.exception("Overture: исключение")
+        ctx = locals().get("ctx")
+        return OvertureResult.error_result(
+            exc,
+            cache_signature=ctx.sig if ctx is not None else None,
+        )
 
 
 def compute_overture(
@@ -388,48 +519,28 @@ def compute_overture(
     buffer_m: float | None,
     bbox: Any,
     city: str,
-    cache: JsonCache | None,
+    cache: CachePort | None,
     limit: int = 0,
     parallel: bool = True,
     num_workers: int | None = None,
     release: str | None = None,
+    config: OvertureConfig | None = None,
 ) -> tuple[
     dict[int, OvertureStats],
     dict[str, Any] | None,
     dict[tuple[int, int], OvertureStats],
 ]:
-    """Считает площади зданий Overture в буферах маршрутов города."""
-    normalized = _normalize_inputs(buffer_m, bbox, routes, overture_path)
-    if normalized is None:
-        return {}, None, {}
-    buffer_m, bbox_val, routes, paths = normalized
-
-    try:
-        pipeline = _build_pipeline(paths, bbox_val, buffer_m, limit, city)
-        if pipeline is None:
-            return {}, None, {}
-        ctx, polygon_geometries, epsg = pipeline
-
-        buffer_cache = LRUCache(max_size=OVERTURE_BUFFER_CACHE_MAX_SIZE)
-        buffer_cache_lock = threading.RLock()
-
-        if parallel and len(routes) > 1:
-            stats, dir_stats_map = _run_parallel(
-                routes, ctx, cache, num_workers, buffer_cache, buffer_cache_lock
-            )
-        else:
-            stats, dir_stats_map = _run_sequential(
-                routes, ctx, cache, epsg, buffer_cache, buffer_cache_lock
-            )
-
-        meta = _overture_meta(buffer_m, len(polygon_geometries), epsg, release)
-    except MemoryError:
-        logger.warning("Overture: недостаточно памяти для обработки зданий")
-        logger.exception("Overture: MemoryError")
-        return {}, None, {}
-    except Exception as exc:
-        logger.warning("Overture: ошибка при вычислении: %s", exc)
-        logger.exception("Overture: исключение")
-        return {}, None, {}
-    else:
-        return stats, meta, dir_stats_map
+    """Совместимый tuple-API; новый код использует compute_overture_result."""
+    return compute_overture_result(
+        routes=routes,
+        overture_path=overture_path,
+        buffer_m=buffer_m,
+        bbox=bbox,
+        city=city,
+        cache=cache,
+        limit=limit,
+        parallel=parallel,
+        num_workers=num_workers,
+        release=release,
+        config=config,
+    ).as_legacy_tuple()
