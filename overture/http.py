@@ -612,9 +612,6 @@ def _http_resolve_stac_part_files(
     retry_delay: float = 2.0,
 ) -> list[str]:
     """Возвращает список ключей S3 частей, пересекающих bbox (через STAC по HTTP)."""
-    import pyarrow.compute as pc
-    from pyarrow import parquet as pq
-
     stac_url = f"https://stac.overturemaps.org/{release}/collections.parquet"
     try:
         data = _http_get_stac(
@@ -623,9 +620,6 @@ def _http_resolve_stac_part_files(
             retries=retries,
             retry_delay=retry_delay,
         )
-        import pyarrow.compute as pc
-        from pyarrow import parquet as pq
-
         table = pq.read_table(io.BytesIO(data))
 
         feature_type_filter = (pc.field("collection") == overture_type) & (
@@ -659,24 +653,6 @@ def _http_resolve_stac_part_files(
             retries,
             retry_delay,
         )
-
-    feature_type_filter = (pc.field("collection") == overture_type) & (
-        pc.field("type") == "Feature"
-    )
-    min_lat, min_lon, max_lat, max_lon = bbox
-    bbox_filter = (
-        (pc.field("bbox", "xmin") < max_lon)
-        & (pc.field("bbox", "xmax") > min_lon)
-        & (pc.field("bbox", "ymin") < max_lat)
-        & (pc.field("bbox", "ymax") > min_lat)
-    )
-    table = table.filter(feature_type_filter & bbox_filter)
-    keys: list[str] = []
-    for path in table.column("assets").to_pylist():
-        href = path["aws"]["alternate"]["s3"]["href"]
-        if href.startswith("s3://"):
-            keys.append(href[len("s3://") :])
-    return keys
 
 
 def _part_local_path(key: str, cache_dir: str | Path) -> Path:
