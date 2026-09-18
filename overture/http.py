@@ -581,11 +581,25 @@ def _stac_item_hrefs(
 
     def resolve_item_href(href: str) -> str:
         # Some published Overture STAC collections contain an href prefixed
-        # with collection.json/. That is the collection filename, not a
-        # directory, and must not become part of the request URL.
+        # with collection.json/ and then a release-relative path. Treat that
+        # as a path from the STAC root, not as a child of collection.json.
         normalized = href.lstrip("./")
         if normalized.startswith("collection.json/"):
             normalized = normalized[len("collection.json/") :]
+
+        parts = normalized.split("/", 1)
+        if len(parts) == 2:
+            first = parts[0]
+            if len(first) >= 10 and first[4] == "-" and first[7] == "-" and "." in first:
+                base_parts = urllib.parse.urlsplit(base_url)
+                marker = "/" + first + "/"
+                if marker in base_parts.path:
+                    prefix = base_parts.path.split(marker, 1)[0] + marker
+                    root_url = urllib.parse.urlunsplit(
+                        (base_parts.scheme, base_parts.netloc, prefix, "", "")
+                    )
+                    return urllib.parse.urljoin(root_url, normalized)
+
         return urllib.parse.urljoin(collection_dir, normalized)
 
     # Overture's published collections currently carry one union bbox followed
