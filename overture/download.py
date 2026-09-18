@@ -129,7 +129,7 @@ def _prepare_auto_download(
     min_lat, min_lon, max_lat, max_lon = map(float, bbox)
     bbox_key = _safe_bbox_key((min_lat, min_lon, max_lat, max_lon))
     effective_release = _resolve_overture_release(release)
-    if effective_release is None:
+    if effective_release is None or effective_release.lower() == "latest":
         try:
             # Разрешаем latest до формирования имени кэша, чтобы каждое обновление
             # Overture получало новый cache key, а не застывало под "latest".
