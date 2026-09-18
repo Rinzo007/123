@@ -1,10 +1,18 @@
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import numpy as np
 
 import overture.core as core
-from tests.conftest import OvertureStats
 from overture.result import OvertureStatus
+
+
+@dataclass(frozen=True)
+class _Stats:
+    total_area_m2: float = 0.0
+    corridor_m2: float = 0.0
+    count: int = 0
+    ok: bool = True
 
 
 def _valid_kwargs():
@@ -54,8 +62,8 @@ def test_partial_status_preserves_successful_route_results(monkeypatch):
         "_build_pipeline",
         lambda *args, **kwargs: (ctx, buildings, 32631),
     )
-    ok = OvertureStats(total_area_m2=10.0, corridor_m2=20.0, count=1, ok=True)
-    failed = OvertureStats(ok=False)
+    ok = _Stats(total_area_m2=10.0, corridor_m2=20.0, count=1, ok=True)
+    failed = _Stats(ok=False)
     monkeypatch.setattr(
         core,
         "_run_sequential",
