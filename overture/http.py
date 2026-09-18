@@ -505,7 +505,11 @@ def _http_get_stac(
         elif len(data) < _STAC_CHUNK_BYTES:
             return b"".join(chunks)
 
-def _stac_item_hrefs(collection: dict[str, Any], bbox: tuple[float, float, float, float]) -> list[str]:
+def _stac_item_hrefs(
+    collection: dict[str, Any],
+    bbox: tuple[float, float, float, float],
+    base_url: str,
+) -> list[str]:
     """Возвращает href'ы STAC Item, чьи bbox пересекают заданный bbox."""
     import urllib.parse
 
@@ -532,14 +536,12 @@ def _stac_item_hrefs(collection: dict[str, Any], bbox: tuple[float, float, float
                 continue
             xmin, ymin, xmax, ymax = map(float, item_bbox)
             if xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat:
-                candidate_links.append(urllib.parse.urljoin(
-                    "https://stac.overturemaps.org/", href
-                ))
+                candidate_links.append(urllib.parse.urljoin(base_url, href))
         return candidate_links
 
     # Be conservative if a future STAC writer changes the extent layout.
     return [
-        urllib.parse.urljoin("https://stac.overturemaps.org/", href)
+        urllib.parse.urljoin(base_url, href)
         for href in item_links
     ]
 
@@ -582,13 +584,13 @@ def _http_resolve_stac_part_files_via_collection(
         retry_delay=retry_delay,
     )
     collection = json_module.loads(collection_data)
-    item_hrefs = _stac_item_hrefs(collection, bbox)
+    item_hrefs = _stac_item_hrefs(collection, bbox, url)
     if not item_hrefs:
         return []
 
     def fetch_item(item_url: str) -> str | None:
         item_data = _http_get_stac(
-            urllib.parse.urljoin(item_url, ""),
+            item_url,
             timeout=_STAC_TIMEOUT_S,
             retries=retries,
             retry_delay=retry_delay,
@@ -651,7 +653,7 @@ def _http_resolve_stac_part_files(
         )
         return _http_resolve_stac_part_files_via_collection(
             release,
-            f"{'addresses' if theme == 'addresses' else 'places' if theme == 'places' else theme}",
+            theme,
             overture_type,
             bbox,
             retries,
