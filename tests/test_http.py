@@ -302,3 +302,10 @@ def test_download_progress_reports_speed_and_eta(monkeypatch, caplog):
     assert "скорость 5.00 МБ/с" in caplog.text
     assert "ETA 2.0 с" in caplog.text
     assert "средняя скорость 5.00 МБ/с" in progress.summary()
+
+def test_stac_hosts_include_s3_catalog_mirror():
+    import overture.http as http
+
+    assert http._STAC_HTTP_HOSTS[0] == "https://stac.overturemaps.org"
+    assert "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac" in http._STAC_HTTP_HOSTS
+
