@@ -331,6 +331,23 @@ def _download_part_once(key: str, cache_dir: str | Path) -> None:
 
     bucket, _, obj_path = key.partition("/")
     part = dest.with_name(dest.name + ".part")
+
+    # Если процесс завершился после полной записи .part, но до rename,
+    # распознаём готовый parquet и завершаем публикацию без Range-запроса.
+    if part.exists():
+        try:
+            from pyarrow.parquet import ParquetFile
+
+            if part.stat().st_size > 0:
+                ParquetFile(part)
+                size = part.stat().st_size
+                sha256 = _sha256_file(part)
+                part.replace(dest)
+                _write_part_manifest(dest, key=key, size=size, sha256=sha256)
+                return
+        except (OSError, ValueError, TypeError, RuntimeError):
+            pass
+
     urls = [
         _overture_host_url(host, bucket, key, obj_path)
         for host in _OVERTURE_HTTP_HOSTS
