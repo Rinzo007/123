@@ -283,3 +283,22 @@ def test_stac_resolver_falls_back_to_collection_json(monkeypatch):
     assert keys == ["bucket/relevant.parquet"]
     assert calls[0].endswith("/2026-08-19.0/collections.parquet")
     assert calls[1] == "collection-fallback"
+
+
+def test_download_progress_reports_speed_and_eta(monkeypatch, caplog):
+    import overture.http as http
+
+    progress = http._PartProgress("part.parquet", total_bytes=20 * 1024 * 1024, log_interval_s=0)
+    progress._t0 = 0.0
+    progress._last_log = 0.0
+    progress._last_bytes = 0
+    progress._bytes = 10 * 1024 * 1024
+    monkeypatch.setattr(http.time, "monotonic", lambda: 2.0)
+
+    with caplog.at_level("INFO", logger="wikiroutes.gis.overture"):
+        progress.update(b"")
+
+    assert "10.0/20.0 МБ" in caplog.text
+    assert "скорость 5.00 МБ/с" in caplog.text
+    assert "ETA 2.0 с" in caplog.text
+    assert "средняя скорость 5.00 МБ/с" in progress.summary()
