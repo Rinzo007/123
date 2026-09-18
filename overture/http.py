@@ -675,8 +675,8 @@ def _http_resolve_stac_part_files_via_collection(
             raise ValueError(f"Некорректный STAC Item URL: {item_url}")
         relative_path = item_path.split(marker, 1)[1]
         item_urls = [
-            f"{base}/{release}/{relative_path.lstrip('/')}"
-            for base in collection_urls
+            f"{host}/{release}/{relative_path.lstrip('/')}"
+            for host in _STAC_HTTP_HOSTS
         ]
         item_data = _http_get_stac(
             item_urls,
