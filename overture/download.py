@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import re
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -222,9 +223,19 @@ def _duckdb_download_overture_place(
             f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
         )
         logger.info("Overture: DuckDB %s → %s", provider, source)
+        started = time.monotonic()
         conn.execute(query)
+        elapsed = max(time.monotonic() - started, 1e-9)
         if not target.exists() or target.stat().st_size <= 0:
             return None
+        size_mb = target.stat().st_size / (1024 * 1024)
+        logger.info(
+            "Overture: DuckDB %s: %.1f МБ за %.1f с (%.2f МБ/с)",
+            provider,
+            size_mb,
+            elapsed,
+            size_mb / elapsed,
+        )
 
         gdf = gpd.read_parquet(target)
         return gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
