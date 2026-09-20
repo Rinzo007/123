@@ -35,6 +35,25 @@ jobs:
           TAKT_BUNDLE_PATH: "${{ runner.temp }}/bd956ff0a1875604740f7.js"
         run: node scripts/takt_browser_snapshot.js tests/fixtures/takt_browser_snapshot.generated.json
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install passenger_flow runtime dependencies
+        run: python -m pip install numpy scipy
+
+      - name: Execute Python passenger_flow
+        run: python scripts/takt_python_snapshot.py tests/fixtures/takt_python_snapshot.generated.json
+
+      - name: Compare JS and Python
+        run: |
+          python scripts/takt_differential.py \
+            tests/fixtures/takt_browser_snapshot.generated.json \
+            tests/fixtures/takt_python_snapshot.generated.json \
+            --section differential \
+            --max-diffs 50
+
       - name: Upload JS snapshot
         uses: actions/upload-artifact@v4
         with:
