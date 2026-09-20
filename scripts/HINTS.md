@@ -210,6 +210,12 @@ tests/test_passenger_flow_takt_parity.py
 разбиение JS ``Ja/Xa`` по промежуточным пересечениям остаётся следующим
 уровнем exact parity.
 
+## P2 — crowd-aware shortest-path routing
+
+Shortest-path теперь учитывает текущую directional crowding-нагрузку уже на
+этапе выбора пути: segment ride multiplier и stop dwell extra входят в edge cost.
+После выбора варианта отдельно добавляется только crowding-множитель ожидания
+и reliability extra, чтобы не учитывать ride/dwell feedback дважды.
 ## P2 — row-dependent infrastructure cost
 
 Если маршрут явно содержит ``row/rows``, ``segCostMul``, ``fixedLegs`` или ``gaps``,
