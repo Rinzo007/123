@@ -155,7 +155,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P1** | ✅ закрыт | Базовая parity `passenger_flow` с расчётным bundle. |
 | **P2-A Automobile** | ✅ закрыт | Периодный `yt` для автомобиля; `baseT`/fallback и разделение monetary/parking части. |
 | **P2-B Routing** | 🟡 почти закрыт | `ri()` access/egress и `co()` inverse-wait split перенесены; остаётся exact `fromLi`/transfer-frequency semantics и проверка повторного использования линии. |
-| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa` теперь периодные; route `headways[0..4]` сохраняются и проходят в assignment/KPI; остаётся полный JS polyline/onTrack reuse. |
+| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa` периодные; `headways[0..4]` проходят в assignment/KPI; `La()` decoded-polyline reuse перенесён при наличии `legs`; остаётся разрешение `onTrack`-цепочек без decoded geometry. |
 | **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
 | **P2-E Crowding/reliability** | 🟡 почти закрыт | `Fr → unev → Rr` теперь участвует в first-leg wait/split; остаётся точное согласование transfer-leg `hs×ti` с route-choice cost. |
 | **P3 Differential** | 🟡 | Comparator и golden snapshot готовы; нужен реальный browser-exported JS snapshot против Python на одинаковом входе. |
@@ -265,6 +265,13 @@ Route sequence сохраняет `headways[0..4]` из route/direction metadata
 `Ga` считает residual track tph отдельно по каждому периоду и возвращает максимальный требуемый minimum headway.
 `Qa` считает `pax/train` через периодный runs × direction factor, затем применяет dwell/turnback constraint.
 Fleet/OPEX повторяют `cn`: fleet считается по каждому headway, берётся максимум; `vehicleKm/day` суммирует периоды, а OPEX умножается на `J(def)/capacity`.
+### P2-C parity update — La decoded geometry
+
+`La()`-style CAPEX reuse теперь использует `geometry_legs`/`segment_lengths_m`:
+канонический edge key округляется по JS `Math.round(x*1e5)`, а reused fraction считается по длине фактических sub-edges.
+При отсутствии decoded `legs` сохраняется atomic stop-segment fallback.
+`onTrack` dependency resolution пока не реконструируется из одного `onTrack` массива без исходной source-track geometry;
+в этом случае нужен decoded geometry payload, как в web engine.
 ## P2 — crowd-aware shortest-path routing
 
 Shortest-path теперь учитывает текущую directional crowding-нагрузку уже на
