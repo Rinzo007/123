@@ -789,7 +789,7 @@ def _enumerate_journeys(
 
         # Terminate at every destination stop reachable on this line.
         for d_pos in destination_by_seq.get(seq_idx, ()):
-            if d_pos == pos and d_pos == leg_start:
+            if d_pos == pos and not legs and d_pos == leg_start:
                 continue
             ride = _route_ride_time_min(seq, leg_start, d_pos)
             if ride <= 0.0:
@@ -808,9 +808,12 @@ def _enumerate_journeys(
         n = len(seq["stops"])
         neighbors: list[int] = []
         if seq.get("closed") and n >= 2:
-            neighbors = [(pos - 1) % n, (pos + 1) % n]
-            if neighbors[0] == neighbors[1]:
-                neighbors = neighbors[:1]
+            if seq.get("both_ways"):
+                neighbors = [(pos - 1) % n, (pos + 1) % n]
+                if neighbors[0] == neighbors[1]:
+                    neighbors = neighbors[:1]
+            else:
+                neighbors = [(pos + 1) % n]
         elif n >= 2:
             if pos > 0:
                 neighbors.append(pos - 1)
