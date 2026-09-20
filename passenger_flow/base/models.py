@@ -361,3 +361,11 @@ class FlowResult:
     capital_cost_eur: float = 0.0
     capex_day: float = 0.0
     fleet_total: float = 0.0
+    # Unrounded aggregates retained for JS/Takt differential checks.
+    raw_assigned_trips: float = 0.0
+    raw_car_trips: float = 0.0
+    raw_walk_trips: float = 0.0
+    raw_two_wheel_trips: float = 0.0
+    raw_rest_trips: float = 0.0
+    raw_revenue_day: float = 0.0
+    raw_opex_day: float = 0.0
