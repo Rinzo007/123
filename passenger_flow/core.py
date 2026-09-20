@@ -27,8 +27,8 @@ from typing import Any, Protocol
 import numpy as np
 from scipy.spatial import cKDTree
 
-from ..models import RouteLike
-from ..od import Zones
+from .models import RouteLike
+from od import Zones
 from .algorithm.assign import _assign_od
 from .algorithm.kpis import _build_line_kpis
 from .algorithm.wait import (
