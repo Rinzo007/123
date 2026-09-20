@@ -119,13 +119,14 @@ class Reporter(Protocol):
 class PreparedPassengerFlow:
     """Подготовленный статический контекст для повторных расчётов OD.
 
-    Включает последовательности маршрутов, KD-tree остановок и привязку зон.
-    Объект привязан к конкретному экземпляру ``Zones`` и радиусу поиска.
+    Включает последовательности маршрутов, KD-tree остановок, привязку зон
+    и reusable transfer spatial index для стандартного радиуса пересадки.
     """
     zones: Zones
     stop_search_radius_m: float
     route_sequences: tuple[dict[str, Any], ...]
     zone_nearest: dict[int, list[tuple[int, int, int, float]]]
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None
 
 
 def prepare_passenger_flow(
@@ -150,6 +151,7 @@ def prepare_passenger_flow(
         stop_search_radius_m=float(stop_search_radius_m),
         route_sequences=tuple(route_sequences),
         zone_nearest=zone_nearest,
+        transfer_index=_build_transfer_edge_index(route_sequences, 800.0),
     )
 
 # ===== Валидация входных параметров =====
@@ -935,7 +937,9 @@ def run_passenger_flow(
             )
         route_sequences = list(prepared.route_sequences)
         zone_nearest = prepared.zone_nearest
+        prepared_transfer_index = prepared.transfer_index
     else:
+        prepared_transfer_index = None
         route_sequences = _build_route_stop_sequence(routes)
         if route_sequences:
             stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
@@ -1006,7 +1010,11 @@ def run_passenger_flow(
         wait_calc=wait_calc,
         vehicle_specs=vehicle_specs,
         car_period_multipliers=car_period_multipliers,
-        transfer_index=_build_transfer_edge_index(route_sequences, transfer_radius_m),
+        transfer_index=(
+            prepared_transfer_index
+            if prepared is not None and abs(float(transfer_radius_m) - 800.0) <= 1e-9
+            else _build_transfer_edge_index(route_sequences, transfer_radius_m)
+        ),
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
