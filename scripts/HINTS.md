@@ -155,8 +155,8 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P1** | ✅ закрыт | Базовая parity `passenger_flow` с расчётным bundle. |
 | **P2-A Automobile** | ✅ закрыт | Периодный `yt` для автомобиля; `baseT`/fallback и разделение monetary/parking части. |
 | **P2-B Routing** | 🟡 почти закрыт | `ri()` access/egress и `co()` inverse-wait split перенесены; остаётся exact `fromLi`/transfer-frequency semantics и проверка повторного использования линии. |
-| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa`, shared atomic sections и row CAPEX есть; осталось per-period headway API и полный JS polyline/onTrack reuse. |
-| **P2-D Economics** | 🟡 почти закрыт | Fare/CAPEX/row metadata перенесены; остаётся exact period fleet/OPEX с occupancy factor. |
+| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa` теперь периодные; route `headways[0..4]` сохраняются и проходят в assignment/KPI; остаётся полный JS polyline/onTrack reuse. |
+| **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
 | **P2-E Crowding/reliability** | 🟡 почти закрыт | `Fr → unev → Rr` теперь участвует в first-leg wait/split; остаётся точное согласование transfer-leg `hs×ti` с route-choice cost. |
 | **P3 Differential** | 🟡 | Comparator и golden snapshot готовы; нужен реальный browser-exported JS snapshot против Python на одинаковом входе. |
 | **P4 Performance** | 🟡 | Spatial transfer index и O(1) ride timing кэшированы; следующий шаг — профиль полного OD assignment и устранение повторных edge-cost расчётов без изменения результатов. |
@@ -259,6 +259,12 @@ Access/egress использует Takt `circuity/contSpeed`, `baseT` fallback �
 `1 / max(1, wait × unev × ti(load))`, а `Fr()` переносит `unev=1+H²` из crowd feedback.
 Остаётся отдельный узел точного `co()` для transfer-leg alternative sets и возможность
 повторного использования одной линии.
+### P2-C/P2-D parity update — headways/Ga/Qa/fleet
+
+Route sequence сохраняет `headways[0..4]` из route/direction metadata; каждый период assignment получает собственный `seq_headway_min`.
+`Ga` считает residual track tph отдельно по каждому периоду и возвращает максимальный требуемый minimum headway.
+`Qa` считает `pax/train` через периодный runs × direction factor, затем применяет dwell/turnback constraint.
+Fleet/OPEX повторяют `cn`: fleet считается по каждому headway, берётся максимум; `vehicleKm/day` суммирует периоды, а OPEX умножается на `J(def)/capacity`.
 ## P2 — crowd-aware shortest-path routing
 
 Shortest-path теперь учитывает текущую directional crowding-нагрузку уже на
