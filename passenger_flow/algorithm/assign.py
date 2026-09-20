@@ -138,13 +138,22 @@ class _OdTotals:
 def _base_time_for_pair(
     base_time_s: np.ndarray | None,
     period_index: int,
+    pair_index: int,
     zi: int,
     zj: int,
+    n_periods: int | None = None,
 ) -> float | None:
     if base_time_s is None:
         return None
     if base_time_s.ndim == 3:
         value = float(base_time_s[period_index, zi, zj])
+    elif (
+        base_time_s.ndim == 2
+        and n_periods is not None
+        and base_time_s.shape[0] >= n_periods
+        and base_time_s.shape[0] != base_time_s.shape[1]
+    ):
+        value = float(base_time_s[period_index, pair_index])
     else:
         value = float(base_time_s[zi, zj])
     return value if value > 0.0 else None
@@ -555,7 +564,7 @@ def _assign_od(
         if trips <= 0:
             continue
         totals.period_total += trips
-        road_time_s = _base_time_for_pair(base_time_s, period_index, zi, zj)
+        road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
 
         origin_stops = _line_access_stops(
             zone_nearest.get(zi, []), route_sequences
@@ -610,7 +619,7 @@ def _assign_od(
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
-                rest_s=_base_time_for_pair(base_time_s, period_index, zi, zj),
+                rest_s=_base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5),
             )
             continue
 
