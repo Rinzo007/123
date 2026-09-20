@@ -47,6 +47,7 @@ from passenger_flow.base.takt import (
     _takt_po_seconds,
 )
 from passenger_flow.network.geometry import haversine_meters
+from scripts.takt_differential import compare_snapshots
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
@@ -125,6 +126,28 @@ def test_takt_car_cost_uses_base_time_and_period_multiplier() -> None:
     )
     expected = 1800.0 * 1.8 + 240.0 + (10.0 * 1.3 * 0.25 + 1.5) * 360.0
     assert math.isclose(got, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+def test_python_snapshot_matches_canonical_takt_reference() -> None:
+    reference = json.loads(
+        (Path(__file__).parent / "fixtures" / "takt_reference_snapshot.json").read_text(encoding="utf-8")
+    )
+    waits = [_takt_po_seconds(6), _takt_po_seconds(12), _takt_po_seconds(15)]
+    fares = [_takt_fare_eur(0.6, 0.12, distance) for distance in (0, 10000, 30000)]
+    from passenger_flow.base.takt import TAKT_PERIODS
+    rows = np.asarray([0, 1], dtype=np.int64)
+    cols = np.asarray([1, 0], dtype=np.int64)
+    vals = np.asarray([1000.0, 1000.0], dtype=np.float64)
+    snapshot = {
+        "reference": reference["reference"],
+        "wait_seconds": waits,
+        "fare_eur": fares,
+        "hold_probability": _takt_hold_prob(60.0, 90.0),
+        "route_probabilities": _takt_route_probs(np.asarray([600.0, 900.0])),
+        "mode_shares": _takt_mode_shares(ModeChoiceConfig(), 5000.0, 1200.0, 1.2),
+        "car_period_multipliers": list(_takt_car_period_multipliers(rows, cols, vals, TAKT_PERIODS)),
+        "msa_gap_example": _takt_msa_gap({1: 10.0}, {1: 15.0}, {(1, 0): 2.0}, {(1, 0): 3.0}, {(1, 0): 4.0}, {(1, 0): 5.0}, {(1, 0): 6.0}, {(1, 0): 8.0}),
+    }
+    assert compare_snapshots(reference, snapshot) == []
 
 def test_takt_wait_and_fare_golden_values() -> None:
     wait = FIXTURE["wait"]
