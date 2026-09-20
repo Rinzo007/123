@@ -14,12 +14,15 @@ import numpy as np
 
 from ...od import Zones
 from ..base.models import ModeChoiceConfig
+from ..base.models import VehicleSpec, vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_RELIABILITY_FLOOR_S,
     _TAKT_RELIABILITY_JITTER_FACTOR,
     _TAKT_WAIT_EXTRA_PER_MIN,
     _TAKT_WAIT_FLOOR_MIN,
     _TAKT_WAIT_LINEAR_LIMIT_MIN,
+    _TAKT_CROWDED_LOAD_FACTOR,
+    _TAKT_PERIOD_HOURS,
 )
 from .assign import _assign_od
 
@@ -73,6 +76,62 @@ def _build_wait_extra(
             )
     return extra or None
 
+def _build_crowd_state(
+    route_sequences: list[dict[str, Any]],
+    seg_forward: Mapping[tuple[int, int], float],
+    seg_reverse: Mapping[tuple[int, int], float],
+    seq_stop_totals: Mapping[tuple[int, int], float],
+    seq_headway_min: Mapping[int, float] | None,
+    vehicle_specs: Mapping[str, VehicleSpec] | None,
+    period_hours: float,
+) -> dict[str, dict[tuple[int, int], float]]:
+    """Строит segment/stop feedback в том же пространстве, что JS Fr()."""
+    state: dict[str, dict[tuple[int, int], float]] = {
+        "seg_forward": {},
+        "seg_reverse": {},
+        "stop_extra": {},
+    }
+    if seq_headway_min is None:
+        return state
+
+    for seq_idx, seq in enumerate(route_sequences):
+        h = float(seq_headway_min.get(seq_idx, 0.0))
+        if h <= 0.0:
+            continue
+        spec = vehicle_specs.get(str(seq.get("route_type_key") or "").lower()) if vehicle_specs else None
+        if spec is None:
+            spec = vehicle_spec_for_route_type(seq.get("route_type_key", "bus"))
+        period_runs = period_hours * 60.0 / h
+        if period_runs <= 0.0 or spec.capacity <= 0:
+            continue
+
+        denom = period_runs * float(spec.capacity)
+        for seg_idx in range(max(0, len(seq["stops"]) - 1)):
+            f = float(seg_forward.get((seq_idx, seg_idx), 0.0))
+            r = float(seg_reverse.get((seq_idx, seg_idx), 0.0))
+            state["seg_forward"][(seq_idx, seg_idx)] = max(
+                f / denom, 0.0
+            )
+            state["seg_reverse"][(seq_idx, seg_idx)] = max(
+                r / denom, 0.0
+            )
+
+        direction_factor = (
+            2.0 if not seq.get("closed") or seq.get("both_ways") else 1.0
+        )
+        dwell_runs = direction_factor * period_runs
+        if dwell_runs > 0.0:
+            for stop_idx in range(len(seq["stops"])):
+                pax = float(seq_stop_totals.get((seq_idx, stop_idx), 0.0))
+                if pax <= 0.0:
+                    continue
+                state["stop_extra"][(seq_idx, stop_idx)] = (
+                    float(spec.dwell_per_pax_s) * pax / dwell_runs
+                )
+
+    return state
+
+
 def _run_msa_period(
     od_rows: np.ndarray,
     od_cols: np.ndarray,
@@ -101,6 +160,8 @@ def _run_msa_period(
     seq_jitter_s: Mapping[int, float] | None = None,
     no_car_shares: np.ndarray | None = None,
     wait_calc: str = "takt",
+    period_hours: float = 24.0,
+    vehicle_specs: Mapping[str, VehicleSpec] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -111,8 +172,11 @@ def _run_msa_period(
     """
     smoothed: dict[int, float] = {}
     prev_smoothed: dict[int, float] = {}
-    smoothed_seg: dict[tuple[int, int], float] = {}
+    smoothed_seg_forward: dict[tuple[int, int], float] = {}
+    smoothed_seg_reverse: dict[tuple[int, int], float] = {}
+    smoothed_stop: dict[tuple[int, int], float] = {}
     wait_extra = dict(reliability_extra) if reliability_extra else None
+    crowd_state = None
     agg: dict[str, Any] = {}
     final_gap = gap_tol
     for iteration in range(1, max_iterations + 1):
@@ -140,6 +204,9 @@ def _run_msa_period(
             seq_jitter_s=seq_jitter_s,
             no_car_shares=no_car_shares,
             wait_calc=wait_calc,
+            base_time_s=None,
+            period_index=0,
+            crowd_state=crowd_state,
         )
         raw = agg["route_totals"]
         alpha = 1.0 / iteration
@@ -149,22 +216,55 @@ def _run_msa_period(
                 (1.0 - alpha) * smoothed.get(rid, 0.0)
                 + alpha * raw.get(rid, 0.0)
             )
-        raw_seg = agg["seg_totals"]
-        seg_keys = set(raw_seg) | set(smoothed_seg)
-        for key in seg_keys:
-            smoothed_seg[key] = (
-                (1.0 - alpha) * smoothed_seg.get(key, 0.0)
-                + alpha * raw_seg.get(key, 0.0)
+        raw_seg_forward = agg.get("seg_forward_totals", {})
+        raw_seg_reverse = agg.get("seg_reverse_totals", {})
+        raw_stop = agg.get("seq_stop_totals", {})
+        for key in set(raw_seg_forward) | set(smoothed_seg_forward):
+            smoothed_seg_forward[key] = (
+                (1.0 - alpha) * smoothed_seg_forward.get(key, 0.0)
+                + alpha * raw_seg_forward.get(key, 0.0)
             )
-        if smoothed_seg:
-            agg["seg_totals"] = smoothed_seg
+        for key in set(raw_seg_reverse) | set(smoothed_seg_reverse):
+            smoothed_seg_reverse[key] = (
+                (1.0 - alpha) * smoothed_seg_reverse.get(key, 0.0)
+                + alpha * raw_seg_reverse.get(key, 0.0)
+            )
+        for key in set(raw_stop) | set(smoothed_stop):
+            smoothed_stop[key] = (
+                (1.0 - alpha) * smoothed_stop.get(key, 0.0)
+                + alpha * raw_stop.get(key, 0.0)
+            )
+        agg["seg_forward_totals"] = smoothed_seg_forward
+        agg["seg_reverse_totals"] = smoothed_seg_reverse
+        agg["seq_stop_totals"] = smoothed_stop
+        crowd_state = _build_crowd_state(
+            route_sequences,
+            smoothed_seg_forward,
+            smoothed_seg_reverse,
+            smoothed_stop,
+            seq_headway_min,
+            vehicle_specs,
+            period_hours,
+        )
         denom = max(sum(smoothed.values()), 1.0)
         final_gap = (
             sum(
                 abs(smoothed.get(r, 0.0) - prev_smoothed.get(r, 0.0))
                 for r in rids
             )
-            / denom
+            + sum(
+                abs(v - smoothed_seg_forward.get(k, 0.0))
+                for k, v in raw_seg_forward.items()
+            )
+            + sum(
+                abs(v - smoothed_seg_reverse.get(k, 0.0))
+                for k, v in raw_seg_reverse.items()
+            )
+        ) / max(
+            denom
+            + sum(smoothed_seg_forward.values())
+            + sum(smoothed_seg_reverse.values()),
+            1.0,
         )
         prev_smoothed = dict(smoothed)
         if iteration > 1 and final_gap <= gap_tol:
