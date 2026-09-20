@@ -797,7 +797,6 @@ def _compute_costs(
 def _compute_purpose_matrix(
     production: np.ndarray,
     zones: Zones,
-    config: Any,
     reporter: Any,
     *,
     attraction: np.ndarray | None = None,
@@ -811,7 +810,7 @@ def _compute_purpose_matrix(
         production,
         zones,
         attraction=attraction,
-        purposes=getattr(config, "od_purposes_definitions", PURPOSE_DEFAULTS),
+        purposes=PURPOSE_DEFAULTS,
     )
     matrix = purpose_od.matrix
     purpose_periods = periods_from_purpose_blend(
@@ -1056,14 +1055,18 @@ def _run_generated_od(
         ) = _compute_purpose_matrix(
             production,
             zones,
-            config,
             reporter,
             attraction=attraction,
         )
     else:
         # Единый OD-движок: Takt. Без разложения по целям
         # используется та же модель с профилями PURPOSE_DEFAULTS.
-        purpose_od = build_purpose_od(production, zones)
+        purpose_od = build_purpose_od(
+            production,
+            zones,
+            attraction=attraction,
+            purposes=PURPOSE_DEFAULTS,
+        )
         matrix = purpose_od.matrix
     if cache_dir is not None and getattr(cache, "write_enabled", True):
         _save_generated_od(
