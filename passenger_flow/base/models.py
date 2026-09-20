@@ -358,5 +358,6 @@ class FlowResult:
     line_results: tuple[LineResult, ...] = ()
     revenue_day: float = 0.0
     opex_day: float = 0.0
+    capital_cost_eur: float = 0.0
     capex_day: float = 0.0
     fleet_total: float = 0.0
