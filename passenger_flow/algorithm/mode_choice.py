@@ -14,8 +14,6 @@ import numpy as np
 from ..base.models import ModeChoiceConfig
 from ..base.defaults import TAKT_CAR_PERIOD_MT, TAKT_CAR_PERIOD_NT
 
-_TAKT_DEBUG_MODE_CALLS: list[dict[str, float | None]] = []
-
 
 def _takt_no_car_shares(
     mode: ModeChoiceConfig,
@@ -186,15 +184,6 @@ def _takt_mode_shares(
     )
     rest_u = math.exp(-max(0.0, float(rest_s)) / ks) if rest_s is not None and rest_s > 0 else 0.0
 
-    if len(_TAKT_DEBUG_MODE_CALLS) < 5:
-        _TAKT_DEBUG_MODE_CALLS.append({
-            "be": float(be),
-            "carCostS": float(_takt_car_cost_s(mode, od_meters, road_time_s=road_time_s, period_multiplier=car_period_multiplier)),
-            "transitCostS": None if transit_s is None else float(transit_s),
-            "fareEur": float(fare_eur),
-            "roadTimeS": None if road_time_s is None else float(road_time_s),
-            "carMultiplier": float(car_period_multiplier),
-        })
     us = transit_u + car_u + walk_u + ebike_u + rest_u
     hr = transit_u + walk_u + ebike_u + rest_u
     if us <= 0.0:

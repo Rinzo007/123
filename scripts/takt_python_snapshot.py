@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Run the canonical synthetic P3 case through passenger_flow and emit JSON."""
-# temporary diagnostics for exact Takt Rr parity
 
 from __future__ import annotations
 
@@ -13,8 +12,6 @@ from types import SimpleNamespace
 import numpy as np
 
 from passenger_flow import TAKT_PERIODS, run_passenger_flow
-import passenger_flow.algorithm.mode_choice as _mode_choice_debug
-import passenger_flow.algorithm.assign as _assign_debug
 
 
 @dataclass(frozen=True)
@@ -129,10 +126,6 @@ def main() -> int:
             "capitalCostM": float(result.capital_cost_eur / 1_000_000.0),
             "revenueDay": js_round(result.raw_revenue_day),
             "opexDay": js_round(result.raw_opex_day),
-            "transitS": float(result.raw_transit_s),
-            "transitSByPeriod": [float(v) for v in result.raw_transit_s_by_period],
-            "modeChoiceDebug": list(_mode_choice_debug._TAKT_DEBUG_MODE_CALLS),
-            "rrDebug": dict(_assign_debug._TAKT_DEBUG_RR),
             "modeSplit": {
                 "transit": raw_assigned / mode_den,
                 "car": raw_car / mode_den,

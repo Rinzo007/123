@@ -680,10 +680,6 @@ def _merge_pass_aggregates(
     accum["two_wheel_trips"] += pass_agg["two_wheel_trips"]
     accum["rest_trips"] += pass_agg.get("rest_trips", 0.0)
     accum["fare_revenue"] += pass_agg["fare_revenue"]
-    if accum.get("last_transit_s", 0.0) == 0.0 and "last_transit_s" in pass_agg:
-        accum["last_transit_s"] = float(pass_agg["last_transit_s"])
-    if "transit_s_by_period" in pass_agg:
-        accum.setdefault("transit_s_by_period", {}).update(pass_agg["transit_s_by_period"])
 
 
 def _empty_accumulator() -> dict[str, Any]:
@@ -695,8 +691,6 @@ def _empty_accumulator() -> dict[str, Any]:
         "two_wheel_trips": 0.0,
         "rest_trips": 0.0,
         "fare_revenue": 0.0,
-        "last_transit_s": 0.0,
-        "transit_s_by_period": {},
         "route_totals": defaultdict(float),
         "dir_totals": defaultdict(float),
         "stop_totals": defaultdict(_empty_stop_entry),
@@ -1276,8 +1270,6 @@ def run_passenger_flow(
         two_wheel_trips=merged_two_wheel,
         rest_trips=merged_rest,
         period_flows=tuple(period_flows),
-        raw_transit_s=float(accum.get("last_transit_s", 0.0)),
-        raw_transit_s_by_period=tuple(float(v) for _, v in sorted(accum.get("transit_s_by_period", {}).items())),
         line_results=line_results,
     )
     interzonal_trips = max(total_trips - intrazonal_trips, 1.0)
