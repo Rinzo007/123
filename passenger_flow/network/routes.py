@@ -303,15 +303,16 @@ def _best_direct_spans(
     origins: list[tuple[int, int, int]],
     destinations: list[tuple[int, int, int]],
 ) -> dict[int, tuple[int, int, int]]:
-    """Один «кандидат» на (rid, di): пара (orig_pos, dest_pos) с минимальным
-    временем проезда, чтобы маршрут не дублировался для каждой пары
-    остановок зоны (дедупликация по маршруту).
+    """Кандидат на (rid, di) с минимальным числом межостановочных шагов.
+
+    JS-граф допускает переход между любыми двумя открытыми остановками одной
+    последовательности; порядок позиций поэтому не фиксируется.
     """
     best_span: dict[int, tuple[int, int, int]] = {}
     for orig_seq_idx, _orig_stop_idx, orig_pos in origins:
         for dest_seq_idx, _dest_stop_idx, dest_pos in destinations:
-            if orig_seq_idx == dest_seq_idx and orig_pos < dest_pos:
-                span = dest_pos - orig_pos
+            if orig_seq_idx == dest_seq_idx and orig_pos != dest_pos:
+                span = abs(dest_pos - orig_pos)
                 prev = best_span.get(orig_seq_idx)
                 if prev is None or span < prev[0]:
                     best_span[orig_seq_idx] = (span, orig_pos, dest_pos)
@@ -624,7 +625,7 @@ def _destination_positions(
             pos
             for seq, _stop, pos in destinations
             if seq == seq_idx
-            and (pos != current_pos if closed else pos > current_pos)
+            and (pos != current_pos if closed else pos != current_pos)
         }
     )
 
@@ -636,19 +637,41 @@ def _transfer_targets(
     excluded: set[int],
     transfer_radius_m: float,
 ) -> Iterator[tuple[int, dict[str, Any], dict[str, Any]]]:
-    """Генерирует все допустимые переходы A→B после current_pos."""
-    closed_a = bool(route_stop_sequences[seq_a].get("closed"))
+    """Генерирует ближайший допустимый переход A→B для каждой другой линии.
+
+    Как и JS ``Et``, для каждой остановки A выбирается только ближайшая
+    остановка каждой другой линии в пределах радиуса пересадки. Направление
+    внутри последовательности линии не ограничивается индексом остановки.
+    """
     for ta in route_stop_sequences[seq_a]["stops"]:
         if int(ta["position"]) == current_pos:
-            continue
-        if not closed_a and int(ta["position"]) <= current_pos:
             continue
         for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
                 continue
+            best_tb: dict[str, Any] | None = None
+            best_dist = float(transfer_radius_m) + 1.0
             for tb in data_b["stops"]:
-                if _transfers_match(ta, tb, transfer_radius_m):
-                    yield seq_b, ta, tb
+                distance_m = haversine_meters(
+                    float(ta["lat"]),
+                    float(ta["lon"]),
+                    float(tb["lat"]),
+                    float(tb["lon"]),
+                )
+                if distance_m > transfer_radius_m + 1e-9:
+                    continue
+                if (
+                    best_tb is None
+                    or distance_m < best_dist - 1e-9
+                    or (
+                        math.isclose(distance_m, best_dist, rel_tol=0.0, abs_tol=1e-9)
+                        and int(tb["position"]) > int(best_tb["position"])
+                    )
+                ):
+                    best_tb = tb
+                    best_dist = distance_m
+            if best_tb is not None:
+                yield seq_b, ta, best_tb
 
 
 def _dedupe_journeys(
