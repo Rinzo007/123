@@ -51,6 +51,7 @@ from scripts.takt_differential import compare_snapshots
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
+    _build_transfer_edge_index,
     _ride_edge_time_min,
     _route_ride_time_min,
     build_journeys,
@@ -454,6 +455,19 @@ def test_closed_one_way_route_does_not_add_reverse_state() -> None:
     assert journeys
     assert journeys[0].legs == ((0, 1, 0),)
 
+
+def test_transfer_index_is_specific_to_current_stop() -> None:
+    a = _synthetic_sequence([1, 2, 3])
+    b = _synthetic_sequence([4, 5, 6])
+    a["_seq_idx"] = 0; b["_seq_idx"] = 1
+    b["stops"][0]["lat"] = a["stops"][0]["lat"] + 0.0001
+    b["stops"][1]["lat"] = a["stops"][2]["lat"] + 0.0001
+    index = _build_transfer_edge_index([a, b], 800.0)
+    first_targets = index[(0, 0)]
+    last_targets = index[(0, 2)]
+    assert first_targets and last_targets
+    assert first_targets[0][2]["id"] == 4
+    assert last_targets[0][2]["id"] == 5
 
 def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
