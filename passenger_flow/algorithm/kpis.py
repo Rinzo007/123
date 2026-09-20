@@ -144,7 +144,7 @@ def _shared_capacity_min_headways(
         int(seq["route_id"]): 60.0 / max(float(vehicle_spec_for_route_type(seq.get("route_type_key", "bus")).track_tph), 1e-9)
         for seq in route_sequences
     }
-    by_seq = {int(seq.get("_seq_idx", i)): seq for i, seq in enumerate(route_sequences)}
+    by_route = {int(seq["route_id"]): seq for seq in route_sequences}
     for key, lines in section_lines.items():
         if len(lines) < 2:
             continue
@@ -153,7 +153,7 @@ def _shared_capacity_min_headways(
         for period_index in range(5):
             line_freq: dict[int, float] = {}
             for seq_idx in lines:
-                seq = by_seq.get(int(seq_idx))
+                seq = by_route.get(int(seq_idx))
                 if seq is None:
                     continue
                 h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
