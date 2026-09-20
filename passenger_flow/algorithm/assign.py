@@ -19,7 +19,11 @@ from ..base.takt import (
     _takt_po_seconds,
 )
 from ..network.geometry import _stop_key, haversine_meters
-from ..network.routes import _route_segment_indices, build_journeys
+from ..network.routes import (
+    _route_segment_indices,
+    _scheduled_transfer_wait_min,
+    build_journeys,
+)
 from .mode_choice import (
     _od_fare_eur,
     _takt_mode_shares,
@@ -248,7 +252,7 @@ def _journey_crowd_extra(
     wait_extra: Mapping[int, float] | None = None,
     period_index: int = 0,
 ) -> np.ndarray:
-    """Дополнительное время ожидания по Takt Fr→unev→Rr."""
+    """Дополнительное ожидание по Takt Fr→unev→Rr, без double-count hs."""
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
     seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
     unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
@@ -263,18 +267,29 @@ def _journey_crowd_extra(
             first_seg, forward = selected[0]
             loads = seg_forward if forward else seg_reverse
             lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
-            wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
             if leg_no == 0:
+                wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
                 unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
                 extra_s += wait_s * (unev * lf - 1.0)
             else:
-                extra_s += wait_s * (lf - 1.0)
+                prev_seq, _prev_a, prev_b = journey.legs[leg_no - 1]
+                prev_stop = route_sequences[prev_seq]["stops"][prev_b]
+                curr_stop = route_sequences[seq_idx]["stops"][a]
+                transfer_wait_min = _scheduled_transfer_wait_min(
+                    prev_seq,
+                    seq_idx,
+                    prev_stop,
+                    curr_stop,
+                    stop_time_min=0.0,
+                    route_stop_sequences=route_sequences,
+                    seq_headway_min=seq_headway_min,
+                    seq_jitter_s={},
+                )
+                extra_s += float(transfer_wait_min) * 60.0 * (lf - 1.0)
         for seq_idx, _a, _b in journey.legs:
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
         result[jidx] = max(0.0, extra_s / 60.0)
     return result
-# ===== Накопление загрузок по вариантам =====
-
 
 def _accumulate_stop(
     entry: dict[str, Any],
