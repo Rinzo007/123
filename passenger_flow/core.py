@@ -401,7 +401,12 @@ def _validate_flow_inputs(
     _finite_number("walk_to_stop_min", walk_to_stop_min, nonnegative=True)
     _finite_number("transfer_penalty_min", transfer_penalty_min, nonnegative=True)
     _finite_number("logit_temp", logit_temp, positive=True)
-    _validate_base_time(\n        base_time_s,\n        n_zones,\n        len(periods) if periods else 1,\n        int(np.count_nonzero(matrix > 0.0)),\n    )
+    _validate_base_time(
+        base_time_s,
+        n_zones,
+        len(periods) if periods else 1,
+        int(np.count_nonzero(matrix > 0.0)),
+    )
     _validate_sparse_od(od_sparse, n_zones)
     _validate_transfer_args(max_transfers, transfer_radius_m)
     _validate_headway_args(headway_min, headway_by_route)
