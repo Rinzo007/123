@@ -176,6 +176,7 @@ def _apply_car_only_modes(
     zj: int,
     no_car_share: float | None = None,
     rest_s: float | None = None,
+    car_period_multiplier: float = 1.0,
 ) -> None:
     """Fallback без транзитного пути: авто, пешком и (возможно) eBike.
 
@@ -192,6 +193,8 @@ def _apply_car_only_modes(
         0.0,
         rest_s=rest_s,
         no_car_share=no_car_share,
+        road_time_s=rest_s,
+        car_period_multiplier=car_period_multiplier,
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
@@ -208,6 +211,7 @@ def _split_transit_trips(
     transit_s: float,
     base_time_s: float | None,
     no_car_share: float | None = None,
+    car_period_multiplier: float = 1.0,
 ) -> float:
     """Считает mode shares по Takt и возвращает число транзитных поездок.
 
@@ -225,6 +229,8 @@ def _split_transit_trips(
         fare_eur,
         rest_s=base_time_s,
         no_car_share=no_car_share,
+        road_time_s=base_time_s,
+        car_period_multiplier=car_period_multiplier,
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
@@ -417,6 +423,7 @@ def _assign_od(
     base_time_s: np.ndarray | None = None,
     period_index: int = 0,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    car_period_multiplier: float = 1.0,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -436,6 +443,7 @@ def _assign_od(
         if trips <= 0:
             continue
         totals.period_total += trips
+        road_time_s = _base_time_for_pair(base_time_s, period_index, zi, zj)
 
         origin_stops = _line_access_stops(
             zone_nearest.get(zi, []), route_sequences
@@ -454,6 +462,8 @@ def _assign_od(
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                rest_s=road_time_s,
+                car_period_multiplier=car_period_multiplier,
             )
             continue
 
@@ -506,12 +516,11 @@ def _assign_od(
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
                 transit_s=float(_takt_route_choice(travel_times * 60.0)[1]),
-                base_time_s=_base_time_for_pair(
-                    base_time_s, period_index, zi, zj
-                ),
+                base_time_s=road_time_s,
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                car_period_multiplier=car_period_multiplier,
             )
         else:
             transit_trips = trips
