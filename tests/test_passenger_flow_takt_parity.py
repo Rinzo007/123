@@ -26,6 +26,7 @@ import numpy as np
 
 from passenger_flow.algorithm.mode_choice import (
     _takt_mode_shares,
+    _takt_mode_shares_with_rest,
     _takt_no_car_shares,
     _takt_route_probs,
 )
@@ -35,7 +36,11 @@ from passenger_flow.base.takt import (
     _takt_hold_prob,
     _takt_po_seconds,
 )
-from passenger_flow.network.routes import _direct_journeys, _route_ride_time_min
+from passenger_flow.network.routes import (
+    _direct_journeys,
+    _route_ride_time_min,
+    build_journeys,
+)
 
 
 FIXTURE = json.loads(
@@ -135,3 +140,79 @@ def test_explicit_cumt_drives_direct_journey_time() -> None:
     )
     assert len(journeys) == 1
     assert math.isclose(journeys[0][0], case["expected_min"] + 7.5, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def _synthetic_sequence(ids: list[int]) -> dict:
+    return {
+        "_seq_idx": 0,
+        "route_id": 1,
+        "route_name": "synthetic",
+        "route_type": "bus",
+        "route_type_key": "bus",
+        "access_m": 500.0,
+        "di": 0,
+        "direction_name": "A",
+        "stops": [
+            {
+                "id": stop_id,
+                "name": str(stop_id),
+                "lat": 52.0 + i * 0.001,
+                "lon": 4.0 + i * 0.001,
+                "position": i,
+            }
+            for i, stop_id in enumerate(ids)
+        ],
+        "cum_t_s": [0.0, 60.0, 120.0],
+        "cycle_run_s": 120.0,
+        "dwell_s": 0.0,
+        "speed_kmh": 18.0,
+        "closed": False,
+        "both_ways": False,
+        "phase_s": 0.0,
+        "open": [True, True, True],
+        "open_pre": [0, 1, 2, 3],
+    }
+
+
+def test_base_t_rest_alternative_is_present_when_base_time_exists() -> None:
+    got = _takt_mode_shares_with_rest(
+        ModeChoiceConfig(),
+        5000.0,
+        1200.0,
+        1.2,
+        rest_s=1500.0,
+    )
+    assert len(got) == 5
+    assert got[4] > 0.0
+    assert math.isclose(sum(got), 1.0, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def test_multi_leg_search_reaches_four_legs() -> None:
+    seqs = [
+        _synthetic_sequence([1, 2, 3]),
+        _synthetic_sequence([2, 4, 5]),
+        _synthetic_sequence([5, 6, 7]),
+        _synthetic_sequence([7, 8, 9]),
+    ]
+    origins = [(0, 0, 0)]
+    destinations = [(3, 2, 2)]
+    journeys = build_journeys(
+        origins,
+        destinations,
+        seqs,
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=5.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=3,
+        transfer_penalty_calc="fixed",
+        seq_headway_min=None,
+        seq_jitter_s=None,
+        wait_calc="takt",
+    )
+    assert any(len(legs) == 4 for _time, legs in journeys)
+    assert len(journeys) <= 3
+
+
