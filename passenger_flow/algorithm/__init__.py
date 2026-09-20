@@ -5,7 +5,6 @@ from __future__ import annotations
 from .assign import _assign_od
 from .kpis import _build_line_kpis
 from .mode_choice import (
-    _car_cap_prob,
     _logit_probs,
     _mode_minutes,
     _od_fare_eur,
@@ -22,7 +21,6 @@ __all__ = [
     "_assign_od",
     "_build_line_kpis",
     "_build_wait_extra",
-    "_car_cap_prob",
     "_expected_wait_min",
     "_logit_probs",
     "_mode_minutes",
