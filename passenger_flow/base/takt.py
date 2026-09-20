@@ -18,8 +18,17 @@ from __future__ import annotations
 
 import math
 
+from .defaults import (
+    TAKT_FARE_BASE_EUR,
+    TAKT_FARE_CAP_EUR,
+    TAKT_FARE_PER_KM_EUR,
+    TAKT_NO_CAR_FACTOR,
+    TAKT_RIDER_BIAS_S,
+    TAKT_VOT_S_PER_EUR,
+    TAKT_WALK_CIRCUITY,
+    TAKT_WALK_SPEED_MPS,
+)
 from .models import Period
-
 # ---------------------------------------------------------------------------
 # Ожидание на посадке — Ze (bc1e6aad22337e5eeaa8.js, ок. "@2731")
 # ---------------------------------------------------------------------------
@@ -57,17 +66,17 @@ _TAKT_REST_DEFAULTS: dict[str, float] = {
     "waitS": 240.0,            # ожидание, с
     "circuity": 1.3,           # извилистость маршрута
 }
-_TAKT_NO_CAR_FACTOR = 0.78     # Aa: доля «без авто» × Aa → отказ от авто
-_TAKT_VOT_S_PER_EUR = 360.0    # Pa: значение времени по умолчанию, с/евро
-_TAKT_RIDER_BIAS_S = 0.0       # Wo: постоянный сдвиг стоимости транзита, с
+_TAKT_NO_CAR_FACTOR = TAKT_NO_CAR_FACTOR     # Aa: доля «без авто» × Aa → отказ от авто
+_TAKT_VOT_S_PER_EUR = TAKT_VOT_S_PER_EUR    # Pa: значение времени по умолчанию, с/евро
+_TAKT_RIDER_BIAS_S = TAKT_RIDER_BIAS_S       # Wo: постоянный сдвиг стоимости транзита, с
 
 # ---------------------------------------------------------------------------
 # Тариф — da/pa/ha/Y/me/Xe (bc1e6aad и 64b3e62b, ок. "@2549"/"@10560"):
 # ``fare = min(max(3, base), base + perKm * dist_km)``.
 # ---------------------------------------------------------------------------
-_TAKT_FARE_BASE_EUR = 0.6
-_TAKT_FARE_PER_KM_EUR = 0.12
-_TAKT_FARE_CAP_EUR = 3.0             # pa/me: потолок в min(max(pa, base), base+d·perKm)
+_TAKT_FARE_BASE_EUR = TAKT_FARE_BASE_EUR
+_TAKT_FARE_PER_KM_EUR = TAKT_FARE_PER_KM_EUR
+_TAKT_FARE_CAP_EUR = TAKT_FARE_CAP_EUR             # pa/me: потолок в min(max(pa, base), base+d·perKm)
 _TAKT_FARE_EPS = 1e-6                # Ge: порог «тариф не изменён»
 _TAKT_FARE_REVENUE_FACTOR = 0.9      # Xe/ha: учёт доли выручки
 
@@ -410,14 +419,14 @@ TAKT_FLEET: dict[str, dict[str, object]] = {
 # ---------------------------------------------------------------------------
 # Ходьба и пересадки — 64b3e62b167b2f7dcfa2.js: ae, Za, Uo, ec, kn, Ko, tc
 # ---------------------------------------------------------------------------
-_TAKT_WALK_SPEED_MPS = 1.33           # ae: скорость пешехода, м/с
+_TAKT_WALK_SPEED_MPS = TAKT_WALK_SPEED_MPS           # ae: скорость пешехода, м/с
 _TAKT_TRANSFER_MAX_WALK_M = 800.0     # Za: максимум пешей пересадки, м
 _TAKT_WALK_BASE_S = 405.0             # Uo: базовая стоимость выхода, с
 _TAKT_WALK_PER_M_S = 0.25             # ec: добавка за метр, с
 _TAKT_WALK_DISUT_PER_M_S = 1.0        # kn: дискомфорт за метр ходьбы, с/м
 _TAKT_TRANSFER_WAIT_FACTOR = 1.0      # Ko: множитель ожидания на пересадке
 _TAKT_TURNBACK_FIXED_S = 405.0        # tc: резерв оборота на конечной, с
-_TAKT_WALK_CIRCUITY = 1.25            # извилистость полного пешего пути Ze
+_TAKT_WALK_CIRCUITY = TAKT_WALK_CIRCUITY            # извилистость полного пешего пути Ze
 
 # ---------------------------------------------------------------------------
 # Crowding (перегрузка) — tn/er/Ua/ti (085f71988f12f8f584de.js).
