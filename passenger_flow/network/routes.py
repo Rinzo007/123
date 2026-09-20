@@ -1179,11 +1179,40 @@ def _enumerate_journeys(
                 fixed_access_min = _takt_ri_anchor_min() + access_min + egress_min
             else:
                 fixed_access_min = walk_to_stop_min
-            total = cost + ride + fixed_access_min + first_wait_by_seq.get(first_seq, 0.0)
             signature = final_legs
             if signature not in seen_journeys:
                 seen_journeys.add(signature)
-                journeys.append(JourneyAlternative(total, final_legs))
+                # Takt ri() first evaluates the shortest transit-network
+                # candidate without the initial wait/anchor. Keep that
+                # candidate ahead of the direct wait+anchor alternative.
+                if use_takt_access:
+                    pool_access_min = _takt_pool_access_min(
+                        access_by_stop.get(
+                            (first_seq, int(final_legs[0][1])), 0.0
+                        )
+                    )
+                    pool_egress_min = _takt_pool_access_min(
+                        egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
+                    )
+                    pool_total = cost + ride + pool_access_min + pool_egress_min
+                    journeys.append(JourneyAlternative(pool_total, final_legs))
+                    direct_total = (
+                        cost
+                        + ride
+                        + fixed_access_min
+                        + first_wait_by_seq.get(first_seq, 0.0)
+                    )
+                    if abs(direct_total - pool_total) > 1e-12:
+                        journeys.append(JourneyAlternative(direct_total, final_legs))
+                else:
+                    journeys.append(
+                        JourneyAlternative(
+                            cost + ride + fixed_access_min + first_wait_by_seq.get(
+                                first_seq, 0.0
+                            ),
+                            final_legs,
+                        )
+                    )
 
         # Full same-line edges are evaluated lazily when terminating at a
         # destination or transferring. Because every pair of stops is linked
