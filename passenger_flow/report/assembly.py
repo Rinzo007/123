@@ -283,6 +283,7 @@ def assemble_flow_result(
             sum(r.revenue_day for r in rounded_line_results), 1
         ),
         opex_day=round_half_up(sum(r.opex_day for r in rounded_line_results), 1),
+        capital_cost_eur=round_half_up(sum(r.capital_cost_eur for r in rounded_line_results), 1),
         capex_day=round_half_up(sum(r.capex_day for r in rounded_line_results), 1),
         fleet_total=round_half_up(sum(r.fleet for r in rounded_line_results), 1),
     )
