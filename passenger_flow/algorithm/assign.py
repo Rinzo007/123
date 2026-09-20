@@ -15,7 +15,6 @@ import numpy as np
 from ...od import Zones
 from ..base.models import ModeChoiceConfig
 from ..base.takt import (
-    _takt_crowding_ride_mult,
     _takt_crowding_wait_mult,
     _takt_po_seconds,
 )
