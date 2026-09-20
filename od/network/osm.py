@@ -20,8 +20,8 @@ from scipy import sparse
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
-from ...cache import JsonCache
-from ...type_defs import Coordinate
+from cache import JsonCache
+from type_defs import Coordinate
 from ..model import (
     OdMatrixError,
     Zones,
