@@ -16,7 +16,11 @@ from .defaults import (
     TAKT_NO_CAR_FACTOR,
     TAKT_NO_CAR_SHARE,
     TAKT_RIDER_BIAS_S,
-    TAKT_TWO_WHEEL_CIRCUITY,
+    TAKT_REST_ACCESS_S,
+    TAKT_REST_BASE_SPEED_KMH,
+    TAKT_REST_CONT_SPEED_KMH,
+    TAKT_REST_CIRCUITY,
+    TAKT_REST_WAIT_S,    TAKT_TWO_WHEEL_CIRCUITY,
     TAKT_TWO_WHEEL_FIXED_S,
     TAKT_TWO_WHEEL_PER_KM_EUR,
     TAKT_TWO_WHEEL_REACH_M,
@@ -101,6 +105,8 @@ class PeriodFlow:
     assigned_trips: float
     car_trips: float
     walk_trips: float
+    two_wheel_trips: float = 0.0
+    rest_trips: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +331,11 @@ class ModeChoiceConfig:
     two_wheel_circuity: float = TAKT_TWO_WHEEL_CIRCUITY
     # Постоянная поправка стоимости транзита Wo в секундах.
     rider_bias_s: float = TAKT_RIDER_BIAS_S
+    rest_base_speed_kmh: float = TAKT_REST_BASE_SPEED_KMH
+    rest_cont_speed_kmh: float = TAKT_REST_CONT_SPEED_KMH
+    rest_access_s: float = TAKT_REST_ACCESS_S
+    rest_wait_s: float = TAKT_REST_WAIT_S
+    rest_circuity: float = TAKT_REST_CIRCUITY
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +351,7 @@ class FlowResult:
     car_trips: float = 0.0
     walk_trips: float = 0.0
     two_wheel_trips: float = 0.0
+    rest_trips: float = 0.0
     period_flows: tuple[PeriodFlow, ...] = ()
     line_results: tuple[LineResult, ...] = ()
     revenue_day: float = 0.0
