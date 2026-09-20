@@ -336,6 +336,21 @@ def _build_route_stop_sequence(
             stops = _direction_stops(direction)
             if not stops:
                 continue
+            geometry_legs = _optional_value(
+                direction,
+                ("legs", "geometry_legs", "decoded_legs"),
+            )
+            if geometry_legs is None:
+                geometry_legs = _optional_value(
+                    route, ("legs", "geometry_legs", "decoded_legs")
+                )
+            segment_lengths = _optional_value(
+                direction, ("segLen", "seg_len", "segment_lengths")
+            )
+            if segment_lengths is None:
+                segment_lengths = _optional_value(
+                    route, ("segLen", "seg_len", "segment_lengths")
+                )
             explicit_cum = _optional_value(
                 direction,
                 ("cumT", "cum_t", "cumulative_time_s", "cum_time_s"),
@@ -430,6 +445,8 @@ def _build_route_stop_sequence(
                     "route_type_key": route_type_key,
                     "headways": headways,
                     "access_m": access_m,
+                    "geometry_legs": geometry_legs,
+                    "segment_lengths_m": segment_lengths,
                     "capacity": (
                         float(route_capacity)
                         if route_capacity is not None
