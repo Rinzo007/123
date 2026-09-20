@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from typing import Any, NamedTuple
 import math
-from typing import Any
 
 from ...models import RouteLike
 from ...support import type_label
@@ -27,9 +27,16 @@ from ..base.takt import (
 from .geometry import _takt_transfer_penalty_min, _transfers_match, haversine_meters
 
 
-# Один вариант поездки: (полное время в минутах, кортеж ножек).
-# Ножка — (seq_idx, позиция посадки, позиция высадки).
-_Journey = tuple[float, tuple[tuple[int, int, int], ...]]
+class JourneyAlternative(NamedTuple):
+    """Вариант поездки с именованными полями и tuple-совместимостью.
+
+    ``total_time_min`` — полное время варианта в минутах;
+    ``legs`` — ножки ``(seq_idx, позиция посадки, позиция высадки)``.
+    """
+    total_time_min: float
+    legs: tuple[tuple[int, int, int], ...]
+
+_Journey = JourneyAlternative
 
 
 # ===== Последовательности остановок маршрутов =====
@@ -335,7 +342,7 @@ def _direct_journeys(
         )
         wait_min = _boarding_wait_min(headway, wait_time_min, wait_calc)
         journeys.append(
-            (
+            JourneyAlternative(
                 ride_min + walk_to_stop_min + wait_min,
                 ((seq_idx, orig_pos, dest_pos),),
             )
@@ -593,7 +600,7 @@ def _transfer_journeys(
                     transfer_penalty_calc=transfer_penalty_calc,
                 )
                 journeys.append(
-                    (
+                    JourneyAlternative(
                         time_min + walk_to_stop_min,
                         (
                             (seq_a, a_pos, ta["position"]),
