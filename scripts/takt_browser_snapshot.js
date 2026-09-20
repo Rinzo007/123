@@ -161,7 +161,8 @@ async function main() {
   );
 
   const line = result.lines?.[0];
-  const snapshot = {\n    debug: sandbox.__TAKT_debug ?? null,
+  const snapshot = {
+    debug: sandbox.__TAKT_debug ?? null,
     reference: {
       engine: "Takt web bundle",
       bundle: "bd956ff0a1875604740f.js",
