@@ -206,7 +206,7 @@ def _round_line_result(r: LineResult) -> LineResult:
         route_name=r.route_name,
         mode=r.mode,
         trips=round_half_up(r.trips, 1),
-        cycle_km=round_half_up(r.cycle_km, 1),
+        cycle_km=round_half_up(r.cycle_km, 2),
         cycle_min=round_half_up(r.cycle_min, 1),
         fleet=round_half_up(r.fleet, 1),
         veh_km_day=round_half_up(r.veh_km_day, 1),
