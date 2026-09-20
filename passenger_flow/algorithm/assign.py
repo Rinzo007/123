@@ -279,11 +279,9 @@ def _journey_crowd_extra(
                         extra_s += float(stop_extra.get((seq_idx, arrival_stop), 0.0))
                     prev_stop = arrival_stop
             if seq_headway_min is not None and seq_idx in seq_headway_min and selected_segments:
-                first_seg, _first_forward = selected_segments[0]
-                lf = max(
-                    float(seg_forward.get((seq_idx, first_seg), 0.0)),
-                    float(seg_reverse.get((seq_idx, first_seg), 0.0)),
-                )
+                first_seg, first_forward = selected_segments[0]
+                loads = seg_forward if first_forward else seg_reverse
+                lf = float(loads.get((seq_idx, first_seg), 0.0))
                 if lf > 1.0:
                     base_wait_s = _takt_po_seconds(
                         float(seq_headway_min[seq_idx])
