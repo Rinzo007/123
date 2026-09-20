@@ -45,6 +45,7 @@ from passenger_flow.network.routes import (
     _direct_journeys,
     _route_ride_time_min,
     build_journeys,
+    _build_route_stop_sequence,
 )
 
 
@@ -274,6 +275,28 @@ def test_multi_leg_search_reaches_four_legs() -> None:
     assert len(journeys) <= 3
 
 
+
+def test_route_sequence_preserves_row_specific_takt_speed() -> None:
+    from types import SimpleNamespace
+
+    stops = [
+        SimpleNamespace(id=1, name="A", latitude=52.0, longitude=4.0),
+        SimpleNamespace(id=2, name="B", latitude=52.01, longitude=4.01),
+    ]
+    direction = SimpleNamespace(name="D", stops=stops)
+    route = SimpleNamespace(
+        ok=True,
+        route_id=501,
+        name="tram 501",
+        route_type="tram",
+        directions=[direction],
+        row="reserved",
+        closed=False,
+        bothWays=False,
+    )
+    seq = _build_route_stop_sequence([route])[0]
+    assert seq["row"] == "reserved"
+    assert math.isclose(seq["speed_kmh"], 25.0, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
     seq = _synthetic_sequence([1, 2, 3])
