@@ -42,7 +42,13 @@ def _close(reference: float, actual: float, abs_tol: float, rel_tol: float) -> b
 
 def _path_matches(path: str, rule: str) -> bool:
     if rule.endswith(".*"):
-        return path.startswith(rule[:-2])
+        prefix = rule[:-1]
+        if path.startswith(prefix):
+            return True
+    if "[*]" in rule:
+        prefix, suffix = rule.split("[*]", 1)
+        if path.startswith(prefix + "[") and path.endswith(suffix):
+            return True
     return path == rule
 
 
