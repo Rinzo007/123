@@ -209,7 +209,8 @@ def _build_route_stop_sequence(
         route_type_key = str(route.route_type).strip().lower()
         route_type_label = type_label(route.route_type)
         fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
-        route_row = _optional_value(route, ("row", "track_row"))
+        explicit_route_row = _optional_value(route, ("row", "track_row"))
+        route_row = explicit_route_row
         default_row = fleet_defaults.get("default_row")
         if route_row is None:
             route_row = default_row
