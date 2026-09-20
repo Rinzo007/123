@@ -375,6 +375,35 @@ def _accumulate_journey(
                 totals.seg_reverse_totals[(seq_idx, seg_i)] += route_trips
 
 
+def _takt_first_leg_r_r_seconds(
+    journey: _Journey,
+    route_sequences: list[dict[str, Any]],
+    *,
+    period_index: int,
+    seq_headway_min: Mapping[int, float] | None,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+) -> float:
+    """Return Takt first-leg Rr/co seconds for one journey."""
+    seq_idx, a, b = journey.legs[0]
+    headway = (
+        float(seq_headway_min.get(seq_idx, 0.0))
+        if seq_headway_min is not None
+        else 0.0
+    )
+    wait_s = _takt_po_seconds(headway) if headway > 0.0 else 360.0
+    seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
+    seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
+    unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
+    selected = _route_segment_indices(route_sequences[seq_idx], a, b)
+    load = 1.0
+    if selected:
+        seg_idx, forward = selected[0]
+        loads = seg_forward if forward else seg_reverse
+        load = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+    unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
+    return wait_s * unev * load
+
+
 def _takt_co_route_probs(
     journeys: list[_Journey],
     route_sequences: list[dict[str, Any]],
