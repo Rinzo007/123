@@ -370,3 +370,4 @@ class FlowResult:
     raw_revenue_day: float = 0.0
     raw_opex_day: float = 0.0
     raw_transit_s: float = 0.0
+    raw_transit_s_by_period: tuple[float, ...] = ()
