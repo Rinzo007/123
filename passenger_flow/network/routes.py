@@ -321,6 +321,7 @@ def _scheduled_transfer_wait_min(
     tb: dict[str, Any],
     *,
     stop_time_min: float,
+    route_stop_sequences: list[dict[str, Any]],
     seq_headway_min: Mapping[int, float],
     seq_jitter_s: Mapping[int, float],
 ) -> float:
@@ -371,6 +372,7 @@ def _transfer_wait_min(
     transfer_wait_min: float | None,
     seq_headway_min: Mapping[int, float] | None,
     seq_jitter_s: Mapping[int, float] | None,
+    route_stop_sequences: list[dict[str, Any]],
 ) -> float:
     """Ожидание на пересадке: по расписанию (если заданы headway/jitter),
     иначе — ``transfer_wait_min`` (или обычное ``wait_time_min``).
@@ -387,6 +389,7 @@ def _transfer_wait_min(
             ta,
             tb,
             stop_time_min=stop_time_min,
+            route_stop_sequences=route_stop_sequences,
             seq_headway_min=seq_headway_min,
             seq_jitter_s=seq_jitter_s,
         )
@@ -460,6 +463,7 @@ def _transfer_journeys(
     transfer_penalty_calc: str,
     seq_headway_min: Mapping[int, float] | None,
     seq_jitter_s: Mapping[int, float] | None,
+    wait_calc: str,
 ) -> list[_Journey]:
     """Все варианты поездки с одной пересадкой между разными маршрутами."""
     journeys: list[_Journey] = []
@@ -485,6 +489,7 @@ def _transfer_journeys(
                     transfer_wait_min=transfer_wait_min,
                     seq_headway_min=seq_headway_min,
                     seq_jitter_s=seq_jitter_s,
+                    route_stop_sequences=route_stop_sequences,
                 )
                 headway_a = (
                     seq_headway_min.get(seq_a)
@@ -577,6 +582,7 @@ def build_journeys(
                 transfer_penalty_calc=transfer_penalty_calc,
                 seq_headway_min=seq_headway_min,
                 seq_jitter_s=seq_jitter_s,
+                wait_calc=wait_calc,
             )
         )
     return journeys
