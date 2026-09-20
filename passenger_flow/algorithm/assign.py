@@ -398,6 +398,7 @@ def _assign_od(
     base_time_s: np.ndarray | None = None,
     period_index: int = 0,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     car_period_multiplier: float = 1.0,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
@@ -458,6 +459,7 @@ def _assign_od(
             seq_jitter_s=seq_jitter_s,
             wait_calc=wait_calc,
             crowd_state=crowd_state,
+            transfer_index=transfer_index,
         )
         if not journeys:
             _apply_car_only_modes(
