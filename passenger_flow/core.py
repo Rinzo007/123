@@ -226,8 +226,12 @@ def _validate_base_time(
             raise PassengerFlowError("base_time_s содержит меньше периодов, чем periods")
     else:
         raise PassengerFlowError("base_time_s должен быть NxN или [period,N,N]")
-    if not np.isfinite(base_time_s).all() or np.any(base_time_s < 0.0):
-        raise PassengerFlowError("base_time_s должен содержать конечные неотрицательные значения")
+    if np.isinf(base_time_s).any() or np.any(
+        np.isfinite(base_time_s) & (base_time_s < 0.0)
+    ):
+        raise PassengerFlowError(
+            "base_time_s должен содержать неотрицательные значения или NaN"
+        )
 
 def _validate_flow_inputs(
     matrix: np.ndarray,
