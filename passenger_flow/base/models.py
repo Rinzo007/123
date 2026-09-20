@@ -280,6 +280,7 @@ class LineResult:
     veh_km_day: float = 0.0
     opex_day: float = 0.0
     revenue_day: float = 0.0
+    capital_cost_eur: float = 0.0
     capex_day: float = 0.0
     crowding: float = 0.0
     min_headway: float = 0.0
