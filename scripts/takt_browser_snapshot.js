@@ -75,11 +75,25 @@ sandbox.self = {
 const debugNeedle = "const Xt=at*k+G;";
 const debugIndex = bundle.indexOf(debugNeedle, bundle.indexOf("async function Bs("));
 if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
-const debugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug = { ds: ds[0], Ge: Ge[0], rn: rn[0], ride: no[0], crowd: oo[0], transferWait: ro[0], transfer: ao[0], co: co(bt[0].legs[0], 0, G), btS: bt[0].s, Lr: Lr(bt[0].legs[0], 0), legs: bt[0].legs };\n`;
+const debugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug = {
+  ds: ds[0],
+  Ge: Ge[0],
+  rn: rn[0],
+  ride: no[0],
+  crowd: oo[0],
+  transferWait: ro[0],
+  transfer: ao[0],
+  co: co(bt[0].legs[0], 0, G),
+  btS: bt[0].s,
+  Lr: Lr(bt[0].legs[0], 0),
+  legs: bt[0].legs
+};\n`;
 const instrumented =
   bundle.slice(0, debugIndex) +
   debugCode +
-  bundle.slice(debugIndex).replace("\\n" + "globalThis.__TAKT_Bs = Bs;" + "\\n", "\\n" + "globalThis.__TAKT_Bs = Bs;" + "\\nglobalThis.__TAKT_Bs_debug = () => globalThis.__TAKT_debug;" + "\\n", 1);
+  bundle.slice(debugIndex, markerIndex) +
+  "\nglobalThis.__TAKT_Bs = Bs;\n" +
+  bundle.slice(markerIndex);
 
 vm.runInNewContext(instrumented, sandbox, {
   filename: bundlePath,
