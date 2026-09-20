@@ -338,19 +338,62 @@ def _station_min_headways(
         result[rid] = max(result.get(rid, 0.0), station_min)
     return result
 
-def _build_line_kpis(
-    route_sequences: list[dict[str, Any]],
-    route_totals: Mapping[int, float],
-    headway_min: float,
-    revenue_day: float,
-    assigned_trips: float,
-    vehicle_specs: Mapping[str, VehicleSpec] | None,
-    headway_by_route: Mapping[int, float] | None = None,
-    capex_factor: float = 1.0,
-    capex_amort_years: float = 30.0,
-    seg_totals: Mapping[tuple[int, int], float] | None = None,
-    seg_forward_totals: Mapping[tuple[int, int], float] | None = None,
-    seg_reverse_totals: Mapping[tuple[int, int], float] | None = None,
+def _period_service_metrics(
+    seq: Mapping[str, Any],
+    spec: VehicleSpec,
+    period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None,
+    default_headway_min: float,
+    headway_by_route: Mapping[int, float] | None,
+) -> tuple[float, float, float]:
+    """Возвращает точные JS cn metrics: max fleet, km/day и variable OPEX."""
+    stops = seq.get("stops") or []
+    n = len(stops)
+    if n < 2:
+        return 0.0, 0.0, 0.0
+    closed = bool(seq.get("closed"))
+    one_way_km = sum(
+        haversine_meters(stops[i]["lat"], stops[i]["lon"], stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"]) / 1000.0
+        for i in range(n if closed else n - 1)
+    )
+    cum = seq.get("cum_t_s") or []
+    run_s = float(seq.get("cycle_run_s", 0.0)) if seq.get("cycle_run_s") is not None else (
+        float(cum[-1]) if cum else one_way_km * 1000.0 / max(float(spec.speed_kmh) / 3.6, 0.01)
+    )
+    open_count = int(sum(bool(v) for v in seq.get("open", [True] * n)))
+    j_s = run_s + open_count * float(spec.dwell_s)
+    base_cycle_s = j_s + 300.0 if closed else 2.0 * j_s + 600.0
+    direction_factor = 1.0 if closed and not bool(seq.get("both_ways")) else 2.0
+    fleet_factor = 2.0 if closed and bool(seq.get("both_ways")) else 1.0
+    fleet_max = 0.0
+    vehicle_km_day = 0.0
+    periods = period_seq_stop_totals or (({}, 24.0),)
+    seq_idx = int(seq.get("_seq_idx", -1))
+    for period_index, (stop_totals, hours) in enumerate(periods):
+        h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
+        if h <= 0.0:
+            continue
+        period_runs = max(float(hours), 1e-9) * 60.0 / h
+        dwell_extra_s = 0.0
+        if stop_totals:
+            total_stop_pax = sum(max(0.0, float(stop_totals.get((seq_idx, si), 0.0))) for si in range(n))
+            dwell_runs = direction_factor * period_runs
+            if dwell_runs > 0.0:
+                dwell_extra_s = float(spec.dwell_per_pax_s) * total_stop_pax / dwell_runs
+        it_s = (1.0 if        hv = _sequence_period_headway(seq, 0, headway_min, headway_by_route)
+        runs_day = 1440.0 / max(float(hv), 1e-6)
+        cycle_km, cycle_min = _route_cycle(seq, spec)
+        period_fleet, vehicle_km_day, variable_opex_day = _period_service_metrics(
+            seq, spec, period_seq_stop_totals, headway_min, headway_by_route
+        )
+        fleet = int(period_fleet)
+        capacity = float(seq.get("capacity", spec.capacity))
+        occupancy_factor = capacity / max(float(spec.capacity), 1.0)
+        opex_day = (variable_opex_day + fleet * float(spec.veh_cost_day)) * occupancy_factor
+        share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
+        capital_cost_eur = _sequence_capital_cost_eur(
+            seq, spec, capex_factor, shared_capital_sections, atomic_sections
+        )
+
     period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None = None,
 ) -> list[LineResult]:
     """Эксплуатационные KPI линий (при заданном ``headway_min``).
@@ -392,7 +435,6 @@ def _build_line_kpis(
         if seq.get("closed") and seq.get("both_ways"):
             fleet *= 2
         share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
-        capacity = spec.capacity
         one_way_km = (
             cycle_km / 2.0
             if seq.get("closed") and seq.get("both_ways")
@@ -478,11 +520,8 @@ def _build_line_kpis(
                 cycle_km=cycle_km,
                 cycle_min=cycle_min,
                 fleet=fleet,
-                veh_km_day=cycle_km * runs_day,
-                opex_day=(
-                    cycle_km * runs_day * spec.opex_per_veh_km
-                    + fleet * spec.veh_cost_day
-                ),
+                veh_km_day=vehicle_km_day,
+                opex_day=opex_day,
                 revenue_day=revenue_day * share,
                 capital_cost_eur=capital_cost_eur,
                 capex_day=(
