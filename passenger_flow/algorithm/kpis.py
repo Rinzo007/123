@@ -163,12 +163,48 @@ def _shared_capacity_min_headways(
                 minimum = 60.0 / residual if residual > 0.01 else math.inf
                 result[rid] = max(result.get(rid, 0.0), minimum)
     return result
+def _geometry_point_key(point: Any) -> str:
+    lon = float(point[0]); lat = float(point[1])
+    return f"{round(lon * 1e5):.0f},{round(lat * 1e5):.0f}"
+
+
+def _geometry_edge_key(a: Any, b: Any) -> tuple[str, str]:
+    ka = _geometry_point_key(a); kb = _geometry_point_key(b)
+    return (ka, kb) if ka < kb else (kb, ka)
+
+
+def _geometry_reuse_edges(
+    route_sequences: Sequence[Mapping[str, Any]],
+) -> set[tuple[str, str]]:
+    """La(): edges of decoded legs that already have an owned geometry."""
+    reused: set[tuple[str, str]] = set()
+    for seq in route_sequences:
+        legs = seq.get("geometry_legs")
+        if not isinstance(legs, (list, tuple)):
+            continue
+        gaps = seq.get("gaps") or []
+        built = seq.get("built_segs")
+        for seg_i, leg in enumerate(legs):
+            if seg_i < len(gaps) and bool(gaps[seg_i]):
+                continue
+            if isinstance(built, (list, tuple)) and seg_i < len(built) and built[seg_i] is False:
+                continue
+            if not isinstance(leg, (list, tuple)) or len(leg) < 2:
+                continue
+            for a, b in zip(leg, leg[1:]):
+                try:
+                    reused.add(_geometry_edge_key(a, b))
+                except (TypeError, ValueError, IndexError):
+                    continue
+    return reused
+
 def _sequence_capital_cost_eur(
     seq: Mapping[str, Any],
     spec: VehicleSpec,
     capex_factor: float,
     shared_sections: set[tuple[str, str, str]] | None = None,
     atomic_sections: Mapping[tuple[int, int], list[tuple[tuple[str, str, str], float]]] | None = None,
+    geometry_reuse_edges: set[tuple[str, str]] | None = None,
 ) -> float:
     """Сегментный CAPEX Takt с поддержкой row/segCostMul/fixedLegs/gaps.
     При переданном ``shared_sections`` одинаковые физические секции
@@ -238,6 +274,42 @@ def _sequence_capital_cost_eur(
                 multiplier = max(0.0, float(multipliers[i]))
             except (TypeError, ValueError):
                 multiplier = 1.0
+        geometry_legs = seq.get("geometry_legs")
+        segment_lengths_m = seq.get("segment_lengths_m")
+        if (
+            geometry_reuse_edges is not None
+            and isinstance(geometry_legs, (list, tuple))
+            and i < len(geometry_legs)
+            and isinstance(geometry_legs[i], (list, tuple))
+            and len(geometry_legs[i]) >= 2
+        ):
+            leg = geometry_legs[i]
+            total_m = 0.0
+            reused_m = 0.0
+            for a, b in zip(leg, leg[1:]):
+                try:
+                    edge_m = haversine_meters(float(a[1]), float(a[0]), float(b[1]), float(b[0]))
+                except (TypeError, ValueError, IndexError):
+                    continue
+                total_m += edge_m
+                if _geometry_edge_key(a, b) in geometry_reuse_edges:
+                    reused_m += edge_m
+            if total_m > 0.0:
+                if isinstance(segment_lengths_m, (list, tuple)) and i < len(segment_lengths_m):
+                    try:
+                        segment_m = max(0.0, float(segment_lengths_m[i]))
+                    except (TypeError, ValueError):
+                        segment_m = total_m
+                else:
+                    segment_m = total_m
+                distance_cost = (
+                    segment_m / 1000.0
+                    * cost_per_km_eur
+                    * multiplier
+                    * float(capex_factor)
+                )
+                total += distance_cost * max(0.0, 1.0 - reused_m / total_m)
+                continue
         pieces = (
             []
             if fixed_full_build
