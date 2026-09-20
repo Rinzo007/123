@@ -375,7 +375,7 @@ takes the maximum station/track constraint across supplied periods.
 tolerance и field-specific rules.
 
 Golden reference для P3 хранится в `tests/fixtures/takt_reference_snapshot.json`
-с provenance bundle `bd956ff0a1875604740f40.js`. В `tests/test_passenger_flow_takt_parity.py`
+с provenance bundle `bd956ff0a1875604740f.js`. В `tests/test_passenger_flow_takt_parity.py`
 Python-расчёты проходят через тот же comparator, поэтому изменение формулы
 ломает golden test с указанием точного JSON path.
 
