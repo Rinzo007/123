@@ -836,6 +836,14 @@ class _AssignContext:
 # ===== Один период =====
 
 
+def _assigned_demand_trips(
+    period_flows: Sequence[PeriodFlow],
+    fallback_interzonal_trips: float,
+) -> float:
+    """Return the demand actually expanded into period/directional assignments."""
+    assigned = float(sum(p.total_trips for p in period_flows))
+    return assigned if assigned > 0.0 else float(fallback_interzonal_trips)
+
 def _run_period(
     ctx: _AssignContext,
     period: Period | None,
@@ -1273,9 +1281,10 @@ def run_passenger_flow(
         line_results=line_results,
     )
     interzonal_trips = max(total_trips - intrazonal_trips, 1.0)
+    assigned_demand_trips = _assigned_demand_trips(period_flows, interzonal_trips)
     line(
         f"  Маршрутов с пассажиропотоком: {result.routes_served}, "
-        f"назначено на транзит: {merged_assigned:,.0f}/{interzonal_trips:,.0f} "
+        f"назначено на транзит: {merged_assigned:,.0f}/{assigned_demand_trips:,.0f} "
         f"межзональных; авто: {merged_car:,.0f}, пешком: {merged_walk:,.0f}"
         f"{f', eBike: {merged_two_wheel:,.0f}' if merged_two_wheel else ''}"
         f"{f', выручка: {merged_revenue:,.1f} €' if merged_revenue else ''}"

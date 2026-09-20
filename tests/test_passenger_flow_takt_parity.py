@@ -1061,6 +1061,26 @@ def test_takt_purposes_base_time_roundtrip(tmp_path) -> None:
     assert np.array_equal(loaded.commute_base_time, source.commute_base_time)
 
 
+def test_flow_report_denominator_uses_periodized_directional_demand() -> None:
+    from passenger_flow.base.models import PeriodFlow
+
+    base_od_trips = 916_174.0
+    period_flows = (
+        PeriodFlow("early", "04-06", 64_091.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        PeriodFlow("am", "06-09", 604_275.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        PeriodFlow("mid", "09-15", 347_445.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        PeriodFlow("pm", "15-19", 594_513.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        PeriodFlow("eve", "19-24", 219_676.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+
+    assert math.isclose(
+        sum(p.total_trips for p in period_flows),
+        2.0 * base_od_trips,
+        rel_tol=0.0,
+        abs_tol=1e-9,
+    )
+
+
 def test_prepared_flow_api_accepts_reusable_static_context(monkeypatch) -> None:
     import passenger_flow.core as core
 
