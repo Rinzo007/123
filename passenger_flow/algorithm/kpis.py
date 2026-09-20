@@ -399,14 +399,15 @@ def _station_min_headways(
             h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
             if h <= 0.0:
                 continue
-            period_runs = max(float(hours), 1e-9) * 60.0 / h
             direction_factor = 1.0 if bool(seq.get("closed")) and not bool(seq.get("both_ways")) else 2.0
-            pax_per_train = 0.0
-            if period_runs > 0.0:
-                for stop_idx in range(len(seq.get("stops") or [])):
-                    stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
-                    pax_per_train = max(pax_per_train, stop_p / (period_runs * direction_factor))
-            n = 60.0 - float(spec.dwell_per_pax_s) * pax_per_train / 60.0
+            peak_rate = 0.0
+            for stop_idx in range(len(seq.get("stops") or [])):
+                stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
+                peak_rate = max(
+                    peak_rate,
+                    stop_p / (max(float(hours), 1e-9) * direction_factor),
+                )
+            n = 60.0 - float(spec.dwell_per_pax_s) * peak_rate / 60.0
             dwell_min = (float(spec.dwell_s) + 25.0) / n if n > 6.0 else 999.0
             turnback_min = 0.0 if bool(seq.get("closed")) else float(spec.turnback_s) / 120.0
             station_min = max(station_min, dwell_min, turnback_min)
