@@ -73,11 +73,16 @@ def _cumulative_seconds(value: Any, count: int) -> tuple[list[float] | None, flo
     return None, None
 
 
-def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float) -> list[float]:
+def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float | list[float]) -> list[float]:
     """Строит cumT fallback из геометрии и скорости ряда."""
-    speed_mps = max(float(speed_kmh) / 3.6, 0.01)
     result = [0.0]
     for a, b in zip(stops, stops[1:]):
+        seg_speed = (
+            float(speed_kmh[i]) if isinstance(speed_kmh, list) and i < len(speed_kmh)
+            else float(speed_kmh) if not isinstance(speed_kmh, list)
+            else 0.0
+        )
+        speed_mps = max(seg_speed / 3.6, 0.01)
         result.append(
             result[-1]
             + haversine_meters(
@@ -288,8 +293,23 @@ def _build_route_stop_sequence(
             cum_t_s, explicit_cycle_s = _cumulative_seconds(
                 explicit_cum, len(stops)
             )
+            direction_rows = _optional_value(direction, ("rows", "track_rows"))
+            if direction_rows is None:
+                direction_rows = route_rows
+            segment_count = len(stops) if closed else max(0, len(stops) - 1)
+            row_speed_profile: list[float] = []
+            for seg_i in range(segment_count):
+                row_i = route_row
+                if isinstance(direction_rows, (list, tuple)) and seg_i < len(direction_rows) and direction_rows[seg_i] is not None:
+                    row_i = direction_rows[seg_i]
+                elif isinstance(direction_rows, Mapping) and seg_i in direction_rows:
+                    row_i = direction_rows[seg_i]
+                data = row_data.get(row_i) if isinstance(row_data, Mapping) else None
+                row_speed_profile.append(float(data.get("kmh", spec.speed_kmh)) if isinstance(data, Mapping) else float(spec.speed_kmh))
+            if not row_speed_profile:
+                row_speed_profile = [row_speed_kmh]
             if cum_t_s is None:
-                cum_t_s = _derive_cumulative_seconds(stops, row_speed_kmh)
+                cum_t_s = _derive_cumulative_seconds(stops, row_speed_profile)
                 explicit_cycle_s = None
             open_values = _optional_value(
                 direction, ("openStops", "open_stops")
@@ -319,7 +339,7 @@ def _build_route_stop_sequence(
                         stops[-1]["lat"], stops[-1]["lon"],
                         stops[0]["lat"], stops[0]["lon"],
                     )
-                    / max(row_speed_kmh / 3.6, 0.01)
+                    / max(row_speed_profile[-1] / 3.6, 0.01)
                 )
             sequences.append(
                 {
