@@ -20,7 +20,7 @@ import numpy as np
 from shapely.geometry import box
 from shapely.geometry import mapping as shapely_mapping
 
-from ..cache import JsonCache
+from cache import JsonCache
 from .builders import (
     build_purpose_od,
     build_takt_demand_with_purposes,
@@ -36,7 +36,7 @@ from .demand import (
     zone_weights_from_streets,
 )
 from .model import OdMatrixError, OdResult, Zones, _as_sparse
-from ..passenger_flow.models import PURPOSE_DEFAULTS
+from passenger_flow.models import PURPOSE_DEFAULTS
 from .network import (
     build_road_graph,
     euclidean_costs,
@@ -481,7 +481,7 @@ def _od_generated_cache_dir(
         return None
     weight_paths = (config.ghs_file, config.ghs_s_file)
     if not any(weight_paths):
-        from ..config import DEFAULT_GHS_FILE
+        from config import DEFAULT_GHS_FILE
 
         candidate = str(DEFAULT_GHS_FILE) if DEFAULT_GHS_FILE else None
         if candidate:
