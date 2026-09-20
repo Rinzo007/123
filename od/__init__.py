@@ -8,10 +8,6 @@
 from __future__ import annotations
 
 from .builders import (
-    _SPARSE_GRAVITY_CELLS,
-    _furness,
-    _furness_sparse,
-    build_gravity_od,
     build_purpose_od,
     build_takt_demand_with_purposes,
     build_takt_od,
@@ -69,7 +65,6 @@ from .zones import (
 __all__ = [
     "_FALLBACK_SPEED_KMH",
     "_OD_CACHE_SCHEMA_VERSION",
-    "_SPARSE_GRAVITY_CELLS",
     "OdMatrixError",
     "OdResult",
     "PurposeOd",
@@ -80,14 +75,11 @@ __all__ = [
     "_as_sparse",
     "_cell_step",
     "_cosscale",
-    "_furness",
-    "_furness_sparse",
     "_snapped_centroids",
     "_write_demand_street_geojson",
     "_zone_tile_sums",
     "assign_district_names",
     "assign_road_loads",
-    "build_gravity_od",
     "build_purpose_od",
     "build_road_graph",
     "build_takt_demand_with_purposes",
