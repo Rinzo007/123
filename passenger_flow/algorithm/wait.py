@@ -162,6 +162,8 @@ def _run_msa_period(
     wait_calc: str = "takt",
     period_hours: float = 24.0,
     vehicle_specs: Mapping[str, VehicleSpec] | None = None,
+    base_time_s: np.ndarray | None = None,
+    period_index: int = 0,
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -204,8 +206,8 @@ def _run_msa_period(
             seq_jitter_s=seq_jitter_s,
             no_car_shares=no_car_shares,
             wait_calc=wait_calc,
-            base_time_s=None,
-            period_index=0,
+            base_time_s=base_time_s,
+            period_index=period_index,
             crowd_state=crowd_state,
         )
         raw = agg["route_totals"]
@@ -269,10 +271,5 @@ def _run_msa_period(
         prev_smoothed = dict(smoothed)
         if iteration > 1 and final_gap <= gap_tol:
             break
-        wait_extra = _build_wait_extra(
-            route_sequences,
-            smoothed,
-            wait_crowding_per_100_min,
-            reliability_extra,
-        )
+        wait_extra = dict(reliability_extra) if reliability_extra else None
     return agg, iteration, final_gap
