@@ -885,6 +885,7 @@ def _enumerate_journeys(
     max_legs: int,
     max_alternatives: int,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
 ) -> list[_Journey]:
     """Детерминированный shortest-path поиск по состояниям stop/line.
 
@@ -913,7 +914,7 @@ def _enumerate_journeys(
         headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
-    transfer_index = _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
+    transfer_index = transfer_index or _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
     def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
 
@@ -1023,6 +1024,7 @@ def build_journeys(
     seq_jitter_s: Mapping[int, float] | None = None,
     wait_calc: str = "takt",
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
 ) -> list[_Journey]:
     """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
     max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
@@ -1043,5 +1045,6 @@ def build_journeys(
         max_legs=max_legs,
         max_alternatives=min(_TAKT_ALTS, 3),
         crowd_state=crowd_state,
+        transfer_index=transfer_index,
     )
 
