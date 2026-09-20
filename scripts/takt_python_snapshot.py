@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +93,13 @@ def main() -> int:
         include_reliability=True,
     )
     line = result.line_results[0] if result.line_results else None
+    raw_assigned = float(result.raw_assigned_trips)
+    raw_car = float(result.raw_car_trips)
+    raw_walk = float(result.raw_walk_trips)
+    raw_two_wheel = float(result.raw_two_wheel_trips)
+    raw_rest = float(result.raw_rest_trips)
+    mode_den = max(raw_assigned + raw_car + raw_walk + raw_two_wheel + raw_rest, 1e-12)
+    js_round = lambda value: math.floor(float(value) + 0.5)
     snapshot = {
         "reference": {
             "engine": "passenger_flow Python",
@@ -99,11 +107,11 @@ def main() -> int:
         },
         "raw": {
             "totalTrips": float(result.total_trips),
-            "assignedTrips": float(result.assigned_trips),
-            "carTrips": float(result.car_trips),
-            "walkTrips": float(result.walk_trips),
-            "twoWheelTrips": float(result.two_wheel_trips),
-            "restTrips": float(result.rest_trips),
+            "assignedTrips": raw_assigned,
+            "carTrips": raw_car,
+            "walkTrips": raw_walk,
+            "twoWheelTrips": raw_two_wheel,
+            "restTrips": raw_rest,
             "periods": [
                 {
                     "key": p.key,
@@ -118,61 +126,21 @@ def main() -> int:
             ],
         },
         "differential": {
-            "ridersPerDay": float(result.assigned_trips),
+            "ridersPerDay": js_round(raw_assigned),
             "capitalCostM": float(result.capital_cost_eur / 1_000_000.0),
-            "revenueDay": float(result.revenue_day),
-            "opexDay": float(result.opex_day),
+            "revenueDay": js_round(result.raw_revenue_day),
+            "opexDay": js_round(result.raw_opex_day),
             "modeSplit": {
-                "transit": float(
-                    result.assigned_trips
-                    / max(
-                        result.assigned_trips
-                        + result.car_trips
-                        + result.walk_trips
-                        + result.two_wheel_trips
-                        + result.rest_trips,
-                        1e-12,
-                    )
-                ),
-                "car": float(
-                    result.car_trips
-                    / max(
-                        result.assigned_trips
-                        + result.car_trips
-                        + result.walk_trips
-                        + result.two_wheel_trips
-                        + result.rest_trips,
-                        1e-12,
-                    )
-                ),
-                "walk": float(
-                    (result.walk_trips + result.two_wheel_trips)
-                    / max(
-                        result.assigned_trips
-                        + result.car_trips
-                        + result.walk_trips
-                        + result.two_wheel_trips
-                        + result.rest_trips,
-                        1e-12,
-                    )
-                ),
-                "rest": float(
-                    result.rest_trips
-                    / max(
-                        result.assigned_trips
-                        + result.car_trips
-                        + result.walk_trips
-                        + result.two_wheel_trips
-                        + result.rest_trips,
-                        1e-12,
-                    )
-                ),
+                "transit": raw_assigned / mode_den,
+                "car": raw_car / mode_den,
+                "walk": (raw_walk + raw_two_wheel) / mode_den,
+                "rest": raw_rest / mode_den,
             },
             "line": {
                 "route_id": int(line.route_id) if line else None,
                 "fleet": float(line.fleet) if line else None,
-                "revenueDay": float(line.revenue_day) if line else None,
-                "opexDay": float(line.opex_day) if line else None,
+                "revenueDay": js_round(line.revenue_day) if line else None,
+                "opexDay": js_round(line.opex_day) if line else None,
                 "cycleKm": float(line.cycle_km) if line else None,
             },
         },
