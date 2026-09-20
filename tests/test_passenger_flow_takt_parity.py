@@ -29,7 +29,7 @@ from passenger_flow.core import _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
     _takt_mode_shares,
-    _takt_mode_shares_with_rest,
+    _takt_mode_shares,
     _takt_no_car_shares,
     _takt_route_probs,
 )
@@ -178,7 +178,7 @@ def _synthetic_sequence(ids: list[int]) -> dict:
 
 
 def test_base_t_rest_alternative_is_present_when_base_time_exists() -> None:
-    got = _takt_mode_shares_with_rest(
+    got = _takt_mode_shares(
         ModeChoiceConfig(),
         5000.0,
         1200.0,
