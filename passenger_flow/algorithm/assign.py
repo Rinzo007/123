@@ -334,19 +334,21 @@ def _accumulate_journey(
         totals.dir_totals[(rid, di)] += route_trips
 
         rs_key = (rid, di)
-        lo, hi = sorted((orig_pos, dest_pos))
-        for stop in seq["stops"]:
-            si = stop["position"]
-            if not (lo <= si <= hi):
-                continue
+        selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
+        path_positions = [orig_pos]
+        for seg_i, is_forward in selected_segments:
+            arrival = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i
+            path_positions.append(arrival)
+        for path_no, si in enumerate(path_positions):
+            stop = seq["stops"][si]
             _accumulate_stop(
                 totals.stop_totals[_stop_key(stop)],
                 stop,
-                is_boarding=(si == orig_pos),
-                is_alighting=(si == dest_pos),
+                is_boarding=(path_no == 0),
+                is_alighting=(path_no == len(path_positions) - 1),
                 trips=route_trips,
             )
-            if si == orig_pos or si == dest_pos:
+            if path_no == 0 or path_no == len(path_positions) - 1:
                 totals.seq_stop_totals[(seq_idx, si)] += route_trips
             stop_name_key = stop["name"]
             totals.route_stop_totals[rs_key][stop_name_key] = (
@@ -354,7 +356,7 @@ def _accumulate_journey(
                 + route_trips
             )
 
-        for seg_i, is_forward in _route_segment_indices(seq, orig_pos, dest_pos):
+        for seg_i, is_forward in selected_segments:
             totals.seg_totals[(seq_idx, seg_i)] += route_trips
             if is_forward:
                 totals.seg_forward_totals[(seq_idx, seg_i)] += route_trips
