@@ -25,7 +25,7 @@ except ImportError:
 import numpy as np
 
 from passenger_flow.algorithm.kpis import _build_line_kpis
-from passenger_flow.core import _validate_base_time
+from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
@@ -96,6 +96,15 @@ def test_takt_car_period_multiplier_matches_reference_formula() -> None:
     assert math.isclose(_takt_car_period_multiplier(1000.0, 200.0), 1.8)
     assert math.isclose(_takt_car_period_multiplier(10.0, 0.0), 1.0)
 
+
+def test_takt_car_period_multipliers_match_period_profile() -> None:
+    from passenger_flow.base.takt import TAKT_PERIODS
+
+    rows = np.asarray([0, 1], dtype=np.int64)
+    cols = np.asarray([1, 0], dtype=np.int64)
+    vals = np.asarray([1000.0, 1000.0], dtype=np.float64)
+    got = _takt_car_period_multipliers(rows, cols, vals, TAKT_PERIODS)
+    assert np.allclose(got, [1.0, 1.72, 1.0, 1.375, 1.0], rtol=1e-12, atol=1e-12)
 
 def test_takt_car_cost_uses_base_time_and_period_multiplier() -> None:
     mode = ModeChoiceConfig()
