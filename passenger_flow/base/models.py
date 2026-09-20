@@ -369,3 +369,4 @@ class FlowResult:
     raw_rest_trips: float = 0.0
     raw_revenue_day: float = 0.0
     raw_opex_day: float = 0.0
+    raw_transit_s: float = 0.0
