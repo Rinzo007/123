@@ -96,6 +96,26 @@ def main() -> int:
             "engine": "passenger_flow Python",
             "case": "synthetic-2-stop-bus",
         },
+        "raw": {
+            "totalTrips": float(result.total_trips),
+            "assignedTrips": float(result.assigned_trips),
+            "carTrips": float(result.car_trips),
+            "walkTrips": float(result.walk_trips),
+            "twoWheelTrips": float(result.two_wheel_trips),
+            "restTrips": float(result.rest_trips),
+            "periods": [
+                {
+                    "key": p.key,
+                    "totalTrips": float(p.total_trips),
+                    "assignedTrips": float(p.assigned_trips),
+                    "carTrips": float(p.car_trips),
+                    "walkTrips": float(p.walk_trips),
+                    "twoWheelTrips": float(p.two_wheel_trips),
+                    "restTrips": float(p.rest_trips),
+                }
+                for p in result.period_flows
+            ],
+        },
         "differential": {
             "ridersPerDay": float(result.assigned_trips),
             "capitalCostM": float(result.capital_cost_eur / 1_000_000.0),
