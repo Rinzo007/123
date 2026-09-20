@@ -330,7 +330,7 @@ def _validate_base_time(
     base_time_s: np.ndarray | None,
     n_zones: int,
     n_periods: int,
-    n_pairs: int,
+    n_pairs: int | None = None,
 ) -> None:
     """Проверяет baseT: NxN, [period,N,N] или Takt [period,pair]."""
     if base_time_s is None:
