@@ -83,8 +83,11 @@ def _sequence_capital_cost_eur(
     seq: Mapping[str, Any],
     spec: VehicleSpec,
     capex_factor: float,
+    shared_sections: set[tuple[str, str]] | None = None,
 ) -> float:
     """Сегментный CAPEX Takt с поддержкой row/segCostMul/fixedLegs/gaps.
+    При переданном ``shared_sections`` одинаковые физические секции
+    оплачиваются один раз, как reuse-track часть La().
 
     При отсутствии явной инфраструктурной разметки возвращает прежний
     type-level fallback через ``spec.capex_eur_per_km``.
@@ -142,6 +145,11 @@ def _sequence_capital_cost_eur(
             cost_per_km_eur = float(spec.capex_eur_per_km)
         else:
             cost_per_km_eur = cost_per_km_m * 1e6
+        section_key = tuple(sorted((_infra_stop_key(stops[i]), _infra_stop_key(stops[(i + 1) % n]))))
+        if shared_sections is not None and section_key in shared_sections:
+            continue
+        if shared_sections is not None:
+            shared_sections.add(section_key)
         distance_km = haversine_meters(
             stops[i]["lat"], stops[i]["lon"],
             stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
@@ -222,6 +230,7 @@ def _build_line_kpis(
     shared_min_headway = _shared_capacity_min_headways(
         route_sequences, headway_min, headway_by_route
     )
+    shared_capital_sections: set[tuple[str, str]] = set()
     for seq in route_sequences:
         rid = seq["route_id"]
         if rid in seen:
@@ -250,7 +259,10 @@ def _build_line_kpis(
             else (cycle_km if seq.get("closed") else cycle_km / 2.0)
         )
         capital_cost_eur = _sequence_capital_cost_eur(
-            seq, spec, capex_factor
+            seq,
+            spec,
+            capex_factor,
+            shared_capital_sections,
         )
 
         # Пассажиро-километры и классы: по сегментам направления при наличии
