@@ -12,18 +12,16 @@ import hashlib
 import io
 import json
 import logging
+import re
 import ssl
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("wikiroutes.gis.overture")
-
-
-def _sql_literal(value: str) -> str:
-    """Экранирует строку для безопасной вставки в литерал SQL DuckDB."""
-    return "'" + value.replace("'", "''") + "'"
 
 
 # Официальные endpoint'ы Overture. Azure добавлен как резервное зеркало:
@@ -63,6 +61,19 @@ _STAC_HTTP_HOSTS: tuple[str, ...] = (
     "https://s3.us-west-2.amazonaws.com/overturemaps-extras-us-west-2/stac",
 )
 
+_CONTENT_RANGE_RE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+)$")
+
+
+# ===== Утилиты =====
+
+
+def _sql_literal(value: str) -> str:
+    """Экранирует строку для вставки в SQL-литерал DuckDB."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+# ===== Базовые HTTP-запросы =====
+
 
 def _http_get_url(
     url: str, timeout: float, context: ssl.SSLContext | None = None
@@ -75,10 +86,30 @@ def _http_get_url(
         return resp.read()
 
 
+def _parse_content_range(
+    content_range: str, expected_start: int
+) -> int | None:
+    """Разбирает ``Content-Range`` 206-ответа; возвращает total_size или None.
+
+    Проверяет, что сервер вернул ожидаемое начало диапазона (иначе докачка
+    собьёт смещение); при некорректном значении бросает ``OSError``.
+    """
+    match = _CONTENT_RANGE_RE.match(content_range.strip())
+    if not match:
+        return None
+    range_start, range_end, total = map(int, match.groups())
+    if range_start != expected_start or range_end < range_start:
+        raise OSError(
+            f"Некорректный Content-Range: {content_range!r}, "
+            f"ожидался offset {expected_start}"
+        )
+    return total
+
+
 def _http_get_range(
     url: str, start: int, timeout: float, chunk: int, context: ssl.SSLContext | None
 ) -> tuple[int, bytes, int | None]:
-    """GET ``bytes=start-`` на URL; возвращает (статус, байты).
+    """GET ``bytes=start-`` на URL; возвращает (статус, байты, полный размер).
 
     При поддержке Range (206) отдаёт до ``chunk`` байт от смещения ``start``.
     Если сервер игнорирует Range (200), читает всё тело целиком — докачка для
@@ -99,15 +130,7 @@ def _http_get_range(
         if status == 206:
             content_range = resp.headers.get("Content-Range")
             if content_range:
-                import re
-                match = re.match(r"^bytes\s+(\d+)-(\d+)/(\d+)$", content_range.strip())
-                if match:
-                    range_start, range_end, total = map(int, match.groups())
-                    if range_start != start or range_end < range_start:
-                        raise IOError(
-                            f"Некорректный Content-Range: {content_range!r}, ожидался offset {start}"
-                        )
-                    total_size = total
+                total_size = _parse_content_range(content_range, start)
         else:
             content_length = resp.headers.get("Content-Length")
             if content_length:
@@ -119,12 +142,20 @@ def _http_get_range(
 
 
 def _overture_host_url(host: str, bucket: str, bucket_key: str, obj_path: str) -> str:
-    """Строит HTTP URL для S3/Azure endpoint'а из общего object key."""
+    """Строит HTTP URL для S3/Azure endpoint'а из общего object key.
+
+    Azure-хосты и виртуально-хостинговые S3-endpoint'ы (имя бакета в
+    hostname) принимают путь без бакета. Голый path-style S3 без бакета
+    получает ``bucket_key`` (бакет + путь). Текущий набор хостов всегда
+    попадает в первый случай.
+    """
     if host.endswith((".blob.core.windows.net", ".dfs.core.windows.net")):
         return f"{host}/{obj_path}"
     if "s3.us-west-2.amazonaws.com/" in host and not host.endswith(bucket):
         return f"{host}/{obj_path}"
-    return f"{host}/{obj_path}" if bucket in host else f"{host}/{bucket_key}"
+    if bucket in host:
+        return f"{host}/{obj_path}"
+    return f"{host}/{bucket_key}"
 
 
 def _fetch_chunk(
@@ -170,9 +201,11 @@ def _append_chunk(part: Path, start: int, data: bytes, chunk: int) -> int:
     """Записывает чанк в part (wb/ab по смещению) и возвращает новое смещение."""
     mode = "ab" if start > 0 else "wb"
     with part.open(mode) as fh:
-        fh.seek(start) if mode == "wb" else None
         fh.write(data)
     return start + len(data)
+
+
+# ===== Прогресс загрузки =====
 
 
 class _PartProgress:
@@ -207,7 +240,11 @@ class _PartProgress:
         now = time.monotonic()
         if now - self._last_log >= self._log_interval_s:
             current_speed = self._current_speed(now)
-            logger.info("Overture: %s — %s", self._name, self._format_status(now, current_speed))
+            logger.info(
+                "Overture: %s — %s",
+                self._name,
+                self._format_status(now, current_speed),
+            )
             self._last_log = now
             self._last_bytes = self._bytes
 
@@ -223,19 +260,26 @@ class _PartProgress:
             return 0.0
         return (self._bytes / self._MB) / elapsed
 
+    def _format_eta(
+        self, downloaded_mb: float, total_mb: float, speed: float
+    ) -> str:
+        if speed <= 0:
+            return ""
+        remaining_mb = max(0.0, total_mb - downloaded_mb)
+        eta = remaining_mb / speed
+        return f", осталось {remaining_mb:.1f} МБ, ETA {eta:.1f} с"
+
     def _format_status(self, now: float, speed: float) -> str:
         downloaded_mb = self._bytes / self._MB
-        if self._total_bytes:
-            total_mb = self._total_bytes / self._MB
-            percent = min(100.0, self._bytes * 100.0 / self._total_bytes)
-            remaining_mb = max(0.0, total_mb - downloaded_mb)
-            eta = remaining_mb / speed if speed > 0 else None
-            eta_text = f", осталось {remaining_mb:.1f} МБ, ETA {eta:.1f} с" if eta is not None else ""
-            return (
-                f"{downloaded_mb:.1f}/{total_mb:.1f} МБ ({percent:.1f}%), "
-                f"скорость {speed:.2f} МБ/с{eta_text}"
-            )
-        return f"скачано {downloaded_mb:.1f} МБ, скорость {speed:.2f} МБ/с"
+        if not self._total_bytes:
+            return f"скачано {downloaded_mb:.1f} МБ, скорость {speed:.2f} МБ/с"
+        total_mb = self._total_bytes / self._MB
+        percent = min(100.0, self._bytes * 100.0 / self._total_bytes)
+        eta_text = self._format_eta(downloaded_mb, total_mb, speed)
+        return (
+            f"{downloaded_mb:.1f}/{total_mb:.1f} МБ ({percent:.1f}%), "
+            f"скорость {speed:.2f} МБ/с{eta_text}"
+        )
 
     def summary(self) -> str:
         """Итоговая строка с объёмом и средней скоростью."""
@@ -245,6 +289,9 @@ class _PartProgress:
             f"за {now - self._t0:.1f} с "
             f"(средняя скорость {self._average_speed(now):.2f} МБ/с)"
         )
+
+
+# ===== Целостность part-файлов =====
 
 
 def _sha256_file(path: Path) -> str:
@@ -290,6 +337,19 @@ def _read_part_manifest(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _parquet_ok(path: Path) -> bool:
+    """Проверяет, что файл существует, непустой и открывается как parquet."""
+    try:
+        from pyarrow.parquet import ParquetFile
+
+        if path.stat().st_size <= 0:
+            return False
+        ParquetFile(path)
+        return True
+    except Exception:  # noqa: BLE001 — любая ошибка чтения = невалидный parquet
+        return False
+
+
 def _is_valid_cached_part(
     path: Path,
     *,
@@ -297,8 +357,6 @@ def _is_valid_cached_part(
 ) -> bool:
     """Проверяет parquet-footer, размер и checksum сохранённого part-файла."""
     try:
-        from pyarrow.parquet import ParquetFile
-
         if path.stat().st_size <= 0:
             return False
         manifest = _read_part_manifest(path)
@@ -314,10 +372,55 @@ def _is_valid_cached_part(
             return False
         if _sha256_file(path) != expected_hash:
             return False
-        ParquetFile(path)
-        return True
-    except Exception:
+        return _parquet_ok(path)
+    except Exception:  # noqa: BLE001 — когортная проверка целостности, любая ошибка = invalid
         return False
+
+
+# ===== Загрузка одной части =====
+
+
+def _apply_fresh_download(
+    part: Path, data: bytes, total_size: int | None
+) -> int:
+    """Записывает тело HTTP 200 поверх part (без Range) и возвращает размер.
+
+    Используется, когда сервер игнорирует Range: докачки не будет, файл
+    пишется целиком. Проверяет согласованность с заявленным Content-Length.
+    """
+    if total_size is not None and len(data) != total_size:
+        raise OSError(
+            f"Неполный HTTP 200 для {part.name}: "
+            f"{len(data)} из {total_size} байт"
+        )
+    with part.open("wb") as fh:
+        fh.write(data)
+    return len(data)
+
+
+def _apply_range_chunk(
+    part: Path, start: int, data: bytes, chunk: int, total_size: int | None
+) -> int:
+    """Дописывает Range-чанк в part; проверяет, что ответ не выходит за конец."""
+    if total_size is not None and start + len(data) > total_size:
+        raise OSError(f"Range-ответ выходит за конец Overture part {part.name}")
+    return _append_chunk(part, start, data, chunk)
+
+
+def _download_complete(
+    status: int, start: int, data_len: int, chunk: int, total_size: int | None
+) -> bool:
+    """Признак завершения загрузки part-файла.
+
+    Полный HTTP 200 всегда завершён; 206 завершён, когда достигнут известный
+    total_size либо (при неизвестном размере) получен короткий чанк — что
+    означает, что сервер отдал остаток файла.
+    """
+    if status != 206:
+        return True
+    if total_size is not None:
+        return start == total_size
+    return data_len < chunk
 
 
 def _download_part_from_host(
@@ -336,6 +439,7 @@ def _download_part_from_host(
     start = part.stat().st_size if part.exists() else 0
     progress = _PartProgress(part.name, initial_bytes=start)
     total_size: int | None = None
+
     while True:
         status, data, chunk_total = _fetch_chunk(
             list_urls, start, timeout, chunk, per_chunk_retries, retry_delay
@@ -344,43 +448,48 @@ def _download_part_from_host(
             total_size = chunk_total
             progress.set_total(total_size)
             if total_size < start:
-                raise IOError(
+                raise OSError(
                     f"Некорректный размер Overture part: {total_size} < {start}"
                 )
 
         if status != 206:
-            if total_size is not None and len(data) != total_size:
-                raise IOError(
-                    f"Неполный HTTP 200 для {part.name}: {len(data)} из {total_size} байт"
-                )
-            with part.open("wb") as fh:
-                fh.write(data)
-            start = len(data)
+            start = _apply_fresh_download(part, data, total_size)
         else:
-            if total_size is not None and start + len(data) > total_size:
-                raise IOError(
-                    f"Range-ответ выходит за конец Overture part {part.name}"
-                )
-            start = _append_chunk(part, start, data, chunk)
+            start = _apply_range_chunk(part, start, data, chunk, total_size)
 
         progress.update(data)
 
-        complete = (
-            status != 206
-            or (total_size is not None and start == total_size)
-            or (total_size is None and len(data) < chunk)
-        )
-        if complete:
+        if _download_complete(status, start, len(data), chunk, total_size):
             if total_size is not None and start != total_size:
-                raise IOError(
+                raise OSError(
                     f"Неполная Overture part: {start} из {total_size} байт"
                 )
             logger.info("Overture: %s", progress.summary())
             return start
 
 
+def _finalize_stale_part(key: str, dest: Path, part: Path) -> bool:
+    """Публикует ``.part`` после прошлого запуска, если он уже валидный parquet.
+
+    Возвращает True, если публикация удалась и Range-докачка не нужна.
+    """
+    if not part.exists() or not _parquet_ok(part):
+        return False
+    size = part.stat().st_size
+    sha256 = _sha256_file(part)
+    part.replace(dest)
+    _write_part_manifest(dest, key=key, size=size, sha256=sha256)
+    return True
+
+
 def _download_part_once(key: str, cache_dir: str | Path) -> None:
-    """Скачивает одну часть атомарно и валидирует локальный cache-entry."""
+    """Скачивает одну часть атомарно и валидирует локальный cache-entry.
+
+    Частичный ``<name>.part`` продолжается на повторных запусках. После
+    успешного скачивания пишется manifest (размер + SHA-256) и файл
+    атомарно переименовывается в целевой — так ``_is_valid_cached_part``
+    отличает готовый кэш от обрыва середины загрузки.
+    """
     dest = _part_local_path(key, cache_dir)
     if dest.exists() and _is_valid_cached_part(dest, key=key):
         return
@@ -394,47 +503,30 @@ def _download_part_once(key: str, cache_dir: str | Path) -> None:
     bucket, _, obj_path = key.partition("/")
     part = dest.with_name(dest.name + ".part")
 
-    # Если процесс завершился после полной записи .part, но до rename,
+    # Если процесс завершился после полной записи .part, но до rename —
     # распознаём готовый parquet и завершаем публикацию без Range-запроса.
-    if part.exists():
-        try:
-            from pyarrow.parquet import ParquetFile
-
-            if part.stat().st_size > 0:
-                ParquetFile(part)
-                size = part.stat().st_size
-                sha256 = _sha256_file(part)
-                part.replace(dest)
-                _write_part_manifest(dest, key=key, size=size, sha256=sha256)
-                return
-        except (OSError, ValueError, TypeError, RuntimeError):
-            pass
+    if _finalize_stale_part(key, dest, part):
+        return
 
     urls = [
         _overture_host_url(host, bucket, key, obj_path)
         for host in _OVERTURE_HTTP_HOSTS
     ]
     _download_part_from_host(urls, part, timeout=120.0)
-    if not _is_valid_cached_part(part):
-        # part ещё не имеет manifest, поэтому валидируем его хотя бы как parquet
-        # перед публикацией; checksum записывается ниже.
-        try:
-            from pyarrow.parquet import ParquetFile
 
-            if part.stat().st_size <= 0:
-                raise IOError("Пустой Overture part")
-            ParquetFile(part)
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            with contextlib.suppress(OSError):
-                part.unlink()
-            raise IOError(f"Невалидный скачанный Overture part {key!r}") from exc
+    if not _parquet_ok(part):
+        with contextlib.suppress(OSError):
+            part.unlink()
+        raise OSError(f"Невалидный скачанный Overture part {key!r}")
 
     size = part.stat().st_size
-    if size <= 0:
-        raise IOError(f"Пустой Overture part после скачивания: {key!r}")
     sha256 = _sha256_file(part)
     part.replace(dest)
     _write_part_manifest(dest, key=key, size=size, sha256=sha256)
+
+
+# ===== STAC-резолвинг =====
+
 
 def _retry_after_value(retry_after: str) -> float | None:
     """Парсит ``Retry-After`` как число секунд; None при нечисловом значении."""
@@ -448,7 +540,9 @@ def _retry_after_date(retry_after: str) -> float | None:
     """Парсит ``Retry-After`` как HTTP-дату (RFC 7231); None при не-дата."""
     try:
         when = email.utils.parsedate_to_datetime(retry_after)
-        return (when - datetime_module.datetime.now(datetime_module.UTC)).total_seconds()
+        return (
+            when - datetime_module.datetime.now(datetime_module.UTC)
+        ).total_seconds()
     except (TypeError, ValueError):
         return None
 
@@ -477,8 +571,6 @@ def _stac_retry_delay(exc: Exception, attempt: int, retry_delay: float) -> float
     Для HTTP 429 — ``Retry-After`` из ответа (минимум 30 с по RFC 7231),
     иначе экспоненциальный backoff от ``retry_delay``.
     """
-    import urllib.error
-
     if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         return _retry_after_seconds(retry_after, retry_delay * (2**attempt))
@@ -486,7 +578,12 @@ def _stac_retry_delay(exc: Exception, attempt: int, retry_delay: float) -> float
 
 
 def _log_stac_retry(
-    url: str, attempt: int, retries: int, delay: float, exc: Exception, rate_limited: bool
+    url: str,
+    attempt: int,
+    retries: int,
+    delay: float,
+    exc: Exception,
+    rate_limited: bool,
 ) -> None:
     label = " (429)" if rate_limited else ""
     logger.warning(
@@ -498,6 +595,31 @@ def _log_stac_retry(
         label,
         exc,
     )
+
+
+def _read_stac_chunk(
+    url: str | list[str] | tuple[str, ...],
+    start: int,
+    timeout: float,
+    retries: int,
+    retry_delay: float,
+    progress: _PartProgress,
+) -> tuple[int, bytes, int | None]:
+    """Один Range-запрос STAC с логированием прогресса."""
+    status, data, total = _fetch_chunk(
+        url,
+        start=start,
+        timeout=timeout,
+        chunk=_STAC_CHUNK_BYTES,
+        retries=retries,
+        retry_delay=retry_delay,
+    )
+    if not data and status == 206:
+        raise OSError(f"Пустой Range-ответ STAC для offset {start}")
+    progress.set_total(total)
+    if data:
+        progress.update(data)
+    return status, data, total
 
 
 def _http_get_stac(
@@ -513,50 +635,79 @@ def _http_get_stac(
     TLS-handshake. Здесь каждый диапазон ограничен ``_STAC_CHUNK_BYTES`` и
     получает новый TLS-сеанс; уже полученные диапазоны не теряются.
     """
+    display_url = url[0] if isinstance(url, (list, tuple)) else url
+    progress = _PartProgress(display_url.rsplit("/", 1)[-1] or "STAC")
     chunks: list[bytes] = []
     start = 0
     total_size: int | None = None
-    display_url = url[0] if isinstance(url, (list, tuple)) else url
-    progress = _PartProgress(display_url.rsplit("/", 1)[-1] or "STAC")
 
     while True:
-        status, data, reported_total = _fetch_chunk(
-            url,
-            start=start,
-            timeout=timeout,
-            chunk=_STAC_CHUNK_BYTES,
-            retries=retries,
-            retry_delay=retry_delay,
+        status, data, reported_total = _read_stac_chunk(
+            url, start, timeout, retries, retry_delay, progress
         )
         if status != 206:
             if start == 0:
-                progress.update(data)
                 logger.info("Overture: STAC %s", progress.summary())
                 return data
-            raise IOError(
-                "Overture STAC перестал поддерживать Range после частичного чтения "
-                f"({status} для offset {start})"
+            raise OSError(
+                "Overture STAC перестал поддерживать Range после частичного "
+                f"чтения ({status} для offset {start})"
             )
-        if not data:
-            raise IOError(f"Пустой Range-ответ STAC для offset {start}")
 
         chunks.append(data)
         total_size = reported_total or total_size
-        progress.set_total(total_size)
-        progress.update(data)
         start += len(data)
 
         if total_size is not None:
-            if start >= total_size:
-                if start != total_size:
-                    raise IOError(
-                        f"STAC Range превысил размер файла: {start} из {total_size} байт"
-                    )
+            if start > total_size:
+                raise OSError(
+                    f"STAC Range превысил размер файла: "
+                    f"{start} из {total_size} байт"
+                )
+            if start == total_size:
                 logger.info("Overture: STAC %s", progress.summary())
                 return b"".join(chunks)
         elif len(data) < _STAC_CHUNK_BYTES:
             logger.info("Overture: STAC %s", progress.summary())
             return b"".join(chunks)
+
+
+def _resolve_stac_item_href(href: str, base_url: str) -> str:
+    """Разворачивает href STAC Item относительно каталога collection.json.
+
+    Учитывает два «странных» случая публикуемых коллекций Overture:
+    префикс ``collection.json/`` и href, начинающийся с release-пути
+    (например ``2026-08-19.0/...``), который надо резолвить от корня
+    релиза, а не от ``collection.json``.
+    """
+    normalized = href.lstrip("./").removeprefix("collection.json/")
+    parts = normalized.split("/", 1)
+    if len(parts) == 2:
+        first = parts[0]
+        if len(first) >= 10 and first[4] == "-" and first[7] == "-" and "." in first:
+            base_parts = urllib.parse.urlsplit(base_url)
+            marker = "/" + first + "/"
+            if marker in base_parts.path:
+                prefix = base_parts.path.split(marker, 1)[0] + marker
+                root_url = urllib.parse.urlunsplit(
+                    (base_parts.scheme, base_parts.netloc, prefix, "", "")
+                )
+                return urllib.parse.urljoin(root_url, normalized)
+
+    collection_dir = base_url.rsplit("/", 1)[0] + "/"
+    return urllib.parse.urljoin(collection_dir, normalized)
+
+
+def _bbox_intersects(
+    item_bbox: Any, bbox: tuple[float, float, float, float]
+) -> bool:
+    """Пересекаются ли bbox STAC Item и целевой bbox (min_lat, min_lon, ...)."""
+    if not item_bbox or len(item_bbox) != 4:
+        return False
+    min_lat, min_lon, max_lat, max_lon = bbox
+    xmin, ymin, xmax, ymax = map(float, item_bbox)
+    return xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat
+
 
 def _stac_item_hrefs(
     collection: dict[str, Any],
@@ -564,67 +715,26 @@ def _stac_item_hrefs(
     base_url: str,
 ) -> list[str]:
     """Возвращает href'ы STAC Item, чьи bbox пересекают заданный bbox."""
-    import urllib.parse
-
-    min_lat, min_lon, max_lat, max_lon = bbox
     item_links = [
         link.get("href")
         for link in collection.get("links", [])
         if link.get("rel") == "item" and link.get("href")
     ]
     extent_boxes = (
-        collection.get("extent", {})
-        .get("spatial", {})
-        .get("bbox", [])
+        collection.get("extent", {}).get("spatial", {}).get("bbox", [])
     )
-
-    # STAC Item hrefs are resolved relative to the directory containing
-    # collection.json, not relative to collection.json itself. Resolving
-    # against the file URL produces malformed paths such as:
-    # .../segment/collection.json/2026-08-19.0/transportation/segment/00002/00002.json
-    collection_dir = base_url.rsplit("/", 1)[0] + "/"
-
-    def resolve_item_href(href: str) -> str:
-        # Some published Overture STAC collections contain an href prefixed
-        # with collection.json/ and then a release-relative path. Treat that
-        # as a path from the STAC root, not as a child of collection.json.
-        normalized = href.lstrip("./")
-        if normalized.startswith("collection.json/"):
-            normalized = normalized[len("collection.json/") :]
-
-        parts = normalized.split("/", 1)
-        if len(parts) == 2:
-            first = parts[0]
-            if len(first) >= 10 and first[4] == "-" and first[7] == "-" and "." in first:
-                base_parts = urllib.parse.urlsplit(base_url)
-                marker = "/" + first + "/"
-                if marker in base_parts.path:
-                    prefix = base_parts.path.split(marker, 1)[0] + marker
-                    root_url = urllib.parse.urlunsplit(
-                        (base_parts.scheme, base_parts.netloc, prefix, "", "")
-                    )
-                    return urllib.parse.urljoin(root_url, normalized)
-
-        return urllib.parse.urljoin(collection_dir, normalized)
 
     # Overture's published collections currently carry one union bbox followed
     # by one bbox per Item, in the same order as the item links. Use that
     # spatial index to avoid fetching every Item JSON.
-    candidate_links: list[str] = []
-    if len(extent_boxes) == len(item_links) + 1:
-        extent_boxes = extent_boxes[1:]
-        for href, item_bbox in zip(item_links, extent_boxes):
-            if len(item_bbox) != 4:
-                continue
-            xmin, ymin, xmax, ymax = map(float, item_bbox)
-            if xmin < max_lon and xmax > min_lon and ymin < max_lat and ymax > min_lat:
-                candidate_links.append(resolve_item_href(href))
-        return candidate_links
+    if len(extent_boxes) != len(item_links) + 1:
+        # Be conservative if a future STAC writer changes the extent layout.
+        return [_resolve_stac_item_href(href, base_url) for href in item_links]
 
-    # Be conservative if a future STAC writer changes the extent layout.
     return [
-        resolve_item_href(href)
-        for href in item_links
+        _resolve_stac_item_href(href, base_url)
+        for href, item_bbox in zip(item_links, extent_boxes[1:])
+        if _bbox_intersects(item_bbox, bbox)
     ]
 
 
@@ -644,6 +754,33 @@ def _s3_key_from_stac_item(item: dict[str, Any]) -> str | None:
     return None
 
 
+def _stac_item_urls(item_url: str, release: str) -> list[str]:
+    """Зеркальные URL STAC Item'а на всех ``_STAC_HTTP_HOSTS``."""
+    item_path = urllib.parse.urlsplit(item_url).path
+    marker = f"/{release}/"
+    if marker not in item_path:
+        raise ValueError(f"Некорректный STAC Item URL: {item_url}")
+    relative_path = item_path.rsplit(marker, 1)[1]
+    relative_path = relative_path.replace("collection.json/", "", 1)
+    return [
+        f"{host}/{release}/{relative_path.lstrip('/')}"
+        for host in _STAC_HTTP_HOSTS
+    ]
+
+
+def _fetch_stac_item_s3_key(
+    item_url: str, release: str, retries: int, retry_delay: float
+) -> str | None:
+    """Скачивает STAC Item и вытаскивает из него S3-ключ (или None)."""
+    item_data = _http_get_stac(
+        _stac_item_urls(item_url, release),
+        timeout=_STAC_TIMEOUT_S,
+        retries=retries,
+        retry_delay=retry_delay,
+    )
+    return _s3_key_from_stac_item(json.loads(item_data))
+
+
 def _http_resolve_stac_part_files_via_collection(
     release: str,
     theme: str,
@@ -654,9 +791,6 @@ def _http_resolve_stac_part_files_via_collection(
 ) -> list[str]:
     """Резервный STAC-резолвер через collection.json и Item JSON."""
     import concurrent.futures
-    import json as json_module
-
-    import urllib.parse
 
     collection_urls = [
         f"{host}/{release}/{theme}/{overture_type}/collection.json"
@@ -668,34 +802,57 @@ def _http_resolve_stac_part_files_via_collection(
         retries=retries,
         retry_delay=retry_delay,
     )
-    collection = json_module.loads(collection_data)
+    collection = json.loads(collection_data)
     item_hrefs = _stac_item_hrefs(collection, bbox, collection_urls[0])
     if not item_hrefs:
         return []
 
     def fetch_item(item_url: str) -> str | None:
-        item_path = urllib.parse.urlsplit(item_url).path
-        marker = f"/{release}/"
-        if marker not in item_path:
-            raise ValueError(f"Некорректный STAC Item URL: {item_url}")
-        relative_path = item_path.rsplit(marker, 1)[1]
-        relative_path = relative_path.replace("collection.json/", "", 1)
-        item_urls = [
-            f"{host}/{release}/{relative_path.lstrip('/')}"
-            for host in _STAC_HTTP_HOSTS
-        ]
-        item_data = _http_get_stac(
-            item_urls,
-            timeout=_STAC_TIMEOUT_S,
-            retries=retries,
-            retry_delay=retry_delay,
-        )
-        return _s3_key_from_stac_item(json_module.loads(item_data))
+        return _fetch_stac_item_s3_key(item_url, release, retries, retry_delay)
 
     max_workers = min(8, len(item_hrefs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         return [key for key in executor.map(fetch_item, item_hrefs) if key]
 
+
+def _stac_resolve_via_parquet(
+    release: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float],
+    retries: int,
+    retry_delay: float,
+) -> list[str]:
+    """Fallback-резолвер: вытащить ключи через ``collections.parquet`` STAC."""
+    import pyarrow.compute as pc
+    from pyarrow import parquet as pq
+
+    stac_urls = [
+        f"{host}/{release}/collections.parquet" for host in _STAC_HTTP_HOSTS
+    ]
+    data = _http_get_stac(
+        stac_urls,
+        timeout=_STAC_TIMEOUT_S,
+        retries=retries,
+        retry_delay=retry_delay,
+    )
+    table = pq.read_table(io.BytesIO(data))
+    feature_type_filter = (pc.field("collection") == overture_type) & (
+        pc.field("type") == "Feature"
+    )
+    min_lat, min_lon, max_lat, max_lon = bbox
+    bbox_filter = (
+        (pc.field("bbox", "xmin") < max_lon)
+        & (pc.field("bbox", "xmax") > min_lon)
+        & (pc.field("bbox", "ymin") < max_lat)
+        & (pc.field("bbox", "ymax") > min_lat)
+    )
+    table = table.filter(feature_type_filter & bbox_filter)
+    keys: list[str] = []
+    for path in table.column("assets").to_pylist():
+        href = path["aws"]["alternate"]["s3"]["href"]
+        if href.startswith("s3://"):
+            keys.append(href[len("s3://") :])
+    return keys
 
 
 def _http_resolve_stac_part_files(
@@ -721,35 +878,68 @@ def _http_resolve_stac_part_files(
             "переключаемся на collections.parquet",
             exc,
         )
-
-    stac_urls = [f"{host}/{release}/collections.parquet" for host in _STAC_HTTP_HOSTS]
     try:
-        data = _http_get_stac(
-            stac_urls, timeout=_STAC_TIMEOUT_S, retries=retries, retry_delay=retry_delay
+        return _stac_resolve_via_parquet(
+            release, overture_type, bbox, retries, retry_delay
         )
-        import pyarrow.compute as pc
-        from pyarrow import parquet as pq
-        table = pq.read_table(io.BytesIO(data))
-        feature_type_filter = (pc.field("collection") == overture_type) & (
-            pc.field("type") == "Feature"
-        )
-        min_lat, min_lon, max_lat, max_lon = bbox
-        bbox_filter = (
-            (pc.field("bbox", "xmin") < max_lon)
-            & (pc.field("bbox", "xmax") > min_lon)
-            & (pc.field("bbox", "ymin") < max_lat)
-            & (pc.field("bbox", "ymax") > min_lat)
-        )
-        table = table.filter(feature_type_filter & bbox_filter)
-        keys: list[str] = []
-        for path in table.column("assets").to_pylist():
-            href = path["aws"]["alternate"]["s3"]["href"]
-            if href.startswith("s3://"):
-                keys.append(href[len("s3://") :])
-        return keys
     except Exception as exc:  # noqa: BLE001 — последний STAC fallback
         logger.warning("Overture: STAC не удалось разрешить: %s", exc)
         return []
+
+
+# ===== DuckDB fallback =====
+
+
+def _duckdb_configure_provider(
+    conn: Any,
+    provider: str,
+    release: str,
+    theme: str,
+    overture_type: str,
+) -> str:
+    """Настраивает DuckDB-расширения/секреты и возвращает источник паркетов."""
+    if provider == "s3":
+        conn.execute("LOAD httpfs")
+        conn.execute("SET s3_region='us-west-2'")
+        conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
+        return (
+            f"s3://overturemaps-us-west-2/release/{release}/"
+            f"theme={theme}/type={overture_type}/*"
+        )
+    if provider == "azure":
+        conn.execute("LOAD azure")
+        conn.execute("SET azure_transport_option_type='curl'")
+        conn.execute(
+            "CREATE SECRET overture_azure (TYPE azure, PROVIDER config, "
+            "ACCOUNT_NAME 'overturemapswestus2')"
+        )
+        return (
+            f"az://overturemapswestus2.blob.core.windows.net/release/{release}/"
+            f"theme={theme}/type={overture_type}/*"
+        )
+    raise ValueError(f"Неизвестный DuckDB provider: {provider!r}")
+
+
+def _duckdb_bbox_query(
+    source: str, target: Path, bbox: tuple[float, float, float, float]
+) -> str:
+    """Строит ``COPY (...) TO`` с bbox-фильтром для DuckDB.
+
+    ``bbox`` — в порядке ``(min_lat, min_lon, max_lat, max_lon)``, как
+    принимает публичная функция; в SQL значения раскладываются явно.
+    """
+    min_lat, min_lon, max_lat, max_lon = bbox
+    return (
+        "COPY ("
+        " SELECT *"
+        f" FROM read_parquet({_sql_literal(source)}, "
+        "filename=true, hive_partitioning=1)"
+        f" WHERE bbox.xmin < {max_lon}"
+        f"   AND bbox.xmax > {min_lon}"
+        f"   AND bbox.ymin < {max_lat}"
+        f"   AND bbox.ymax > {min_lat}"
+        f") TO {_sql_literal(str(target))} (FORMAT PARQUET)"
+    )
 
 
 def _duckdb_read_overture(
@@ -763,50 +953,17 @@ def _duckdb_read_overture(
     """Извлекает bbox-подмножество Overture через DuckDB cloud scan."""
     import uuid
 
-    import geopandas as gpd
     import duckdb
+    import geopandas as gpd
 
-    if provider == "s3":
-        source = (
-            f"s3://overturemaps-us-west-2/release/{release}/"
-            f"theme={theme}/type={overture_type}/*"
-        )
-    elif provider == "azure":
-        source = (
-            f"az://overturemapswestus2.blob.core.windows.net/release/{release}/"
-            f"theme={theme}/type={overture_type}/*"
-        )
-    else:
-        raise ValueError(f"Неизвестный DuckDB provider: {provider!r}")
-    min_lat, min_lon, max_lat, max_lon = bbox
     target = Path.cwd() / f".overture_duckdb_{uuid.uuid4().hex}.parquet"
-
-
     conn = duckdb.connect(":memory:")
     try:
         conn.execute("LOAD spatial")
-        if provider == "s3":
-            conn.execute("LOAD httpfs")
-            conn.execute("SET s3_region='us-west-2'")
-            conn.execute("CREATE SECRET overture_s3 (TYPE s3, REGION 'us-west-2')")
-        else:
-            conn.execute("LOAD azure")
-            conn.execute("SET azure_transport_option_type='curl'")
-            conn.execute(
-                "CREATE SECRET overture_azure (TYPE azure, PROVIDER config, "
-                "ACCOUNT_NAME 'overturemapswestus2')"
-            )
-
-        query = (
-            "COPY ("
-            " SELECT *"
-            f" FROM read_parquet({_sql_literal(source)}, filename=true, hive_partitioning=1)"
-            f" WHERE bbox.xmin < {max_lon}"
-            f"   AND bbox.xmax > {min_lon}"
-            f"   AND bbox.ymin < {max_lat}"
-            f"   AND bbox.ymax > {min_lat}"
-            f") TO {_sql_literal(str(target))} (FORMAT PARQUET)"
+        source = _duckdb_configure_provider(
+            conn, provider, release, theme, overture_type
         )
+        query = _duckdb_bbox_query(source, target, bbox)
         logger.info(
             "Overture: DuckDB %s/%s/%s → %s",
             theme,
@@ -841,6 +998,9 @@ def _duckdb_read_overture(
             target.unlink()
 
 
+# ===== Локальный кэш частей =====
+
+
 def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     safe = key.replace("/", "__").replace("=", "_")
     return Path(cache_dir) / "parts" / safe
@@ -869,7 +1029,8 @@ def _download_overture_parts(
         if attempt < retries:
             delay = retry_delay * (2**attempt)
             logger.warning(
-                "Overture: скачивание частей попытка %d/%d — повтор через %.1fs: %s",
+                "Overture: скачивание частей попытка %d/%d — "
+                "повтор через %.1fs: %s",
                 attempt + 1,
                 retries + 1,
                 delay,
@@ -879,6 +1040,9 @@ def _download_overture_parts(
     raise last_exc if last_exc is not None else RuntimeError(
         "Overture: скачивание частей не удалось"
     )
+
+
+# ===== Чтение локальных частей =====
 
 
 def _read_part_frames(
@@ -899,7 +1063,9 @@ def _read_part_frames(
     return frames
 
 
-def _concat_part_frames(frames: list[Any], gpd: Any, *, to_epsg4326: bool = True) -> Any:
+def _concat_part_frames(
+    frames: list[Any], gpd: Any, *, to_epsg4326: bool = True
+) -> Any:
     """Склеивает кадры частей, приводя CRS к EPSG:4326 при необходимости."""
     if not frames:
         return gpd.pd.DataFrame()
@@ -911,7 +1077,9 @@ def _concat_part_frames(frames: list[Any], gpd: Any, *, to_epsg4326: bool = True
     return gdf
 
 
-def _read_overture_parts(local_files: list[str], bbox_filter: tuple, gpd: Any) -> Any | None:
+def _read_overture_parts(
+    local_files: list[str], bbox_filter: tuple, gpd: Any
+) -> Any | None:
     frames = _read_part_frames(local_files, bbox_filter, gpd)
     if not frames:
         return None
@@ -921,25 +1089,25 @@ def _read_overture_parts(local_files: list[str], bbox_filter: tuple, gpd: Any) -
 
 __all__ = [
     "_CHUNK_RETRY_DELAY_S",
-    "_STAC_TIMEOUT_S",
-    "_STAC_CHUNK_BYTES",
-    "_STAC_HTTP_HOSTS",
     "_OVERTURE_CHUNK_BYTES",
     "_OVERTURE_HTTP_HOSTS",
+    "_STAC_CHUNK_BYTES",
+    "_STAC_HTTP_HOSTS",
+    "_STAC_TIMEOUT_S",
     "_PartProgress",
     "_append_chunk",
     "_concat_part_frames",
     "_download_overture_parts",
-    "_duckdb_read_overture",
     "_download_part_from_host",
     "_download_part_once",
-    "_is_valid_cached_part",
     "_download_part_round",
+    "_duckdb_read_overture",
     "_fetch_chunk",
     "_http_get_range",
     "_http_get_stac",
     "_http_get_url",
     "_http_resolve_stac_part_files",
+    "_is_valid_cached_part",
     "_log_stac_retry",
     "_overture_host_url",
     "_part_local_path",

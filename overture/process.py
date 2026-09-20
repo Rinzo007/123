@@ -13,7 +13,6 @@ from shapely.errors import GEOSException
 from shapely.geometry import LineString
 
 from .adapters import OvertureStats, dir_geo_sig
-from .ports import CachePort, RoutePort
 from .cache import (
     LRUCache,
     _cache_get,
@@ -24,6 +23,7 @@ from .cache import (
 )
 from .context import _OvertureContext
 from .geometry import _intersection_union_area_and_count, _query_tree
+from .ports import CachePort, RoutePort
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 _TRANSFORMER_LOCAL = threading.local()

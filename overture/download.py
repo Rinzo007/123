@@ -12,14 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from .cache import _safe_bbox_key
-from .release import OvertureReleaseError, resolve_overture_release
 from .http import (
     _download_overture_parts,
     _http_resolve_stac_part_files,
     _part_local_path,
     _read_overture_parts,
-    _sql_literal,
 )
+from .release import OvertureReleaseError, resolve_overture_release
 from .settings import (
     OVERTURE_CACHE_VERSION,
     OVERTURE_THEME_ALIASES,
@@ -176,8 +175,8 @@ def _duckdb_download_overture_place(
     provider: str,
 ) -> Any | None:
     """Читает Overture напрямую из облака через DuckDB, без STAC."""
-    import geopandas as gpd
     import duckdb
+    import geopandas as gpd
 
     if theme != "place":
         raise ValueError(f"DuckDB-загрузка поддерживает только тему place, получено {theme!r}")
@@ -199,6 +198,8 @@ def _duckdb_download_overture_place(
     else:
         raise ValueError(f"Неизвестный DuckDB provider: {provider}")
 
+    def sql_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
 
     conn = duckdb.connect(":memory:")
     try:
@@ -214,12 +215,12 @@ def _duckdb_download_overture_place(
         query = (
             "COPY ("
             " SELECT *"
-            f" FROM read_parquet({_sql_literal(source)}, filename=true, hive_partitioning=1)"
+            f" FROM read_parquet({sql_literal(source)}, filename=true, hive_partitioning=1)"
             f" WHERE bbox.xmin < {max_lon}"
             f"   AND bbox.xmax > {min_lon}"
             f"   AND bbox.ymin < {max_lat}"
             f"   AND bbox.ymax > {min_lat}"
-            f") TO {_sql_literal(str(target))} (FORMAT PARQUET)"
+            f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
         )
         logger.info("Overture: DuckDB %s → %s", provider, source)
         started = time.monotonic()
@@ -388,8 +389,22 @@ def auto_download_overture(
         return None
 
 
-# Совместимый экспорт: каноническая реализация находится в ``overture.poi``.
-from .poi import resolve_poi_place_file
+def resolve_poi_place_file(
+    override: str | None,
+    configured: str | None,
+    bbox: tuple[float, float, float, float] | None,
+    cache_dir: str | Path,
+    release: str | None,
+    retries: int,
+    warn: Callable[[str], None],
+) -> str | None:
+    """Совместимый прокси к POI-слою."""
+    from .poi import resolve_poi_place_file as _resolve_poi_place_file
+
+    return _resolve_poi_place_file(
+        override, configured, bbox, cache_dir, release, retries, warn
+    )
+
 __all__ = [
     "_SAFE_COMPONENT_RE",
     "_AutoDownloadSpec",

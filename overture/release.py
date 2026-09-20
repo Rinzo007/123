@@ -7,7 +7,6 @@ import ssl
 import urllib.request
 from typing import Final
 
-
 _LATEST_ALIASES: Final[frozenset[str]] = frozenset({"latest", "current"})
 _STAC_CATALOG_HOSTS: Final[tuple[str, ...]] = (
     "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac",
@@ -33,7 +32,7 @@ def resolve_overture_release(release: str | None = None) -> str:
         resolved = str(resolved).strip()
         if resolved:
             return resolved
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — опциональный пакет; при неудаче переходим к STAC
         pass
 
     errors: list[Exception] = []

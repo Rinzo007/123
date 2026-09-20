@@ -30,7 +30,7 @@ class OvertureConfig:
     projection_chunk_size: int = 50_000
 
     @classmethod
-    def from_env(cls) -> "OvertureConfig":
+    def from_env(cls) -> OvertureConfig:
         def _int(name: str, default: int) -> int:
             try:
                 return int(os.getenv(name, str(default)))

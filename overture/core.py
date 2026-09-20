@@ -15,20 +15,20 @@ from shapely.geometry import Polygon
 from shapely.geometry import box as shapely_box
 
 from .adapters import OvertureStats, utm_epsg
-from .ports import CachePort
 from .cache import LRUCache, _file_signature
-from .context import _OvertureContext
 from .config import OvertureConfig
+from .context import _OvertureContext
 from .geometry import _validate_bbox
 from .load import load_overture_geometries, overture_resolve_sources
-from .release import resolve_overture_release
-from .result import OvertureResult
+from .ports import CachePort
 from .process import (
     _chunks,
     _process_single_route,
     _thread_batch_worker,
     _WorkerState,
 )
+from .release import resolve_overture_release
+from .result import OvertureResult
 
 logger = logging.getLogger("wikiroutes.gis.overture")
 
@@ -422,7 +422,7 @@ def compute_overture_result(
             if release is not None
             else None
         )
-    except Exception as exc:
+    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
         logger.warning("Overture: не удалось определить release: %s", exc)
         return OvertureResult.error_result(exc)
 
