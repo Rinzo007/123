@@ -376,8 +376,9 @@ def _accumulate_transit_journeys(
     probs = _takt_route_probs(travel_times * 60.0)
     totals.assigned_trips += transit_trips
 
-    for ci, (_time, legs) in enumerate(journeys):
+    for ci, journey in enumerate(journeys):
         route_trips = transit_trips * probs[ci]
+        legs = journey.legs
         if route_trips <= 0:
             continue
         _accumulate_journey(
@@ -489,7 +490,7 @@ def _assign_od(
 
         # Время каждой поездки; перегрузка ожидания (crowding) добавляется
         # по маршрутам его ножек.
-        raw_times = np.asarray([j[0] for j in journeys], dtype=np.float64)
+        raw_times = np.asarray([j.total_time_min for j in journeys], dtype=np.float64)
         travel_times = raw_times + _journey_crowd_extra(
             journeys,
             route_sequences,
