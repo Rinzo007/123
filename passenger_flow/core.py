@@ -81,9 +81,9 @@ def _validate_transfer_args(
 ) -> None:
     if max_transfers < 0:
         raise PassengerFlowError("max_transfers не может быть отрицательным")
-    if max_transfers > 1:
+    if max_transfers > 3:
         raise PassengerFlowError(
-            "Поддерживается не более одной пересадки (max_transfers 0/1)"
+            "Поддерживается не более трёх пересадок (до 4 ножек)"
         )
     if max_transfers > 0 and transfer_radius_m <= 0.0:
         raise PassengerFlowError("transfer_radius_m должен быть положительным")
@@ -201,6 +201,27 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
             raise PassengerFlowError(f"{name} не может быть отрицательным")
 
 
+def _validate_base_time(
+    base_time_s: np.ndarray | None,
+    n_zones: int,
+    n_periods: int,
+) -> None:
+    """Проверяет baseT: NxN либо [period, N, N]."""
+    if base_time_s is None:
+        return
+    if base_time_s.ndim == 2:
+        if base_time_s.shape != (n_zones, n_zones):
+            raise PassengerFlowError("base_time_s имеет неверный размер NxN")
+    elif base_time_s.ndim == 3:
+        if base_time_s.shape[1:] != (n_zones, n_zones):
+            raise PassengerFlowError("base_time_s имеет неверные размеры [period,N,N]")
+        if base_time_s.shape[0] < n_periods:
+            raise PassengerFlowError("base_time_s содержит меньше периодов, чем periods")
+    else:
+        raise PassengerFlowError("base_time_s должен быть NxN или [period,N,N]")
+    if not np.isfinite(base_time_s).all() or np.any(base_time_s < 0.0):
+        raise PassengerFlowError("base_time_s должен содержать конечные неотрицательные значения")
+
 def _validate_flow_inputs(
     matrix: np.ndarray,
     n_zones: int,
@@ -220,6 +241,7 @@ def _validate_flow_inputs(
     msa_gap: float,
     periods: Sequence[Period],
     mode_choice: ModeChoiceConfig,
+    base_time_s: np.ndarray | None,
 ) -> None:
     """Полная валидация входов — композиция групп проверок.
 
@@ -227,6 +249,7 @@ def _validate_flow_inputs(
     нескольких нарушениях сообщение об ошибке не менялось.
     """
     _validate_od_matrix(matrix, n_zones)
+    _validate_base_time(base_time_s, n_zones, len(periods) if periods else 1)
     _validate_transfer_args(max_transfers, transfer_radius_m)
     _validate_headway_args(headway_min, headway_by_route)
     _validate_capex_args(capex_factor, capex_amort_years)
@@ -409,6 +432,7 @@ def _merge_pass_aggregates(
     accum["car_trips"] += pass_agg["car_trips"]
     accum["walk_trips"] += pass_agg["walk_trips"]
     accum["two_wheel_trips"] += pass_agg["two_wheel_trips"]
+    accum["rest_trips"] += pass_agg.get("rest_trips", 0.0)
     accum["fare_revenue"] += pass_agg["fare_revenue"]
 
 
@@ -419,6 +443,7 @@ def _empty_accumulator() -> dict[str, Any]:
         "car_trips": 0.0,
         "walk_trips": 0.0,
         "two_wheel_trips": 0.0,
+        "rest_trips": 0.0,
         "fare_revenue": 0.0,
         "route_totals": defaultdict(float),
         "dir_totals": defaultdict(float),
@@ -606,6 +631,7 @@ def run_passenger_flow(
     zones: Zones,
     *,
     population: np.ndarray | None = None,
+    base_time_s: np.ndarray | None = None,
     od_sparse: Any = None,
     stop_time_min: float = _DEFAULT_STOP_TIME_MIN,
     logit_temp: float = _LOGIT_TEMP,
@@ -752,6 +778,7 @@ def run_passenger_flow(
         msa_gap=msa_gap,
         periods=periods,
         mode_choice=mode_choice,
+        base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
     )
 
     # 1. Подготовка данных маршрутов
@@ -813,6 +840,7 @@ def run_passenger_flow(
         mode_choice=mode_choice,
         zones=zones,
         no_car_shares=_takt_no_car_shares(mode_choice, population_arr),
+        base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
         wait_calc=wait_calc,
@@ -822,10 +850,12 @@ def run_passenger_flow(
 
     # 7. Проходы по периодам
     period_sources: Sequence[Period | None] = tuple(periods) or (None,)
-    for period in period_sources:
+    for period_index, period in enumerate(period_sources):
         pass_agg = _run_period(
             ctx,
             period,
+            period_index=period_index,
+            period_hours=float(_TAKT_PERIOD_HOURS.get(period.key, 24.0) if period is not None else 24.0),
             wait_crowding_per_100_min=wait_crowding_per_100_min,
             reliability_extra=reliability_extra,
             msa_max_iterations=msa_max_iterations,
@@ -842,6 +872,8 @@ def run_passenger_flow(
                     assigned_trips=pass_agg["assigned_trips"],
                     car_trips=pass_agg["car_trips"],
                     walk_trips=pass_agg["walk_trips"],
+                    two_wheel_trips=pass_agg.get("two_wheel_trips", 0.0),
+                    rest_trips=pass_agg.get("rest_trips", 0.0),
                 )
             )
 
@@ -850,6 +882,7 @@ def run_passenger_flow(
     merged_car = accum["car_trips"]
     merged_walk = accum["walk_trips"]
     merged_two_wheel = accum["two_wheel_trips"]
+    merged_rest = accum["rest_trips"]
     merged_revenue = accum["fare_revenue"]
 
     intrazonal_trips = float(np.sum(np.diag(od_matrix)))
@@ -883,6 +916,7 @@ def run_passenger_flow(
         car_trips=merged_car,
         walk_trips=merged_walk,
         two_wheel_trips=merged_two_wheel,
+        rest_trips=merged_rest,
         period_flows=tuple(period_flows),
         line_results=line_results,
     )
