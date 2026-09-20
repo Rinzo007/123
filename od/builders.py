@@ -407,6 +407,7 @@ def build_purpose_od(
     matrices: list[Any] = []
     totals: list[float] = []
     used: list[Purpose] = []
+    base_times: list[np.ndarray | None] = []
     for purpose in purposes:
         prod_p = prod * float(purpose.trips_per_res)
         if prod_p.sum() <= 0.0:
@@ -428,8 +429,30 @@ def build_purpose_od(
                     ),
                     shape=(n, n),
                 ).tocsr()
+                rows_p, cols_p = matrix_p.nonzero()
+                time_weighted = sparse.coo_matrix(
+                    (
+                        pairs[:, 2].astype(np.float64) * pairs[:, 3].astype(np.float64),
+                        (pairs[:, 0], pairs[:, 1]),
+                    ),
+                    shape=(n, n),
+                ).tocsr()
+                trips_p = np.asarray(matrix_p[rows_p, cols_p]).ravel()
+                weighted_p = np.asarray(time_weighted[rows_p, cols_p]).ravel()
+                pair_base = np.divide(
+                    weighted_p,
+                    trips_p,
+                    out=np.zeros_like(weighted_p),
+                    where=trips_p > 0.0,
+                )
+                base_times.append(
+                    np.repeat(pair_base[None, :], len(_TAKT_PERIODS_SLOTS), axis=0)
+                )
             else:
                 matrix_p = sparse.csr_matrix((n, n), dtype=np.float64)
+                base_times.append(
+                    np.zeros((len(_TAKT_PERIODS_SLOTS), 0), dtype=np.float64)
+                )
         else:
             d0_km = max(float(purpose.d0_m) / 1000.0, 1e-3)
             kernel = (1.0 + dist_km / d0_km) ** (-int(purpose.k))
@@ -439,6 +462,8 @@ def build_purpose_od(
         matrices.append(matrix_p)
         used.append(purpose)
         totals.append(float(matrix_p.sum()))
+        if engine == "gravity":
+            base_times.append(None)
     if not matrices:
         raise OdMatrixError("Ни одна цель не дала поездок")
     matrix = np.zeros((len(zones), len(zones)), dtype=np.float64)
@@ -461,6 +486,7 @@ def build_purpose_od(
         period_ret=tuple(float(v) for v in ret_weights),
         shares=shares,
         purposes=tuple(used),
+        purpose_base_times=tuple(base_times),
     )
 
 
