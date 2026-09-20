@@ -116,6 +116,7 @@ def _shared_capacity_min_headways(
     route_sequences: list[dict[str, Any]],
     default_headway_min: float,
     headway_by_route: Mapping[int, float] | None,
+    atomic_sections: dict[tuple[str, str, str], set[int]] | None = None,
 ) -> dict[int, float]:
     """Минимальный интервал с учётом shared infrastructure, по модели Takt Ga.
 
@@ -123,7 +124,7 @@ def _shared_capacity_min_headways(
     транспорта. Для каждой линии residual capacity равна `track_tph` секции
     минус частота остальных линий, использующих ту же секцию.
     """
-    section_lines, _ = _atomic_infrastructure_sections(route_sequences)
+    section_lines = atomic_sections if atomic_sections is not None else _atomic_infrastructure_sections(route_sequences)[0]
     min_headway: dict[int, float] = {rid: 60.0 / max(tph, 1e-9) for rid, tph in line_limit.items()}
     line_headway = lambda rid: float(headway_by_route.get(rid, default_headway_min)) if headway_by_route is not None else float(default_headway_min)
     for key, lines in section_lines.items():
@@ -342,12 +343,12 @@ def _build_line_kpis(
     """
     results: list[LineResult] = []
     seen: set[int] = set()
+    _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     shared_min_headway = _shared_capacity_min_headways(
-        route_sequences, headway_min, headway_by_route
+        route_sequences, headway_min, headway_by_route, atomic_sections=_atomic_lines
     )
     station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals, vehicle_specs)
     shared_capital_sections: set[tuple[str, str, str]] = set()
-    _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     for seq in route_sequences:
         rid = seq["route_id"]
         if rid in seen:
