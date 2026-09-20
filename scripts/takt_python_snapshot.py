@@ -70,15 +70,6 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         bounds=(-0.001, -0.001, 0.006, 0.001),
     )
     base_time_s = np.full((5, 2), 300.0, dtype=np.float64)
-    # Match the Takt bundle geometry exactly: one 340 m physical segment.
-    direction = _Direction("A-B", stops, segLen=(340.0,))
-    route = _Route(
-        ok=True,
-        route_id=1,
-        name="Bus 1",
-        route_type="bus",
-        directions=(direction,),
-    )
     return [route], od, zones, base_time_s
 
 
