@@ -251,7 +251,7 @@ def _build_route_stop_sequence(
                 explicit_cum, len(stops)
             )
             if cum_t_s is None:
-                cum_t_s = _derive_cumulative_seconds(stops, spec.speed_kmh)
+                cum_t_s = _derive_cumulative_seconds(stops, row_speed_kmh)
                 explicit_cycle_s = None
             open_values = _optional_value(
                 direction, ("openStops", "open_stops")
