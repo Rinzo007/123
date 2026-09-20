@@ -251,6 +251,7 @@ def _journey_crowd_extra(
     seq_headway_min: Mapping[int, float] | None,
     wait_extra: Mapping[int, float] | None = None,
     period_index: int = 0,
+    seq_jitter_s: Mapping[int, float] | None = None,
 ) -> np.ndarray:
     """Дополнительное ожидание по Takt Fr→unev→Rr, без double-count hs."""
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
@@ -283,7 +284,7 @@ def _journey_crowd_extra(
                     stop_time_min=0.0,
                     route_stop_sequences=route_sequences,
                     seq_headway_min=seq_headway_min,
-                    seq_jitter_s={},
+                    seq_jitter_s=seq_jitter_s or {},
                 )
                 extra_s += float(transfer_wait_min) * 60.0 * (lf - 1.0)
         for seq_idx, _a, _b in journey.legs:
@@ -542,6 +543,7 @@ def _assign_od(
             seq_headway_min,
             wait_extra=wait_extra,
             period_index=period_index,
+            seq_jitter_s=seq_jitter_s,
         )
 
         if mode is not None:
