@@ -172,7 +172,7 @@ def _leg_alternatives(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     transfer_radius_m: float,
 ) -> tuple[tuple[int, int, int], ...]:
-    """JS ei(): альтернативные линии для конкретной ножки после пересадки."""
+    """JS ei(): альтернативы конкретной ножки с сохранением следующего leg-state."""
     if leg_index <= 0 or leg_index >= len(journey.legs):
         return ()
     prev_seq, _prev_a, prev_b = journey.legs[leg_index - 1]
@@ -183,27 +183,53 @@ def _leg_alternatives(
         route_sequences[base_seq], base_a, base_b,
         stop_time_min=stop_time_min, crowd_state=crowd_state
     )
+    next_leg = journey.legs[leg_index + 1] if leg_index + 1 < len(journey.legs) else None
+    next_seq = next_leg[0] if next_leg is not None else None
+    next_board = next_leg[1] if next_leg is not None else None
+    next_stop = (
+        route_sequences[next_seq]["stops"][next_board]
+        if next_seq is not None and next_board is not None
+        else None
+    )
     alternatives: list[tuple[float, tuple[int, int, int]]] = []
     for alt_seq, alt_board, _alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
         if alt_seq == base_seq:
             continue
-        found = _nearest_stop_on_sequence(
-            route_sequences[alt_seq], base_dest, radius_m=transfer_radius_m
-        )
-        if found is None:
-            continue
-        alt_pos, _stop, _dist = found
-        if alt_pos == int(alt_board["position"]):
-            continue
-        alt_ride = _ride_edge_time_min(
-            route_sequences[alt_seq], int(alt_board["position"]), alt_pos,
-            stop_time_min=stop_time_min, crowd_state=crowd_state
-        )
-        if alt_ride > base_ride * 1.25 + 2.0:
-            continue
-        alternatives.append((
-            alt_ride, (alt_seq, int(alt_board["position"]), alt_pos)
-        ))
+        alt_board_pos = int(alt_board["position"])
+        alt_candidates: list[tuple[int, float]] = []
+        if next_seq is not None and next_stop is not None:
+            for pos, stop in enumerate(route_sequences[alt_seq].get("stops") or []):
+                for target_seq, _target_stop, target_stop in transfer_index.get((alt_seq, pos), ()):
+                    if target_seq != next_seq:
+                        continue
+                    d = haversine_meters(
+                        float(target_stop["lat"]), float(target_stop["lon"]),
+                        float(next_stop["lat"]), float(next_stop["lon"]),
+                    )
+                    if d <= transfer_radius_m + 1e-9:
+                        alt_candidates.append((pos, d))
+                        break
+        else:
+            found = _nearest_stop_on_sequence(
+                route_sequences[alt_seq], base_dest, radius_m=transfer_radius_m
+            )
+            if found is not None:
+                alt_candidates.append((found[0], found[2]))
+        alt_candidates.sort(key=lambda item: (item[1], item[0]))
+        seen_positions: set[int] = set()
+        for alt_pos, _distance in alt_candidates:
+            if alt_pos == alt_board_pos or alt_pos in seen_positions:
+                continue
+            seen_positions.add(alt_pos)
+            alt_ride = _ride_edge_time_min(
+                route_sequences[alt_seq], alt_board_pos, alt_pos,
+                stop_time_min=stop_time_min, crowd_state=crowd_state
+            )
+            if alt_ride <= base_ride * 1.25 + 2.0:
+                alternatives.append((
+                    alt_ride, (alt_seq, alt_board_pos, alt_pos)
+                ))
+            break
     alternatives.sort(key=lambda item: (item[0], item[1]))
     seen: set[tuple[int, int, int]] = set()
     result: list[tuple[int, int, int]] = []
