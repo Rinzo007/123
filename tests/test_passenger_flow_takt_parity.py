@@ -251,3 +251,14 @@ def test_line_opex_includes_daily_vehicle_cost() -> None:
     result = results[0]
     assert result.fleet >= 1.0
     assert result.opex_day > result.fleet * 250.0
+
+def test_closed_route_uses_full_cycle_endpoint_cumt() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["closed"] = True
+    seq["cycle_run_s"] = 180.0
+    assert math.isclose(
+        _route_ride_time_min(seq, 2, 0),
+        1.0,
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    )
