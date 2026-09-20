@@ -73,13 +73,9 @@ sandbox.self = {
 };
 
 const bundleStart = bundle.indexOf("async function Bs(");
-const odNeedle = "const Wr=G=>fo*yt[G]+Oe,uo=c?et.fareJ[at]:ma(f,Ze);";
+const odNeedle = "et.fareJ[at]=uo;";
 const odIndex = bundle.indexOf(odNeedle, bundleStart);
-if (odIndex < 0) throw new Error("Could not locate Takt OD cost block");
-const debugNeedle = "const Xt=at*k+G;";
-const debugIndex = bundle.indexOf(debugNeedle, odIndex);
-if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
-const modeNeedle = "return{lines:cn,modeSplit:";
+if (odIndex < 0) throw new Error("Could not locate initialized Takt fare block");const modeNeedle = "return{lines:cn,modeSplit:";
 const modeIndex = bundle.indexOf(modeNeedle, debugIndex);
 if (modeIndex < 0) throw new Error("Could not locate Takt final return");
 const odDebugCode = "\nif (H === 0 && at === 0) globalThis.__TAKT_debug_od = { distanceM: Ze, carBase: fo, carFixedS: Oe, fareEur: uo, noCarShare: be, eBikeU: Te, walkU: ln, carU0: ho(0), restU0: po(0), carYt0: yt[0], baseT0: z.baseT ? z.baseT[0][at] : null };\n";
@@ -92,7 +88,7 @@ const modeDebugCode = `\nglobalThis.__TAKT_debug_modes = {
   transit: Ht.transit, car: Ht.car, walk: Ht.walk, rest: Ht.rest
 };\n`;
 const instrumented =
-  bundle.slice(0, odIndex) +
+  bundle.slice(0, odIndex + odNeedle.length) +
   odDebugCode +
   bundle.slice(odIndex, debugIndex) +
   routeDebugCode +
