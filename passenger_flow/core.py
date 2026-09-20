@@ -22,13 +22,17 @@ from collections import defaultdict
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .models import RouteLike
-from od import Zones
+if TYPE_CHECKING:
+    from .models import RouteLike
+    from od.model import Zones
+else:
+    RouteLike = Any
+    Zones = Any
 from .algorithm.assign import _assign_od
 from .algorithm.kpis import _build_line_kpis
 from .algorithm.wait import (
