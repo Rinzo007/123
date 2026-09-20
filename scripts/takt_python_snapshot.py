@@ -26,6 +26,7 @@ class _Stop:
 class _Direction:
     name: str
     stops: tuple[_Stop, ...]
+    segLen: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -55,14 +56,8 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         _Stop(1, "A", 52.3700, 0.0000),
         _Stop(2, "B", 52.3700, 0.0050),
     )
-    direction = _Direction("A-B", stops)
-    route = _Route(
-        ok=True,
-        route_id=1,
-        name="Bus 1",
-        route_type="bus",
-        directions=(direction,),
-    )
+    direction = _Direction("A-B", stops, segLen=(340.0,))
+    route = _Route(ok=True, route_id=1, name="Bus 1", route_type="bus", directions=(direction,))
     od = np.array([[0.0, 100.0], [100.0, 0.0]], dtype=np.float64)
     points = np.array(
         [[0.0000, 52.3700, 1000.0], [0.0050, 52.3700, 1000.0]],
@@ -75,6 +70,15 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         bounds=(-0.001, -0.001, 0.006, 0.001),
     )
     base_time_s = np.full((5, 2), 300.0, dtype=np.float64)
+    # Match the Takt bundle geometry exactly: one 340 m physical segment.
+    direction = _Direction("A-B", stops, segLen=(340.0,))
+    route = _Route(
+        ok=True,
+        route_id=1,
+        name="Bus 1",
+        route_type="bus",
+        directions=(direction,),
+    )
     return [route], od, zones, base_time_s
 
 
@@ -89,7 +93,7 @@ def main() -> int:
         periods=TAKT_PERIODS,
         headway_min=10.0,
         headway_by_route={1: 10.0},
-        msa_max_iterations=1,
+        msa_max_iterations=6,
         include_reliability=True,
     )
     line = result.line_results[0] if result.line_results else None
