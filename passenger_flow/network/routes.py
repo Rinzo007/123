@@ -373,6 +373,26 @@ def _build_route_stop_sequence(
             if cum_t_s is None:
                 cum_t_s = _derive_cumulative_seconds(stops, row_speed_profile)
                 explicit_cycle_s = None
+            raw_headways = _optional_value(direction, ("headways",))
+            if raw_headways is None:
+                raw_headways = _optional_value(route, ("headways",))
+            if isinstance(raw_headways, (list, tuple)):
+                headways = tuple(
+                    float(raw_headways[i]) if i < len(raw_headways) and raw_headways[i] is not None else 0.0
+                    for i in range(5)
+                )
+            elif raw_headways is not None:
+                try:
+                    hv = float(raw_headways)
+                except (TypeError, ValueError):
+                    hv = 0.0
+                headways = (hv,) * 5
+            else:
+                headways = None
+
+            open_values = _optional_value(
+                direction, ("openStops", "open_stops")
+            )
             open_values = _optional_value(
                 direction, ("openStops", "open_stops")
             )
@@ -410,6 +430,7 @@ def _build_route_stop_sequence(
                     "route_name": route.name,
                     "route_type": route_type_label,
                     "route_type_key": route_type_key,
+                    "headways": headways,
                     "access_m": access_m,
                     "row": route_row,
                     "row_explicit": explicit_route_row is not None,
