@@ -414,17 +414,31 @@ def _route_cycle(
     """Оборот Takt: (полный оборот км, полный оборот мин)."""
     stops = seq["stops"]
     closed = bool(seq.get("closed"))
-    one_way_km = 0.0
-    for i in range(len(stops) - 1):
-        one_way_km += haversine_meters(
-            stops[i]["lat"], stops[i]["lon"],
-            stops[i + 1]["lat"], stops[i + 1]["lon"],
-        ) / 1000.0
-    if closed and len(stops) >= 2:
-        one_way_km += haversine_meters(
-            stops[-1]["lat"], stops[-1]["lon"],
-            stops[0]["lat"], stops[0]["lon"],
-        ) / 1000.0
+    segment_lengths = seq.get("segment_lengths_m")
+    expected_segments = len(stops) if closed else max(0, len(stops) - 1)
+    if (
+        isinstance(segment_lengths, (list, tuple))
+        and len(segment_lengths) >= expected_segments
+        and expected_segments > 0
+    ):
+        try:
+            one_way_km = sum(
+                max(0.0, float(segment_lengths[i])) for i in range(expected_segments)
+            ) / 1000.0
+        except (TypeError, ValueError):
+            one_way_km = 0.0
+    else:
+        one_way_km = 0.0
+        for i in range(len(stops) - 1):
+            one_way_km += haversine_meters(
+                stops[i]["lat"], stops[i]["lon"],
+                stops[i + 1]["lat"], stops[i + 1]["lon"],
+            ) / 1000.0
+        if closed and len(stops) >= 2:
+            one_way_km += haversine_meters(
+                stops[-1]["lat"], stops[-1]["lon"],
+                stops[0]["lat"], stops[0]["lon"],
+            ) / 1000.0
 
     cum = seq.get("cum_t_s") or []
     run_s = (
@@ -496,10 +510,27 @@ def _period_service_metrics(
     if n < 2:
         return 0.0, 0.0, 0.0
     closed = bool(seq.get("closed"))
-    one_way_km = sum(
-        haversine_meters(stops[i]["lat"], stops[i]["lon"], stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"]) / 1000.0
-        for i in range(n if closed else n - 1)
-    )
+    segment_lengths = seq.get("segment_lengths_m")
+    expected_segments = n if closed else n - 1
+    if (
+        isinstance(segment_lengths, (list, tuple))
+        and len(segment_lengths) >= expected_segments
+        and expected_segments > 0
+    ):
+        try:
+            one_way_km = sum(
+                max(0.0, float(segment_lengths[i])) for i in range(expected_segments)
+            ) / 1000.0
+        except (TypeError, ValueError):
+            one_way_km = 0.0
+    else:
+        one_way_km = sum(
+            haversine_meters(
+                stops[i]["lat"], stops[i]["lon"],
+                stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
+            ) / 1000.0
+            for i in range(expected_segments)
+        )
     cum = seq.get("cum_t_s") or []
     run_s = float(seq.get("cycle_run_s", 0.0)) if seq.get("cycle_run_s") is not None else (
         float(cum[-1]) if cum else one_way_km * 1000.0 / max(float(spec.speed_kmh) / 3.6, 0.01)
