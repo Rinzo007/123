@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ...od import Zones
+from od import Zones
 from ..base.models import ModeChoiceConfig, VehicleSpec, vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_RELIABILITY_FLOOR_S,
