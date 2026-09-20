@@ -515,6 +515,35 @@ def test_route_sequence_uses_per_segment_row_speed_without_cumt() -> None:
 
 
 
+def test_routing_allows_return_to_a_previously_used_line() -> None:
+    a = _synthetic_sequence([1, 2, 3, 4])
+    b = _synthetic_sequence([2, 5, 3])
+    a["route_id"] = 701
+    b["route_id"] = 702
+    a["cum_t_s"] = [0.0, 60.0, 120.0, 180.0]
+    a["segment_time_s"] = (60.0, 60.0, 60.0)
+    a["open_pre"] = [0, 1, 2, 3, 4]
+    b["cum_t_s"] = [0.0, 60.0, 120.0]
+    b["segment_time_s"] = (60.0, 60.0)
+    b["open_pre"] = [0, 1, 2, 3]
+    journeys = build_journeys(
+        [(0, 0, 0)],
+        [(0, 3, 3)],
+        [a, b],
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=0.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=2,
+        transfer_penalty_calc="fixed",
+        seq_headway_min=None,
+        seq_jitter_s=None,
+        wait_calc="takt",
+    )
+    assert any(sum(1 for seq_idx, _a, _b in journey.legs if seq_idx == 0) >= 2 for journey in journeys)
+
 def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     journeys = build_journeys(
