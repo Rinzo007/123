@@ -1,4 +1,4 @@
-"""Golden/regression checks for the Takt-compatible passenger-flow core."""
+\n\ndef test_core_additional_options_enabled_by_default() -> None:\n    import inspect\n\n    from passenger_flow.core import run_passenger_flow\n    sig = inspect.signature(run_passenger_flow)\n    assert sig.parameters["max_transfers"].default == 3\n    assert sig.parameters["headway_min"].default == 10.0\n    assert sig.parameters["wait_crowding_per_100_min"].default == 0.1\n    assert sig.parameters["periods"].default == __import__("passenger_flow").TAKT_PERIODS\n    assert sig.parameters["include_reliability"].default is True\n    assert sig.parameters["msa_max_iterations"].default == 20\n    assert sig.parameters["msa_gap"].default == 0.01\n"""Golden/regression checks for the Takt-compatible passenger-flow core."""
 
 from __future__ import annotations
 
