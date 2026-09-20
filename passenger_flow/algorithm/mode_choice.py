@@ -20,6 +20,37 @@ import numpy as np
 from ..base.models import ModeChoiceConfig
 
 
+def _takt_no_car_shares(
+    mode: ModeChoiceConfig,
+    population: np.ndarray | None = None,
+) -> np.ndarray | None:
+    """Возвращает эффективную долю населения без авто по Takt.
+
+    Базовая доля: noCar × Aa. При наличии населения по зонам применяется
+    та же поправка по логарифму плотности и последующая нормализация среднего,
+    что в движке Takt. Без массива населения возвращается None: вызывающая
+    функция использует общую базовую долю.
+    """
+    q = min(0.95, max(0.03, mode.car_no_car_share * mode.car_no_car_factor))
+    if population is None:
+        return None
+    pop = np.asarray(population, dtype=np.float64)
+    if pop.ndim != 1:
+        raise ValueError("population должен быть одномерным массивом")
+    positive = pop[pop > 0.0]
+    if positive.size == 0:
+        return np.full(pop.shape, q, dtype=np.float64)
+    ordered = np.sort(positive)
+    median_like = float(ordered[ordered.size >> 1])
+    floor_pop = np.maximum(1.0, pop)
+    density_log10 = np.log(floor_pop / max(1.0, median_like)) / math.log(10.0)
+    shares = np.clip(q * (1.0 + 0.45 * density_log10), 0.03, 0.95)
+    mean_share = float(np.sum(pop * shares) / max(float(np.sum(pop)), 1e-12))
+    scale = q / mean_share if mean_share > 0.0 else 1.0
+    shares = np.clip(shares * scale, 0.03, 0.95)
+    return shares.astype(np.float64, copy=False)
+
+
 def _mode_minutes(
     mode: ModeChoiceConfig,
     od_meters: float,
@@ -184,6 +215,7 @@ def _takt_mode_shares(
     od_meters: float,
     transit_s: float | None,
     fare_eur: float,
+    no_car_share: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Доли (transit, car, walk, ebike) по иерархии Takt ``po()``.
 
@@ -194,9 +226,19 @@ def _takt_mode_shares(
     ``transit_s=None`` — транзит недоступен (нет маршрута).
     """
     ks = mode.vot_per_eur_s
-    be = mode.car_no_car_share
+    be = (
+        min(0.95, max(0.03, mode.car_no_car_share * mode.car_no_car_factor))
+        if no_car_share is None
+        else min(0.95, max(0.03, float(no_car_share)))
+    )
 
-    wo = math.exp(-(transit_s + fare_eur * ks) / ks) if transit_s is not None else 0.0
+    wo = (
+        math.exp(
+            -(transit_s + fare_eur * ks + mode.rider_bias_s) / ks
+        )
+        if transit_s is not None
+        else 0.0
+    )
     jt = math.exp(-_takt_car_cost_s(mode, od_meters) / ks)
     js = math.exp(-_takt_walk_cost_s(mode, od_meters) / ks)
     te = (
