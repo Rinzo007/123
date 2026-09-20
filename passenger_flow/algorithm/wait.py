@@ -13,16 +13,13 @@ from typing import Any
 import numpy as np
 
 from ...od import Zones
-from ..base.models import ModeChoiceConfig
-from ..base.models import VehicleSpec, vehicle_spec_for_route_type
+from ..base.models import ModeChoiceConfig, VehicleSpec, vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_RELIABILITY_FLOOR_S,
     _TAKT_RELIABILITY_JITTER_FACTOR,
     _TAKT_WAIT_EXTRA_PER_MIN,
     _TAKT_WAIT_FLOOR_MIN,
     _TAKT_WAIT_LINEAR_LIMIT_MIN,
-    _TAKT_CROWDED_LOAD_FACTOR,
-    _TAKT_PERIOD_HOURS,
 )
 from .assign import _assign_od
 
