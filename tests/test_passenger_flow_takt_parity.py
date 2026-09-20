@@ -23,6 +23,7 @@ except ImportError:
     sys.modules["support"] = _support_stub
 
 import numpy as np
+import pytest
 
 from passenger_flow.algorithm.assign import _journey_crowd_extra
 from passenger_flow.algorithm.kpis import (
@@ -31,7 +32,7 @@ from passenger_flow.algorithm.kpis import (
     _sequence_capital_cost_eur,
     _shared_capacity_min_headways,
 )
-from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
+from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
@@ -40,7 +41,7 @@ from passenger_flow.algorithm.mode_choice import (
     _takt_no_car_shares,
     _takt_route_probs,
 )
-from passenger_flow.base.models import ModeChoiceConfig
+from passenger_flow.base.models import ModeChoiceConfig, PassengerFlowError
 from passenger_flow.base.takt import (
     _takt_fare_eur,
     _takt_hold_prob,
@@ -91,6 +92,44 @@ def test_od_uses_one_takt_model() -> None:
     assert not hasattr(od, "build_gravity_od")
     assert "engine" not in inspect.signature(build_purpose_od).parameters
 
+
+def test_flow_input_validation_rejects_non_finite_scalars() -> None:
+    from passenger_flow.base.takt import TAKT_PERIODS
+    kwargs = dict(
+        max_transfers=3,
+        transfer_radius_m=800.0,
+        transfer_wait_min=None,
+        transfer_penalty_calc="takt",
+        headway_min=10.0,
+        headway_by_route=None,
+        wait_calc="takt",
+        include_reliability=True,
+        capex_factor=1.0,
+        capex_amort_years=30.0,
+        wait_crowding_per_100_min=0.1,
+        msa_max_iterations=20,
+        msa_gap=0.01,
+        periods=TAKT_PERIODS,
+        mode_choice=ModeChoiceConfig(),
+        base_time_s=None,
+        stop_search_radius_m=1500.0,
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=10.0,
+        logit_temp=10.0,
+    )
+    with pytest.raises(PassengerFlowError):
+        _validate_flow_inputs(np.zeros((1, 1)), 1, headway_min=float("nan"), **{k: v for k, v in kwargs.items() if k != "headway_min"})
+    with pytest.raises(PassengerFlowError):
+        _validate_flow_inputs(np.zeros((1, 1)), 1, transfer_radius_m=float("inf"), **{k: v for k, v in kwargs.items() if k != "transfer_radius_m"})
+
+
+def test_route_sequence_validation_rejects_invalid_geometry() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["stops"][1]["lat"] = float("nan")
+    with pytest.raises(PassengerFlowError):
+        _validate_route_sequences([seq])
 
 def test_takt_defaults_are_the_reference_defaults() -> None:
     mode = ModeChoiceConfig()
