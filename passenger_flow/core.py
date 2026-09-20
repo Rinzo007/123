@@ -75,44 +75,36 @@ def _takt_car_period_multipliers(
     od_vals: np.ndarray,
     period_sources: Sequence[Period | None],
 ) -> tuple[float, ...]:
-    """Строит yt для каждого периода из того же спроса, который назначает flow.
-
-    Для верхнего треугольника используется out, для нижнего — ret; затем
-    периодный спрос делится на часы периода и сравнивается со средним
-    спросом в час по всем периодам.
-    """
+    """Build Takt yt from total OD demand times each period out+ret share."""
     if len(period_sources) == 1 and period_sources[0] is None:
         return (1.0,)
-    upper = 0.0
-    lower = 0.0
+    total_demand = 0.0
     for row, col, value in zip(od_rows, od_cols, od_vals):
-        trips = float(value)
-        if trips <= 0.0 or int(row) == int(col):
-            continue
-        if int(row) < int(col):
-            upper += trips
-        else:
-            lower += trips
+        if float(value) > 0.0 and int(row) != int(col):
+            total_demand += float(value)
     period_demand = []
     total_hours = 0.0
-    total_demand = 0.0
+    weighted_demand = 0.0
     for period in period_sources:
-        if period is None:
-            hours = 24.0
-            demand = upper + lower
-        else:
-            hours = float(_TAKT_PERIOD_HOURS.get(period.key, 24.0))
-            demand = upper * float(period.out) + lower * float(period.ret)
+        hours = (
+            24.0
+            if period is None
+            else float(_TAKT_PERIOD_HOURS.get(period.key, 24.0))
+        )
+        demand = (
+            total_demand
+            if period is None
+            else total_demand * (float(period.out) + float(period.ret))
+        )
         hours = max(hours, 1e-12)
         period_demand.append((demand, hours))
-        total_demand += demand
+        weighted_demand += demand
         total_hours += hours
-    average = total_demand / max(total_hours, 1e-12)
+    average = weighted_demand / max(total_hours, 1e-12)
     return tuple(
         _takt_car_period_multiplier(demand / hours, average)
         for demand, hours in period_demand
     )
-
 
 class Reporter(Protocol):
     """Минимальный интерфейс логгера хода расчёта."""
