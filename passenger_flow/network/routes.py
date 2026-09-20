@@ -12,6 +12,8 @@ import math
 from collections.abc import Iterator, Mapping
 from typing import Any, NamedTuple
 
+from scipy.spatial import cKDTree
+
 from ...models import RouteLike
 from ...support import type_label
 from ..base.models import vehicle_spec_for_route_type
@@ -751,6 +753,51 @@ def _transfer_targets(
                 yield seq_b, ta, best_tb
 
 
+def _build_transfer_edge_index(
+    route_stop_sequences: list[dict[str, Any]],
+    transfer_radius_m: float,
+) -> dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]:
+    """Предвычисляет ближайшие transfer edges для каждой source-stop."""
+    entries: list[tuple[float, float, int, dict[str, Any]]] = []
+    for seq_idx, seq in enumerate(route_stop_sequences):
+        for stop in seq.get("stops", []):
+            entries.append((float(stop["lat"]), float(stop["lon"]), seq_idx, stop))
+    if not entries:
+        return {}
+    ref_lat = sum(x[0] for x in entries) / len(entries)
+    lat_scale = 111_320.0
+    lon_scale = lat_scale * max(math.cos(math.radians(ref_lat)), 0.2)
+    points = [(lat * lat_scale, lon * lon_scale) for lat, lon, _seq, _stop in entries]
+    tree = cKDTree(points)
+    result: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    query_r = float(transfer_radius_m)
+    for seq_a, seq in enumerate(route_stop_sequences):
+        for ta in seq.get("stops", []):
+            pos = int(ta["position"])
+            x = float(ta["lat"]) * lat_scale
+            y = float(ta["lon"]) * lon_scale
+            best_by_line: dict[int, tuple[float, dict[str, Any]]] = {}
+            for flat_i in tree.query_ball_point((x, y), r=query_r):
+                seq_b = entries[flat_i][2]
+                tb = entries[flat_i][3]
+                if seq_b == seq_a:
+                    continue
+                distance_m = haversine_meters(
+                    float(ta["lat"]), float(ta["lon"]),
+                    float(tb["lat"]), float(tb["lon"]),
+                )
+                if distance_m > query_r + 1e-9:
+                    continue
+                prior = best_by_line.get(seq_b)
+                if (prior is None or distance_m < prior[0] - 1e-9 or
+                    (math.isclose(distance_m, prior[0], rel_tol=0.0, abs_tol=1e-9)
+                     and int(tb["position"]) > int(prior[1]["position"]))):
+                    best_by_line[seq_b] = (distance_m, tb)
+            result[(seq_a, pos)] = tuple(
+                (seq_b, ta, tb) for seq_b, (_distance, tb) in sorted(best_by_line.items())
+            )
+    return result
+
 def _dedupe_journeys(
     journeys: list[_Journey],
     max_alternatives: int,
@@ -838,17 +885,9 @@ def _enumerate_journeys(
         headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
-    transfer_cache: dict[int, tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    transfer_index = _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
     def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
-        key = seq_idx
-        cached = transfer_cache.get(key)
-        if cached is not None:
-            return cached
-        cached = tuple(
-            _transfer_targets(seq_idx, pos, route_stop_sequences, set(), transfer_radius_m)
-        )
-        transfer_cache[key] = cached
-        return cached
+        return transfer_index.get((seq_idx, pos), ())
 
     for seq_idx, _stop_idx, orig_pos in origins:
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
