@@ -559,7 +559,8 @@ def _assign_od(
         if zi == zj:
             continue
 
-        factor = out_factor if zi < zj else ret_factor
+        # Takt evaluates each OD pair with the period's out+ret demand share.
+        factor = float(out_factor) + float(ret_factor)
         trips *= factor
         if trips <= 0:
             continue
