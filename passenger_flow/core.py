@@ -1149,11 +1149,16 @@ def run_passenger_flow(
 
     # 7. Проходы по периодам
     for period_index, period in enumerate(period_sources):
+        period_hours = float(
+            _TAKT_PERIOD_HOURS.get(period.key, 24.0)
+            if period is not None
+            else 24.0
+        )
         pass_agg = _run_period(
             ctx,
             period,
             period_index=period_index,
-            period_hours=float(_TAKT_PERIOD_HOURS.get(period.key, 24.0) if period is not None else 24.0),
+            period_hours=period_hours,
             wait_crowding_per_100_min=wait_crowding_per_100_min,
             reliability_extra=reliability_extra,
             msa_max_iterations=msa_max_iterations,
