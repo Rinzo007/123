@@ -36,6 +36,7 @@ from .demand import (
     zone_weights_from_streets,
 )
 from .model import OdMatrixError, OdResult, Zones, _as_sparse
+from ..passenger_flow.models import PURPOSE_DEFAULTS
 from .network import (
     build_road_graph,
     euclidean_costs,
@@ -798,13 +799,20 @@ def _compute_purpose_matrix(
     zones: Zones,
     config: Any,
     reporter: Any,
+    *,
+    attraction: np.ndarray | None = None,
 ) -> tuple[np.ndarray, tuple[Any, ...], list[float], list[str], dict[str, Any], Any]:
     """Строит OD по целям поездок и метаданные для кэша/отчёта.
 
     Возвращает ``(matrix, purpose_periods, purpose_trips, purpose_keys,
     purpose_meta, purpose_od)``.
     """
-    purpose_od = build_purpose_od(production, zones, attraction=attraction)
+    purpose_od = build_purpose_od(
+        production,
+        zones,
+        attraction=attraction,
+        purposes=getattr(config, "od_purposes_definitions", PURPOSE_DEFAULTS),
+    )
     matrix = purpose_od.matrix
     purpose_periods = periods_from_purpose_blend(
         purpose_od.period_out, purpose_od.period_ret
@@ -1045,7 +1053,13 @@ def _run_generated_od(
             purpose_keys,
             purpose_meta,
             purpose_od,
-        ) = _compute_purpose_matrix(production, zones, config, reporter)
+        ) = _compute_purpose_matrix(
+            production,
+            zones,
+            config,
+            reporter,
+            attraction=attraction,
+        )
     else:
         # Единый OD-движок: Takt. Без разложения по целям
         # используется та же модель с профилями PURPOSE_DEFAULTS.
