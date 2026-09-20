@@ -680,7 +680,7 @@ def _merge_pass_aggregates(
     accum["two_wheel_trips"] += pass_agg["two_wheel_trips"]
     accum["rest_trips"] += pass_agg.get("rest_trips", 0.0)
     accum["fare_revenue"] += pass_agg["fare_revenue"]
-    if "last_transit_s" in pass_agg:
+    if accum.get("last_transit_s", 0.0) == 0.0 and "last_transit_s" in pass_agg:
         accum["last_transit_s"] = float(pass_agg["last_transit_s"])
 
 
