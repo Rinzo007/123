@@ -36,17 +36,17 @@ _Journey = tuple[float, tuple[tuple[int, int, int], ...]]
 def _line_access_stops(
     candidates: list[tuple[int, int, int, float]],
     route_sequences: list[dict[str, Any]],
-) -> list[tuple[int, int, int]]:
+) -> list[tuple[int, int, int, float]]:
     """Оставляет кандидаты-остановки, попадающие в радиус доступа линии.
 
     Каждый кандидат зоны — ``(seq_idx, stop_idx, position, dist_m)``; линия
     обслуживает точку, только если расстояние до остановки <= её ``access_m``
     (движок Takt: ``nearD[c] <= access``).
     """
-    kept: list[tuple[int, int, int]] = []
+    kept: list[tuple[int, int, int, float]] = []
     for seqi, stopi, posi, dist_m in candidates:
         if dist_m <= float(route_sequences[seqi]["access_m"]):
-            kept.append((seqi, stopi, posi))
+            kept.append((seqi, stopi, posi, float(dist_m)))
     return kept
 
 
@@ -345,6 +345,41 @@ def _accumulate_journey(
                 totals.seg_reverse_totals[(seq_idx, seg_i)] += route_trips
 
 
+def _takt_co_route_probs(
+    journeys: list[_Journey],
+    route_sequences: list[dict[str, Any]],
+    *,
+    period_index: int,
+    seq_headway_min: Mapping[int, float] | None,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+) -> np.ndarray:
+    """Route split Takt co()/Rr() по первому boarding leg."""
+    if not journeys:
+        return np.zeros(0, dtype=np.float64)
+    seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
+    seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
+    unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
+    weights = np.zeros(len(journeys), dtype=np.float64)
+    for idx, journey in enumerate(journeys):
+        seq_idx, a, b = journey.legs[0]
+        headway = float(seq_headway_min.get(seq_idx, 0.0)) if seq_headway_min is not None else 0.0
+        wait_s = _takt_po_seconds(headway) if headway > 0.0 else 360.0
+        selected = _route_segment_indices(route_sequences[seq_idx], a, b)
+        lf = 1.0
+        if selected:
+            seg_idx, forward = selected[0]
+            loads = seg_forward if forward else seg_reverse
+            lf = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+        unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
+        rr = wait_s * unev * lf
+        weights[idx] = 1.0 / max(1.0, rr)
+    total = float(weights.sum())
+    if total <= 0.0:
+        weights[0] = 1.0
+        total = 1.0
+    return weights / total
+
+
 def _accumulate_transit_journeys(
     totals: _OdTotals,
     journeys: list[_Journey],
@@ -352,20 +387,23 @@ def _accumulate_transit_journeys(
     *,
     transit_trips: float,
     route_sequences: list[dict[str, Any]],
+    period_index: int = 0,
+    seq_headway_min: Mapping[int, float] | None = None,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
 ) -> None:
-    """Частотный сплит Takt по вариантам и накопление их загрузок."""
-    probs = _takt_route_probs(travel_times * 60.0)
+    """Частотный сплит Takt co()/Rr() и накопление загрузок."""
+    probs = _takt_co_route_probs(
+        journeys, route_sequences, period_index=period_index,
+        seq_headway_min=seq_headway_min, crowd_state=crowd_state,
+    )
     totals.assigned_trips += transit_trips
-
     for ci, journey in enumerate(journeys):
         route_trips = transit_trips * probs[ci]
-        legs = journey.legs
-        if route_trips <= 0:
+        if route_trips <= 0.0:
             continue
         _accumulate_journey(
-            totals, route_sequences, legs, route_trips=route_trips
-        )
-
+            totals, route_sequences, journey.legs, route_trips=route_trips
+        )\n
 
 # ===== Главная точка входа =====
 
@@ -512,6 +550,9 @@ def _assign_od(
             travel_times,
             transit_trips=transit_trips,
             route_sequences=route_sequences,
+            period_index=period_index,
+            seq_headway_min=seq_headway_min,
+            crowd_state=crowd_state,
         )
 
     return totals.as_dict()
