@@ -254,11 +254,8 @@ def _validate_msa_args(
 
 def _validate_periods(periods: Sequence[Period]) -> None:
     for p in periods:
-        if p.out < 0 or p.ret < 0:
-            raise PassengerFlowError(
-                f"Период «{p.key}»: коэффициенты out/ret "
-                "не могут быть отрицательными"
-            )
+        _finite_number(f"Период «{p.key}».out", p.out, nonnegative=True)
+        _finite_number(f"Период «{p.key}».ret", p.ret, nonnegative=True)
 
 
 def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
@@ -307,6 +304,24 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         _finite_number(name, value, nonnegative=True)
 
 
+def _validate_sparse_od(od_sparse: Any, n_zones: int) -> None:
+    """Проверяет duck-typed sparse OD до его использования в assignment."""
+    if od_sparse is None:
+        return
+    shape = getattr(od_sparse, "shape", None)
+    if shape != (n_zones, n_zones):
+        raise PassengerFlowError(
+            f"od_sparse имеет размер {shape}, ожидается {(n_zones, n_zones)}"
+        )
+    data = getattr(od_sparse, "data", None)
+    if data is None:
+        raise PassengerFlowError("od_sparse должен иметь поле data")
+    values = np.asarray(data, dtype=np.float64)
+    if not np.isfinite(values).all() or np.any(values < 0.0):
+        raise PassengerFlowError(
+            "od_sparse.data должен содержать конечные неотрицательные значения"
+        )
+
 def _validate_base_time(
     base_time_s: np.ndarray | None,
     n_zones: int,
@@ -352,6 +367,7 @@ def _validate_flow_inputs(
     periods: Sequence[Period],
     mode_choice: ModeChoiceConfig,
     base_time_s: np.ndarray | None,
+    od_sparse: Any,
     stop_search_radius_m: float,
     stop_time_min: float,
     wait_time_min: float,
@@ -372,6 +388,7 @@ def _validate_flow_inputs(
     _finite_number("transfer_penalty_min", transfer_penalty_min, nonnegative=True)
     _finite_number("logit_temp", logit_temp, positive=True)
     _validate_base_time(base_time_s, n_zones, len(periods) if periods else 1)
+    _validate_sparse_od(od_sparse, n_zones)
     _validate_transfer_args(max_transfers, transfer_radius_m)
     _validate_headway_args(headway_min, headway_by_route)
     _validate_capex_args(capex_factor, capex_amort_years)
@@ -974,6 +991,7 @@ def run_passenger_flow(
         periods=periods,
         mode_choice=mode_choice,
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
+        od_sparse=od_sparse,
         stop_search_radius_m=stop_search_radius_m,
         stop_time_min=stop_time_min,
         wait_time_min=wait_time_min,
