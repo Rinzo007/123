@@ -154,6 +154,25 @@ async function main() {
       od: city.od,
       line: lines[0],
     },
+    differential: {
+      ridersPerDay: Number(result.ridersPerDay ?? 0),
+      capitalCostM: Number(result.capitalCostM ?? 0),
+      revenueDay: Number(result.revenueDay ?? 0),
+      opexDay: Number(result.opexDay ?? 0),
+      modeSplit: {
+        transit: Number(result.modeSplit?.transit ?? 0),
+        car: Number(result.modeSplit?.car ?? 0),
+        walk: Number(result.modeSplit?.walk ?? 0),
+        rest: Number(result.modeSplit?.rest ?? 0),
+      },
+      line: {
+        route_id: Number(line?.id ?? 0),
+        fleet: Number(line?.fleet ?? 0),
+        revenueDay: Number(line?.revenueDay ?? 0),
+        opexDay: Number(line?.opexDay ?? 0),
+        cycleKm: Number(line?.lengthKm ?? 0) * 2,
+      },
+    },
     result: {
       ridersPerDay: result.ridersPerDay,
       transferTrips: result.transferTrips,
