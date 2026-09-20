@@ -367,3 +367,18 @@ Station minimum headway follows Takt Qa per period: the maximum stop
 throughput is converted into the dwell constraint and combined with the
 open-route turnback constraint. The scalar Python LineResult.min_headway
 takes the maximum station/track constraint across supplied periods.
+
+## P3 — differential / golden validation
+
+Добавлен `scripts/takt_differential.py`: рекурсивное сравнение JSON snapshot
+от reference Takt bundle и Python результата с абсолютной/относительной
+tolerance и field-specific rules.
+
+Golden reference для P3 хранится в `tests/fixtures/takt_reference_snapshot.json`
+с provenance bundle `bd956ff0a1875604740f40.js`. В `tests/test_passenger_flow_takt_parity.py`
+Python-расчёты проходят через тот же comparator, поэтому изменение формулы
+ломает golden test с указанием точного JSON path.
+
+Для реального browser differential достаточно экспортировать JS snapshot и
+Python snapshot в одинаковой JSON-схеме и запустить:
+`python scripts/takt_differential.py reference.json actual.json`
