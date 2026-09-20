@@ -22,7 +22,10 @@ from ..base.takt import (
     _TAKT_FLEET,
     _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
+    _TAKT_WALK_BASE_S,
+    _TAKT_WALK_PER_M_S,
     _TAKT_WALK_SPEED_MPS,
+    _TAKT_REST_DEFAULTS,
     _takt_crowding_ride_mult,
     _takt_hs,
     _takt_po_seconds,
@@ -141,6 +144,32 @@ def _route_segment_indices(
         result.append(((i - 1) % n, False))
         i = (i - 1 + n) % n
     return result
+
+def _takt_ri_access_min(
+    distance_m: float,
+    *,
+    od_distance_m: float | None,
+    base_time_s: float | None,
+) -> float:
+    """Последняя миля из ri(): distance×circuity/contSpeed с baseT fallback."""
+    distance_m = max(0.0, float(distance_m))
+    circuity = float(_TAKT_REST_DEFAULTS["circuity"])
+    cont_speed_kmh = float(_TAKT_REST_DEFAULTS["contSpeed"])
+    walk_s = distance_m * circuity / max(cont_speed_kmh / 3.6, 0.01)
+    base_s = float(base_time_s) if base_time_s is not None else 0.0
+    od_m = float(od_distance_m) if od_distance_m is not None else 0.0
+    if base_s > 0.0 and od_m >= 1.0:
+        walk_s = max(
+            walk_s,
+            max(0.0, base_s - float(_TAKT_REST_DEFAULTS["waitS"]))
+            * min(1.0, distance_m / od_m),
+        )
+    return walk_s * 1.5 / 60.0
+
+
+def _takt_ri_anchor_min() -> float:
+    """An = Sn(62) = 405 + 0.25×62 секунд."""
+    return (_TAKT_WALK_BASE_S + 62.0 * _TAKT_WALK_PER_M_S) / 60.0
 
 def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> float:
     """Время поездки по формуле Takt C(...) без прохода по сегментам."""
@@ -899,6 +928,8 @@ def _enumerate_journeys(
     max_alternatives: int,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
+    od_distance_m: float | None = None,
+    road_time_s: float | None = None,
 ) -> list[_Journey]:
     """Детерминированный shortest-path поиск по состояниям stop/line.
 
@@ -912,8 +943,12 @@ def _enumerate_journeys(
         return []
 
     destination_by_seq: dict[int, set[int]] = {}
-    for seq_idx, _stop_idx, pos in destinations:
+    egress_by_stop: dict[tuple[int, int], float] = {}
+    for seq_idx, _stop_idx, pos, dist_m in destinations:
         destination_by_seq.setdefault(seq_idx, set()).add(int(pos))
+        egress_by_stop[(seq_idx, int(pos))] = min(
+            egress_by_stop.get((seq_idx, int(pos)), math.inf), float(dist_m)
+        )
 
     # (cost, seq_idx, pos, transfers, leg_start, legs, used)
     # used не влияет на стоимость, но предотвращает циклическое повторное
@@ -921,7 +956,11 @@ def _enumerate_journeys(
     heap: list[tuple[float, int, int, int, int, tuple[tuple[int,int,int], ...], frozenset[int]]] = []
     best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
     first_wait_by_seq: dict[int, float] = {}
-    for seq_idx, _stop_idx, _orig_pos in origins:
+    access_by_stop: dict[tuple[int, int], float] = {}
+    for seq_idx, _stop_idx, pos, dist_m in origins:
+        access_by_stop[(seq_idx, int(pos))] = min(
+            access_by_stop.get((seq_idx, int(pos)), math.inf), float(dist_m)
+        )
         if seq_idx in first_wait_by_seq:
             continue
         headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
@@ -931,7 +970,7 @@ def _enumerate_journeys(
     def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
 
-    for seq_idx, _stop_idx, orig_pos in origins:
+    for seq_idx, _stop_idx, orig_pos, _dist_m in origins:
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
         key = (seq_idx, int(orig_pos), 0, int(orig_pos), frozenset((seq_idx,)))
@@ -964,7 +1003,22 @@ def _enumerate_journeys(
             if not final_legs:
                 continue
             first_seq = final_legs[0][0]
-            total = cost + ride + walk_to_stop_min + first_wait_by_seq.get(first_seq, 0.0)
+            access_dist = access_by_stop.get(
+                (first_seq, int(final_legs[0][1])), 0.0
+            )
+            egress_dist = egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
+            access_min = _takt_ri_access_min(
+                access_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
+            )
+            egress_min = _takt_ri_access_min(
+                egress_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
+            )
+            total = (
+                cost + ride + access_min + egress_min
+                + _takt_ri_anchor_min()
+                + first_wait_by_seq.get(first_seq, 0.0)
+                + walk_to_stop_min
+            )
             signature = final_legs
             if signature not in seen_journeys:
                 seen_journeys.add(signature)
@@ -1038,6 +1092,8 @@ def build_journeys(
     wait_calc: str = "takt",
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
+    od_distance_m: float | None = None,
+    road_time_s: float | None = None,
 ) -> list[_Journey]:
     """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
     max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
@@ -1059,5 +1115,7 @@ def build_journeys(
         max_alternatives=min(_TAKT_ALTS, 3),
         crowd_state=crowd_state,
         transfer_index=transfer_index,
+        od_distance_m=od_distance_m,
+        road_time_s=road_time_s,
     )
 
