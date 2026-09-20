@@ -25,6 +25,7 @@ except ImportError:
 import numpy as np
 
 from passenger_flow.algorithm.kpis import _build_line_kpis
+from passenger_flow.core import _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
     _takt_mode_shares,
@@ -259,6 +260,37 @@ def test_closed_route_uses_full_cycle_endpoint_cumt() -> None:
     assert math.isclose(
         _route_ride_time_min(seq, 2, 0),
         1.0,
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    )
+
+def test_base_time_nan_is_treated_as_missing() -> None:
+    _validate_base_time(
+        np.asarray([[np.nan, 900.0], [1200.0, 0.0]], dtype=np.float64),
+        2,
+        1,
+    )
+
+
+def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["route_id"] = 8
+    seq["route_name"] = "tram 8"
+    seq["route_type"] = "tram"
+    seq["route_type_key"] = "tram"
+    results = _build_line_kpis(
+        [seq],
+        {8: 100.0},
+        10.0,
+        0.0,
+        100.0,
+        None,
+    )
+    result = results[0]
+    assert result.capital_cost_eur > 0.0
+    assert math.isclose(
+        result.capex_day,
+        result.capital_cost_eur / (365.0 * 30.0),
         rel_tol=1e-12,
         abs_tol=1e-12,
     )
