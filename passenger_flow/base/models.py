@@ -275,16 +275,17 @@ class ModeChoiceConfig:
     из-за циклической зависимости).
     """
 
-    # Авто: доступно только доле населения без личного авто (1 - no_car_share).
-    car_no_car_share: float = 0.65
+    # Takt noCar: доля населения без авто до поправки Aa.
+    car_no_car_share: float = 0.35
+    car_no_car_factor: float = 0.78
     car_parking_min: float = 4.0
     car_cost_per_km_eur: float = 0.25
     car_parking_eur: float = 1.5
     car_circuity: float = 1.3
     car_speed_kmh: float = 25.0
-    # Пешком: полный путь по «гусиному» расстоянию с коэффициентом кривизны.
-    walk_speed_mps: float = 1.0
-    walk_circuity: float = 1.3
+    # Пешком: Takt использует Ze × 1.25 и скорость 1.33 м/с.
+    walk_speed_mps: float = 1.33
+    walk_circuity: float = 1.25
     # Ценность времени и тариф: fare = max(base, min_fare, base + per_km×км),
     # при fare_cap_eur > 0 результат ограничивается сверху.
     vot_per_eur_s: float = 360.0
@@ -300,6 +301,8 @@ class ModeChoiceConfig:
     two_wheel_per_km_eur: float = 0.03
     two_wheel_fixed_s: float = 240.0
     two_wheel_circuity: float = 1.5
+    # Постоянная поправка стоимости транзита Wo в секундах.
+    rider_bias_s: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
