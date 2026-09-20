@@ -37,7 +37,10 @@ from .algorithm.wait import (
     _reliability_min,
     _run_msa_period,
 )
-from .algorithm.mode_choice import _takt_no_car_shares
+from .algorithm.mode_choice import (
+    _takt_car_period_multiplier,
+    _takt_no_car_shares,
+)
 from .base.models import (
     FlowResult,
     LineResult,
@@ -60,6 +63,50 @@ _DEFAULT_MAX_TRANSFERS = 3
 _DEFAULT_WAIT_CROWDING_PER_100_MIN = 0.1
 _DEFAULT_MSA_MAX_ITERATIONS = 20
 _DEFAULT_MSA_GAP = 0.01
+
+def _takt_car_period_multipliers(
+    od_rows: np.ndarray,
+    od_cols: np.ndarray,
+    od_vals: np.ndarray,
+    period_sources: Sequence[Period | None],
+) -> tuple[float, ...]:
+    """Строит yt для каждого периода из того же спроса, который назначает flow.
+
+    Для верхнего треугольника используется out, для нижнего — ret; затем
+    периодный спрос делится на часы периода и сравнивается со средним
+    спросом в час по всем периодам.
+    """
+    if len(period_sources) == 1 and period_sources[0] is None:
+        return (1.0,)
+    upper = 0.0
+    lower = 0.0
+    for row, col, value in zip(od_rows, od_cols, od_vals):
+        trips = float(value)
+        if trips <= 0.0 or int(row) == int(col):
+            continue
+        if int(row) < int(col):
+            upper += trips
+        else:
+            lower += trips
+    period_demand = []
+    total_hours = 0.0
+    total_demand = 0.0
+    for period in period_sources:
+        if period is None:
+            hours = 24.0
+            demand = upper + lower
+        else:
+            hours = float(_TAKT_PERIOD_HOURS.get(period.key, 24.0))
+            demand = upper * float(period.out) + lower * float(period.ret)
+        hours = max(hours, 1e-12)
+        period_demand.append((demand, hours))
+        total_demand += demand
+        total_hours += hours
+    average = total_demand / max(total_hours, 1e-12)
+    return tuple(
+        _takt_car_period_multiplier(demand / hours, average)
+        for demand, hours in period_demand
+    )
 
 
 class Reporter(Protocol):
@@ -548,6 +595,7 @@ class _AssignContext:
     seq_jitter_s: Mapping[int, float] | None
     wait_calc: str
     vehicle_specs: Mapping[str, VehicleSpec] | None
+    car_period_multipliers: tuple[float, ...]
 
     def _common_kwargs(self) -> dict[str, Any]:
         return {
@@ -589,6 +637,11 @@ class _AssignContext:
             wait_extra=wait_extra,
             period_index=period_index,
             crowd_state=crowd_state,
+            car_period_multiplier=(
+                self.car_period_multipliers[period_index]
+                if period_index < len(self.car_period_multipliers)
+                else 1.0
+            ),
             **self._common_kwargs(),
         )
 
@@ -618,6 +671,11 @@ class _AssignContext:
             gap_tol=gap_tol,
             period_index=period_index,
             period_hours=period_hours,
+            car_period_multiplier=(
+                self.car_period_multipliers[period_index]
+                if period_index < len(self.car_period_multipliers)
+                else 1.0
+            ),
             **self._common_kwargs(),
         )
 
@@ -917,6 +975,10 @@ def run_passenger_flow(
         route_types_map[rid] = seq["route_type"]
 
     # 6. Контекст и общие аккумуляторы
+    period_sources: tuple[Period | None, ...] = tuple(periods) or (None,)
+    car_period_multipliers = _takt_car_period_multipliers(
+        od_rows, od_cols, od_vals, period_sources
+    )
     ctx = _AssignContext(
         od_rows=od_rows,
         od_cols=od_cols,
@@ -940,12 +1002,12 @@ def run_passenger_flow(
         seq_jitter_s=seq_jitter_s,
         wait_calc=wait_calc,
         vehicle_specs=vehicle_specs,
+        car_period_multipliers=car_period_multipliers,
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
 
     # 7. Проходы по периодам
-    period_sources: Sequence[Period | None] = tuple(periods) or (None,)
     for period_index, period in enumerate(period_sources):
         pass_agg = _run_period(
             ctx,
