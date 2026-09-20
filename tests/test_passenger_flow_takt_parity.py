@@ -593,6 +593,20 @@ def test_station_qa_can_raise_min_headway_above_vehicle_track_limit() -> None:
     assert len(results) == 1
     assert math.isclose(results[0].min_headway, 0.75, rel_tol=1e-9, abs_tol=1e-9)
 
+def test_fixed_build_ranges_charge_full_segment_before_reuse() -> None:
+    seq_a = _synthetic_sequence([1, 2, 3])
+    seq_b = _synthetic_sequence([1, 2, 3])
+    seq_a["route_type_key"] = seq_b["route_type_key"] = "tram"
+    seq_a["row"] = seq_b["row"] = "reserved"
+    seq_a["row_explicit"] = seq_b["row_explicit"] = True
+    seq_a["fixed_legs"] = [{"buildRanges": [[0, 1]]}, None]
+    spec = __import__("passenger_flow.base.models", fromlist=["VehicleSpec"]).VEHICLE_DEFAULTS["tram"]
+    shared: set[tuple[str, str, str]] = set()
+    first = _sequence_capital_cost_eur(seq_a, spec, 1.0, shared)
+    second = _sequence_capital_cost_eur(seq_b, spec, 1.0, shared)
+    assert first > 0.0
+    assert second < first
+
 def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["route_id"] = 8
