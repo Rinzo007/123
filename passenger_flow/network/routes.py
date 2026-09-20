@@ -1007,8 +1007,8 @@ def _enumerate_journeys(
             )
 
     # (cost, seq_idx, pos, transfers, leg_start, legs, used)
-    # used не влияет на стоимость, но предотвращает циклическое повторное
-    # использование уже пройденной линии, как старый transfer enumerator.
+    # used сохраняется только как provenance state; повторное использование
+    # линии разрешено, как в JS we-графе. Глубина ограничивается max_legs.
     heap: list[tuple[float, int, int, int, int, tuple[tuple[int,int,int], ...], frozenset[int]]] = []
     best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
     first_wait_by_seq: dict[int, float] = {}
@@ -1093,8 +1093,6 @@ def _enumerate_journeys(
         # Transfer from the current stop. _transfer_targets also preserves
         # the Takt nearest-stop-per-target-line rule.
         for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
-            if seq_b in used:
-                continue
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _ride_edge_time_min(
