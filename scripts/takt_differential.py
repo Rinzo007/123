@@ -117,12 +117,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("actual", type=Path, help="JSON snapshot produced by Python")
     parser.add_argument("--tolerance", type=Path, help="Optional JSON map of path patterns to [abs_tol, rel_tol]")
     parser.add_argument("--max-diffs", type=int, default=50)
+    parser.add_argument("--section", help="Compare only a top-level JSON section from both snapshots.")
     args = parser.parse_args(argv)
 
     try:
         reference = load_json(args.reference)
         actual = load_json(args.actual)
         rules = load_json(args.tolerance) if args.tolerance else None
+        if args.section:
+            reference = reference[args.section]
+            actual = actual[args.section]
         differences = compare_snapshots(reference, actual, tolerance_rules=rules)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"takt-differential: error: {exc}", file=sys.stderr)
