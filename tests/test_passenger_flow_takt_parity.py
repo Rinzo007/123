@@ -31,7 +31,7 @@ from passenger_flow.algorithm.kpis import (
     _shared_capacity_min_headways,
 )
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
-from passenger_flow.algorithm.wait import _build_crowd_state
+from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
     _takt_car_period_multiplier,
@@ -149,6 +149,19 @@ def test_takt_hold_and_route_probability_golden_values() -> None:
     got = _takt_route_probs(np.asarray(routes["costs_s"], dtype=np.float64))
     assert np.allclose(got, routes["expected"], rtol=1e-12, atol=1e-12)
 
+
+def test_msa_gap_uses_smoothing_step_not_raw_to_new_delta() -> None:
+    got = _takt_msa_gap(
+        {1: 10.0},
+        {1: 15.0},
+        {(1, 0): 2.0},
+        {(1, 0): 3.0},
+        {(1, 0): 4.0},
+        {(1, 0): 5.0},
+        {(1, 0): 6.0},
+        {(1, 0): 8.0},
+    )
+    assert math.isclose(got, 8.0 / 31.0, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_density_adjusted_no_car_shares_match_takt_formula() -> None:
     case = FIXTURE["no_car_density"]
