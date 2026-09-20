@@ -268,34 +268,36 @@ def _takt_mode_shares(
         mode, od_meters, transit_s, fare_eur, no_car_share=no_car_share
     )[:4]
 
-def _takt_route_probs(costs_s: np.ndarray) -> np.ndarray:
-    """Частотный сплит маршрутов по Takt ``Ge = 1/max(1, cost)``.
-
-    Активный набор строится жадным добавлением по возрастанию стоимости,
-    пока маргинальная ожидаемая стоимость ``te`` улучшается (``$e``).
-    """
-    order = np.argsort(costs_s, kind="stable")
-    n = len(costs_s)
-    if n == 0:
-        return np.zeros(0)
+def _takt_route_choice(costs_s: np.ndarray) -> tuple[np.ndarray, float]:
+    """Возвращает частотные доли и предельную стоимость набора маршрутов."""
+    costs = np.asarray(costs_s, dtype=np.float64)
+    order = np.argsort(costs, kind="stable")
+    if costs.size == 0:
+        return np.zeros(0, dtype=np.float64), math.inf
     lt = 0.0
     ee = 0.0
     best = math.inf
     selected: list[int] = []
     for pos in order:
-        cost = float(costs_s[pos])
+        cost = float(costs[pos])
         g = 1.0 / max(1.0, cost)
         te = (1.0 + ee + g * cost) / (lt + g)
         if selected and te >= best:
             break
-        selected.append(pos)
+        selected.append(int(pos))
         lt += g
         ee += g * cost
         best = te
-    probs = np.zeros(n)
+    probs = np.zeros(costs.size, dtype=np.float64)
     if lt > 0.0:
         for pos in selected:
-            probs[pos] = (1.0 / max(1.0, float(costs_s[pos]))) / lt
+            probs[pos] = (1.0 / max(1.0, float(costs[pos]))) / lt
     elif selected:
         probs[selected[0]] = 1.0
-    return probs
+    return probs, best
+
+
+def _takt_route_probs(costs_s: np.ndarray) -> np.ndarray:
+    """Частотный сплит Takt; совместимый тонкий интерфейс."""
+    return _takt_route_choice(costs_s)[0]
+
