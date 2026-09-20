@@ -260,11 +260,9 @@ def _journey_crowd_extra(
             seq = route_sequences[seq_idx]
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
             selected_segments = _route_segment_indices(seq, a, b)
-            for seg_i, _is_forward in selected_segments:
-                lf = max(
-                    float(seg_forward.get((seq_idx, seg_i), 0.0)),
-                    float(seg_reverse.get((seq_idx, seg_i), 0.0)),
-                )
+            for seg_i, is_forward in selected_segments:
+                loads = seg_forward if is_forward else seg_reverse
+                lf = float(loads.get((seq_idx, seg_i), 0.0))
                 if lf <= 0.0:
                     continue
                 extra_s += _segment_time_s(seq, seg_i) * (
