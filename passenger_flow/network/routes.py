@@ -570,13 +570,15 @@ def _destination_positions(
     seq_idx: int,
     destinations: list[tuple[int, int, int]],
     current_pos: int = -1,
+    closed: bool = False,
 ) -> list[int]:
-    """Позиции высадки на выбранной последовательности после current_pos."""
+    """Позиции высадки; закрытый маршрут допускает переход через нулевую остановку."""
     return sorted(
         {
             pos
             for seq, _stop, pos in destinations
-            if seq == seq_idx and pos > current_pos
+            if seq == seq_idx
+            and (pos != current_pos if closed else pos > current_pos)
         }
     )
 
@@ -589,8 +591,11 @@ def _transfer_targets(
     transfer_radius_m: float,
 ) -> Iterator[tuple[int, dict[str, Any], dict[str, Any]]]:
     """Генерирует все допустимые переходы A→B после current_pos."""
+    closed_a = bool(route_stop_sequences[seq_a].get("closed"))
     for ta in route_stop_sequences[seq_a]["stops"]:
-        if int(ta["position"]) <= current_pos:
+        if int(ta["position"]) == current_pos:
+            continue
+        if not closed_a and int(ta["position"]) <= current_pos:
             continue
         for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
@@ -664,7 +669,12 @@ def _enumerate_journeys(
             else None
         )
         first_wait = _boarding_wait_min(headway, wait_time_min, wait_calc)
-        for d_pos in _destination_positions(seq_idx, destinations, orig_pos):
+        for d_pos in _destination_positions(
+            seq_idx,
+            destinations,
+            orig_pos,
+            closed=bool(route_stop_sequences[seq_idx].get("closed")),
+        ):
             ride = _route_ride_time_min(
                 route_stop_sequences[seq_idx], orig_pos, d_pos
             )
@@ -722,7 +732,10 @@ def _enumerate_journeys(
                 new_legs = legs + ((seq_a, current_pos, ta_pos),)
 
                 for d_pos in _destination_positions(
-                    seq_b, destinations, tb_pos
+                    seq_b,
+                    destinations,
+                    tb_pos,
+                    closed=bool(route_stop_sequences[seq_b].get("closed")),
                 ):
                     ride_b = _route_ride_time_min(
                         route_stop_sequences[seq_b], tb_pos, d_pos
