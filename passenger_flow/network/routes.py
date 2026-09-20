@@ -129,17 +129,35 @@ def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> f
     segments = _route_segment_indices(seq, orig_pos, dest_pos)
     if not segments:
         return 0.0
-    movement_s = sum(_segment_time_s(seq, seg_idx) for seg_idx, _forward in segments)
-    dwell_steps = max(0, len(segments) - 1)
-    return (movement_s + dwell_steps * float(seq["dwell_s"])) / 60.0
+    movement_s = sum(
+        _segment_time_s(seq, seg_idx) for seg_idx, _forward in segments
+    )
+    dwell_count = 0
+    for offset, (seg_idx, is_forward) in enumerate(segments[:-1]):
+        arrival = (
+            (seg_idx + 1) % len(seq["stops"])
+            if is_forward
+            else seg_idx
+        )
+        if seq.get("open", [True] * len(seq["stops"]))[arrival]:
+            dwell_count += 1
+    return (
+        movement_s + dwell_count * float(seq["dwell_s"])
+    ) / 60.0
 
 
 def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
     """Накопленное время до остановки для фазы пересадки."""
+    open_pre = seq.get("open_pre")
+    dwell_before = (
+        float(open_pre[position])
+        if open_pre is not None and position < len(open_pre)
+        else float(position)
+    )
     return (
         float(seq.get("phase_s", 0.0))
         + float(seq["cum_t_s"][position])
-        + float(seq["dwell_s"]) * position
+        + float(seq["dwell_s"]) * dwell_before
     )
 
 
@@ -214,6 +232,23 @@ def _build_route_stop_sequence(
             if cum_t_s is None:
                 cum_t_s = _derive_cumulative_seconds(stops, spec.speed_kmh)
                 explicit_cycle_s = None
+            open_values = _optional_value(
+                direction, ("openStops", "open_stops")
+            )
+            if open_values is None:
+                open_values = _optional_value(route, ("openStops", "open_stops"))
+            if open_values is None:
+                open_values = [True] * len(stops)
+            try:
+                open_values = [
+                    bool(open_values[i]) if i < len(open_values) else True
+                    for i in range(len(stops))
+                ]
+            except (TypeError, IndexError):
+                open_values = [True] * len(stops)
+            open_pre = [0]
+            for value in open_values:
+                open_pre.append(open_pre[-1] + (1 if value else 0))
             cycle_run_s = (
                 float(explicit_cycle_s)
                 if explicit_cycle_s is not None
@@ -245,6 +280,8 @@ def _build_route_stop_sequence(
                     "closed": closed,
                     "both_ways": both_ways,
                     "phase_s": phase_s,
+                    "open": open_values,
+                    "open_pre": open_pre,
                 }
             )
     return sequences
