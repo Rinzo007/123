@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import heapq
 import math
 from collections.abc import Iterator, Mapping
 from typing import Any, NamedTuple
@@ -656,8 +657,6 @@ def _transfer_targets(
     внутри последовательности линии не ограничивается индексом остановки.
     """
     for ta in route_stop_sequences[seq_a]["stops"]:
-        if int(ta["position"]) == current_pos:
-            continue
         for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
                 continue
@@ -745,126 +744,133 @@ def _enumerate_journeys(
     max_legs: int,
     max_alternatives: int,
 ) -> list[_Journey]:
-    """Ограниченный поиск 0..4 ножек."""
+    """Детерминированный shortest-path поиск по состояниям stop/line.
+
+    В отличие от прежнего beam-search здесь нет произвольного лимита ширины.
+    Состояние хранит текущую линию, остановку, число пересадок и уже
+    использованные линии; соседями являются оба направления движения по
+    sequence и ближайшие transfer-edge по каждой другой линии.
+    """
     max_legs = min(max(1, int(max_legs)), _TAKT_MAX_LEGS)
-    board = _board_positions(origins)
+    if not origins or not destinations or not route_stop_sequences:
+        return []
+
+    destination_by_seq: dict[int, set[int]] = {}
+    for seq_idx, _stop_idx, pos in destinations:
+        destination_by_seq.setdefault(seq_idx, set()).add(int(pos))
+
+    # (cost, seq_idx, pos, transfers, leg_start, legs, used)
+    # used не влияет на стоимость, но предотвращает циклическое повторное
+    # использование уже пройденной линии, как старый transfer enumerator.
+    heap: list[tuple[float, int, int, int, int, tuple[tuple[int,int,int], ...], frozenset[int]]] = []
+    best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
+
+    for seq_idx, _stop_idx, orig_pos in origins:
+        if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
+            continue
+        headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
+        wait = _boarding_wait_min(headway, wait_time_min, wait_calc)
+        key = (seq_idx, int(orig_pos), 0, int(orig_pos), frozenset((seq_idx,)))
+        state = (wait, seq_idx, int(orig_pos), 0, int(orig_pos), tuple(), frozenset((seq_idx,)))
+        prior = best.get(key)
+        if prior is None or wait < prior - 1e-12:
+            best[key] = wait
+            heapq.heappush(heap, state)
+
     journeys: list[_Journey] = []
-    frontier: list[
-        tuple[
-            float,
-            int,
-            int,
-            tuple[tuple[int, int, int], ...],
-            frozenset[int],
-        ]
-    ] = []
+    seen_journeys: set[tuple[tuple[int, int, int], ...]] = set()
 
-    for seq_idx, orig_pos in board.items():
-        headway = (
-            seq_headway_min.get(seq_idx)
-            if seq_headway_min is not None
-            else None
-        )
-        first_wait = _boarding_wait_min(headway, wait_time_min, wait_calc)
-        for d_pos in _destination_positions(
-            seq_idx,
-            destinations,
-            orig_pos,
-            closed=bool(route_stop_sequences[seq_idx].get("closed")),
-        ):
-            ride = _route_ride_time_min(
-                route_stop_sequences[seq_idx], orig_pos, d_pos
-            )
-            if ride <= 0.0:
-                ride = (d_pos - orig_pos) * stop_time_min
-            journeys.append(
-                JourneyAlternative(
-                    ride + first_wait + walk_to_stop_min,
-                    ((seq_idx, orig_pos, d_pos),),
-                )
-            )
-        frontier.append(
-            (first_wait, seq_idx, orig_pos, tuple(), frozenset((seq_idx,)))
-        )
+    while heap:
+        cost, seq_idx, pos, transfers, leg_start, legs, used = heapq.heappop(heap)
+        key = (seq_idx, pos, transfers, leg_start, used)
+        if cost > best.get(key, math.inf) + 1e-9:
+            continue
+        seq = route_stop_sequences[seq_idx]
 
-    beam_size = max(256, len(route_stop_sequences) * 8)
-    while frontier:
-        next_frontier = []
-        for base_cost, seq_a, current_pos, legs, used in frontier:
-            if len(legs) >= max_legs - 1:
+        # Terminate at every destination stop reachable on this line.
+        for d_pos in destination_by_seq.get(seq_idx, ()):
+            if d_pos == pos and d_pos == leg_start:
                 continue
-            for seq_b, ta, tb in _transfer_targets(
-                seq_a,
-                current_pos,
-                route_stop_sequences,
-                set(used),
-                transfer_radius_m,
-            ):
-                ta_pos = int(ta["position"])
-                tb_pos = int(tb["position"])
-                ride_a = _route_ride_time_min(
-                    route_stop_sequences[seq_a], current_pos, ta_pos
-                )
-                if ride_a <= 0.0:
-                    ride_a = max(0, ta_pos - current_pos) * stop_time_min
-                transfer_wait = _transfer_wait_min(
-                    seq_a,
-                    seq_b,
-                    ta,
-                    tb,
-                    stop_time_min=stop_time_min,
-                    wait_time_min=wait_time_min,
-                    transfer_wait_min=transfer_wait_min,
-                    seq_headway_min=seq_headway_min,
-                    seq_jitter_s=seq_jitter_s,
-                    route_stop_sequences=route_stop_sequences,
-                )
-                penalty = _transfer_penalty(
-                    ta,
-                    tb,
-                    transfer_penalty_min=transfer_penalty_min,
-                    transfer_penalty_calc=transfer_penalty_calc,
-                )
-                new_cost = base_cost + ride_a + penalty + transfer_wait
-                new_legs = legs + ((seq_a, current_pos, ta_pos),)
+            ride = _route_ride_time_min(seq, leg_start, d_pos)
+            if ride <= 0.0:
+                ride = abs(d_pos - leg_start) * stop_time_min
+            final_legs = legs + ((seq_idx, leg_start, d_pos),)
+            if not final_legs:
+                continue
+            total = cost + ride + walk_to_stop_min
+            signature = final_legs
+            if signature not in seen_journeys:
+                seen_journeys.add(signature)
+                journeys.append(JourneyAlternative(total, final_legs))
 
-                for d_pos in _destination_positions(
-                    seq_b,
-                    destinations,
-                    tb_pos,
-                    closed=bool(route_stop_sequences[seq_b].get("closed")),
-                ):
-                    ride_b = _route_ride_time_min(
-                        route_stop_sequences[seq_b], tb_pos, d_pos
-                    )
-                    if ride_b <= 0.0:
-                        ride_b = (d_pos - tb_pos) * stop_time_min
-                    journeys.append(
-                        JourneyAlternative(
-                            new_cost + ride_b + walk_to_stop_min,
-                            new_legs + ((seq_b, tb_pos, d_pos),),
-                        )
-                    )
+        # Ride one physical segment in either direction. For a closed route
+        # the same sequence edge is traversable cyclically.
+        n = len(seq["stops"])
+        neighbors: list[int] = []
+        if seq.get("closed") and n >= 2:
+            neighbors = [(pos - 1) % n, (pos + 1) % n]
+            if neighbors[0] == neighbors[1]:
+                neighbors = neighbors[:1]
+        elif n >= 2:
+            if pos > 0:
+                neighbors.append(pos - 1)
+            if pos + 1 < n:
+                neighbors.append(pos + 1)
 
-                if len(new_legs) < max_legs - 1:
-                    next_frontier.append(
-                        (
-                            new_cost,
-                            seq_b,
-                            tb_pos,
-                            new_legs,
-                            used | {seq_b},
-                        )
-                    )
-        if not next_frontier:
-            break
-        next_frontier.sort(key=lambda state: (state[0], state[3]))
-        frontier = next_frontier[:beam_size]
+        for next_pos in neighbors:
+            if next_pos == pos:
+                continue
+            ride = _route_ride_time_min(seq, pos, next_pos)
+            if ride <= 0.0:
+                ride = stop_time_min
+            new_cost = cost + ride
+            nkey = (seq_idx, next_pos, transfers, leg_start, used)
+            if new_cost + 1e-12 < best.get(nkey, math.inf):
+                best[nkey] = new_cost
+                heapq.heappush(heap, (
+                    new_cost, seq_idx, next_pos, transfers, leg_start, legs, used
+                ))
+
+        if transfers >= max_legs - 1:
+            continue
+
+        # Transfer from the current stop. _transfer_targets also preserves
+        # the Takt nearest-stop-per-target-line rule.
+        for seq_b, ta, tb in _transfer_targets(
+            seq_idx, pos, route_stop_sequences, set(used), transfer_radius_m
+        ):
+            ta_pos = int(ta["position"])
+            tb_pos = int(tb["position"])
+            ride_to_transfer = _route_ride_time_min(seq, leg_start, ta_pos)
+            if ride_to_transfer <= 0.0 and ta_pos != leg_start:
+                ride_to_transfer = abs(ta_pos - leg_start) * stop_time_min
+            transfer_wait = _transfer_wait_min(
+                seq_idx, seq_b, ta, tb,
+                stop_time_min=stop_time_min,
+                wait_time_min=wait_time_min,
+                transfer_wait_min=transfer_wait_min,
+                seq_headway_min=seq_headway_min,
+                seq_jitter_s=seq_jitter_s,
+                route_stop_sequences=route_stop_sequences,
+            )
+            penalty = _transfer_penalty(
+                ta, tb,
+                transfer_penalty_min=transfer_penalty_min,
+                transfer_penalty_calc=transfer_penalty_calc,
+            )
+            closed_legs = legs + ((seq_idx, leg_start, ta_pos),)
+            new_cost = cost + ride_to_transfer + penalty + transfer_wait
+            nkey = (seq_b, tb_pos, transfers + 1, tb_pos, used | {seq_b})
+            if new_cost + 1e-12 < best.get(nkey, math.inf):
+                best[nkey] = new_cost
+                heapq.heappush(heap, (
+                    new_cost, seq_b, tb_pos, transfers + 1, tb_pos,
+                    closed_legs, used | {seq_b}
+                ))
 
     return _dedupe_journeys(
         journeys, max_alternatives, route_stop_sequences
     )
-
 
 # ===== Главная точка входа =====
 
