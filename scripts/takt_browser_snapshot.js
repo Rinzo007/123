@@ -75,9 +75,9 @@ sandbox.self = {
 const debugNeedle = "const Xt=at*k+G;";
 const debugIndex = bundle.indexOf(debugNeedle, bundle.indexOf("async function Bs("));
 if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
-const modeNeedle = "const _e=Ht.transit+Ht.car+Ht.walk+Ht.rest;";
+const modeNeedle = "return{lines:cn,modeSplit:";
 const modeIndex = bundle.indexOf(modeNeedle, debugIndex);
-if (modeIndex < 0) throw new Error("Could not locate Takt final mode totals");
+if (modeIndex < 0) throw new Error("Could not locate Takt final return");
 const routeDebugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug = {
   ds: ds[0], Ge: Ge[0], rn: rn[0], ride: no[0], crowd: oo[0],
   transferWait: ro[0], transfer: ao[0], co: co(bt[0].legs[0], 0, G),
