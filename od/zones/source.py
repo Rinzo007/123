@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from shapely.geometry import Point, box
 from shapely.ops import transform as geom_transform
 
-from ...common import open_raster_index, raster_stack, resolve_sources
+from common import open_raster_index, raster_stack, resolve_sources
 from ..model import (
     _KILOMETERS_PER_DEGREE,
     OdMatrixError,
