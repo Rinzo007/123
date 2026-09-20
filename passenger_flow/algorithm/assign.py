@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ...od import Zones
+from od import Zones
 from ..base.models import ModeChoiceConfig
 from ..base.takt import (
     _takt_crowding_wait_mult,
