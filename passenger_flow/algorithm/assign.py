@@ -668,6 +668,8 @@ def _assign_od(
             wait_extra=wait_extra,
             period_index=period_index,
             seq_jitter_s=seq_jitter_s,
+            include_first_leg_wait=False,
+            include_wait_extra=False,
         )
 
         if mode is not None:
@@ -676,7 +678,24 @@ def _assign_od(
                 mode=mode,
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
-                transit_s=float(_takt_route_choice(travel_times * 60.0)[1]),
+                transit_s=float(
+                    _takt_route_choice(
+                        travel_times * 60.0,
+                        np.asarray(
+                            [
+                                _takt_first_leg_r_r_seconds(
+                                    journey,
+                                    route_sequences,
+                                    period_index=period_index,
+                                    seq_headway_min=seq_headway_min,
+                                    crowd_state=crowd_state,
+                                )
+                                for journey in journeys
+                            ],
+                            dtype=np.float64,
+                        ),
+                    )[1]
+                ),
                 base_time_s=road_time_s,
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
