@@ -148,7 +148,7 @@ def _sequence_capital_cost_eur(
     seq: Mapping[str, Any],
     spec: VehicleSpec,
     capex_factor: float,
-    shared_sections: set[tuple[str, str]] | None = None,
+    shared_sections: set[tuple[str, str, str]] | None = None,
     atomic_sections: Mapping[tuple[int, int], list[tuple[tuple[str, str, str], float]]] | None = None,
 ) -> float:
     """Сегментный CAPEX Takt с поддержкой row/segCostMul/fixedLegs/gaps.
@@ -225,10 +225,9 @@ def _sequence_capital_cost_eur(
         if pieces:
             for section_key, length_m in pieces:
                 if shared_sections is not None:
-                    simple_key = (section_key[1], section_key[2])
-                    if simple_key in shared_sections:
+                    if section_key in shared_sections:
                         continue
-                    shared_sections.add(simple_key)
+                    shared_sections.add(section_key)
                 total += (length_m / 1000.0) * cost_per_km_eur * multiplier * float(capex_factor)
         else:
             distance_km = haversine_meters(
@@ -343,7 +342,7 @@ def _build_line_kpis(
         route_sequences, headway_min, headway_by_route
     )
     station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals, vehicle_specs)
-    shared_capital_sections: set[tuple[str, str]] = set()
+    shared_capital_sections: set[tuple[str, str, str]] = set()
     _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     for seq in route_sequences:
         rid = seq["route_id"]
