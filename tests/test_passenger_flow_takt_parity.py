@@ -320,16 +320,18 @@ def test_journey_alternative_exposes_named_fields() -> None:
     assert option[0] == option.total_time_min
 
 
-def test_prepared_flow_is_reusable_for_same_zones() -> None:
-    from passenger_flow.core import prepare_passenger_flow
-    seqs = [_synthetic_sequence([1, 2, 3])]
+def test_prepared_flow_api_accepts_reusable_static_context(monkeypatch) -> None:
+    import passenger_flow.core as core
+
     zones = types.SimpleNamespace(
         xy=np.asarray([[4.0, 52.0], [4.002, 52.002]], dtype=float),
         ids=np.asarray([1, 2], dtype=np.int64),
         polygons=(None, None),
         bounds=(4.0, 52.0, 4.002, 52.002),
     )
-    prepared = prepare_passenger_flow(seqs, zones, stop_search_radius_m=1500.0)
+
+    monkeypatch.setattr(core, "_build_route_stop_sequence", lambda _routes: [_synthetic_sequence([1, 2, 3])])
+    prepared = core.prepare_passenger_flow([], zones, stop_search_radius_m=1500.0)
     assert prepared.zones is zones
     assert len(prepared.route_sequences) == 1
     assert 0 in prepared.zone_nearest and 1 in prepared.zone_nearest
