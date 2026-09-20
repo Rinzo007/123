@@ -28,6 +28,8 @@ from ..network.routes import (
     _leg_alternatives,
     build_journeys,
 )
+_TAKT_DEBUG_RR: dict[str, float] = {}
+
 from .mode_choice import (
     _od_fare_eur,
     _takt_mode_shares,
@@ -433,6 +435,8 @@ def _takt_first_leg_r_r_seconds(
         loads = seg_forward if forward else seg_reverse
         load = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
     unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
+    global _TAKT_DEBUG_RR
+    _TAKT_DEBUG_RR = {"waitS": float(wait_s), "loadFactor": float(load), "unev": float(unev), "rrS": float(wait_s * unev * load), "period": float(period_index)}
     return wait_s * unev * load
 
 
