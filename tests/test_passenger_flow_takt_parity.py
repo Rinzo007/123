@@ -33,6 +33,7 @@ from passenger_flow.algorithm.kpis import (
     _shared_capacity_min_headways,
     _period_service_metrics,
     _geometry_reuse_edges,
+    _geometry_segment_edges,
 )
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
@@ -704,6 +705,26 @@ def test_explicit_takt_row_drives_segment_capital_cost() -> None:
     )
     got = _sequence_capital_cost_eur(seq, spec, 1.0)
     assert math.isclose(got, distance_km * 18_000_000.0, rel_tol=1e-12, abs_tol=1e-8)
+
+def test_ontrack_resolves_source_track_geometry() -> None:
+    source = _synthetic_sequence([1, 2])
+    source["route_id"] = 1001
+    source["track_id"] = "T1001"
+    source["stops"][0]["lon"], source["stops"][0]["lat"] = 4.00000, 52.00000
+    source["stops"][1]["lon"], source["stops"][1]["lat"] = 4.02000, 52.00000
+    source["geometry_legs"] = [[
+        [4.00000, 52.00000], [4.01000, 52.00000], [4.02000, 52.00000]
+    ]]
+    dependent = _synthetic_sequence([3, 4])
+    dependent["route_id"] = 1002
+    dependent["stops"][0]["lon"], dependent["stops"][0]["lat"] = 4.00000, 52.00000
+    dependent["stops"][1]["lon"], dependent["stops"][1]["lat"] = 4.02000, 52.00000
+    dependent["on_track"] = ["T1001"]
+    by_track = {"T1001": source}
+    edges = _geometry_segment_edges(dependent, 0, by_track, {"1002"})
+    assert len(edges) == 2
+    assert edges[0][0] == [4.00000, 52.00000]
+    assert edges[-1][1] == [4.02000, 52.00000]
 
 def test_capex_reuses_partial_decoded_polyline_geometry() -> None:
     a = _synthetic_sequence([1, 2])
