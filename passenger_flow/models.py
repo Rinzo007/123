@@ -37,4 +37,5 @@ __all__ = [
     "vehicle_spec_for_route_type",
 ]
 
-# Runtime-compatible structural type alias used by passenger_flow.core.\nRouteLike = Any\n
+# Runtime-compatible structural type alias used by passenger_flow.core.
+RouteLike = Any
