@@ -727,7 +727,7 @@ def _enumerate_journeys(
             if ride <= 0.0:
                 ride = (d_pos - orig_pos) * stop_time_min
             journeys.append(
-                (
+                JourneyAlternative(
                     ride + first_wait + walk_to_stop_min,
                     ((seq_idx, orig_pos, d_pos),),
                 )
@@ -789,7 +789,7 @@ def _enumerate_journeys(
                     if ride_b <= 0.0:
                         ride_b = (d_pos - tb_pos) * stop_time_min
                     journeys.append(
-                        (
+                        JourneyAlternative(
                             new_cost + ride_b + walk_to_stop_min,
                             new_legs + ((seq_b, tb_pos, d_pos),),
                         )
