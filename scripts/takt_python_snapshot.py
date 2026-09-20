@@ -30,6 +30,7 @@ class _Direction:
     name: str
     stops: tuple[_Stop, ...]
     segLen: tuple[float, ...] | None = None
+    cumT: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         _Stop(1, "A", 52.3700, 0.0000),
         _Stop(2, "B", 52.3700, 0.0050),
     )
-    direction = _Direction("A-B", stops, segLen=(340.0,))
+    direction = _Direction("A-B", stops, segLen=(340.0,), cumT=(0.0, 68.0))
     route = _Route(ok=True, route_id=1, name="Bus 1", route_type="bus", directions=(direction,))
     od = np.array([[0.0, 100.0], [100.0, 0.0]], dtype=np.float64)
     points = np.array(
