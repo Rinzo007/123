@@ -125,6 +125,14 @@ class _OdTotals:
 
 
 # ===== Расстояния и режимы =====
+def _segment_time_s(seq: dict[str, Any], seg_idx: int) -> float:
+    """Время движения физического сегмента по cumT, без ожидания."""
+    cum = seq.get("cum_t_s") or []
+    if seg_idx + 1 >= len(cum):
+        return 0.0
+    return abs(float(cum[seg_idx + 1]) - float(cum[seg_idx]))
+
+
 
 
 def _od_distance_meters(zones: Zones, zi: int, zj: int) -> float:
@@ -155,12 +163,18 @@ def _apply_car_only_modes(
     if mode is None:
         return
     od_meters = _od_distance_meters(zones, zi, zj)
-    _transit, car_s, walk_s, ebike_s = _takt_mode_shares(
-        mode, od_meters, None, 0.0, no_car_share=no_car_share
+    _transit, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares_with_rest(
+        mode,
+        od_meters,
+        None,
+        0.0,
+        rest_s=None,
+        no_car_share=no_car_share,
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
     totals.two_wheel_trips += trips * ebike_s
+    totals.rest_trips += trips * rest_s
 
 
 def _split_transit_trips(
@@ -169,43 +183,78 @@ def _split_transit_trips(
     mode: ModeChoiceConfig,
     trips: float,
     od_meters: float,
-    best_time_min: float,
+    transit_s: float,
+    base_time_s: float | None,
     no_car_share: float | None = None,
 ) -> float:
     """Считает mode shares по Takt и возвращает число транзитных поездок.
 
     Побочно начисляет авто/пешие/eBike-поездки и доход от тарифа.
     """
-    fare_eur = _od_fare_eur(mode, od_meters, best_time_min)
-    transit_s, car_s, walk_s, ebike_s = _takt_mode_shares(
+    fare_eur = _od_fare_eur(
         mode,
         od_meters,
-        best_time_min * 60.0,
+        transit_s / 60.0 if transit_s > 0.0 else None,
+    )
+    transit_share, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares_with_rest(
+        mode,
+        od_meters,
+        transit_s,
         fare_eur,
+        rest_s=base_time_s,
         no_car_share=no_car_share,
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
     totals.two_wheel_trips += trips * ebike_s
-    transit_trips = trips * transit_s
+    totals.rest_trips += trips * rest_s
+    transit_trips = trips * transit_share
     totals.fare_revenue += transit_trips * fare_eur
     return transit_trips
 
 
-def _journey_wait_extra(
+def _journey_crowd_extra(
     journeys: list[_Journey],
-    wait_extra: Mapping[int, float] | None,
+    route_sequences: list[dict[str, Any]],
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    seq_headway_min: Mapping[int, float] | None,
 ) -> np.ndarray:
-    """Дополнительное ожидание (crowding) по маршрутам ножек каждого варианта."""
-    if not wait_extra:
+    """Дополнительное время поездки от сегментной и остановочной перегрузки."""
+    if not crowd_state:
         return np.zeros(len(journeys), dtype=np.float64)
-    return np.asarray(
-        [
-            sum(wait_extra.get(int(leg[0]), 0.0) for leg in j[1])
-            for j in journeys
-        ],
-        dtype=np.float64,
-    )
+    seg_forward = crowd_state.get("seg_forward", {})
+    seg_reverse = crowd_state.get("seg_reverse", {})
+    stop_extra = crowd_state.get("stop_extra", {})
+    result = np.zeros(len(journeys), dtype=np.float64)
+    for jidx, journey in enumerate(journeys):
+        extra_s = 0.0
+        for seq_idx, a, b in journey[1]:
+            seq = route_sequences[seq_idx]
+            lo, hi = sorted((a, b))
+            forward = a <= b
+            loads = seg_forward if forward else seg_reverse
+            for seg_i in range(lo, hi):
+                lf = float(loads.get((seq_idx, seg_i), 0.0))
+                if lf <= 0.0:
+                    continue
+                extra_s += _segment_time_s(seq, seg_i) * (
+                    _takt_crowding_ride_mult(lf) - 1.0
+                )
+            for stop_i in range(lo + 1, hi + 1):
+                extra_s += float(stop_extra.get((seq_idx, stop_i), 0.0))
+            if seq_headway_min is not None and seq_idx in seq_headway_min:
+                boarding_seg = a if forward else a - 1
+                if 0 <= boarding_seg < max(len(seq["stops"]) - 1, 1):
+                    lf = float(loads.get((seq_idx, boarding_seg), 0.0))
+                    if lf > 1.0:
+                        base_wait_s = _takt_po_seconds(
+                            float(seq_headway_min[seq_idx])
+                        )
+                        extra_s += base_wait_s * (
+                            _takt_crowding_wait_mult(lf) - 1.0
+                        )
+        result[jidx] = extra_s / 60.0
+    return result
 
 
 # ===== Накопление загрузок по вариантам =====
@@ -270,6 +319,10 @@ def _accumulate_journey(
 
         for seg_i in range(min(orig_pos, dest_pos), max(orig_pos, dest_pos)):
             totals.seg_totals[(seq_idx, seg_i)] += route_trips
+            if orig_pos < dest_pos:
+                totals.seg_forward_totals[(seq_idx, seg_i)] += route_trips
+            else:
+                totals.seg_reverse_totals[(seq_idx, seg_i)] += route_trips
 
 
 def _accumulate_transit_journeys(
@@ -321,6 +374,9 @@ def _assign_od(
     seq_jitter_s: Mapping[int, float] | None = None,
     no_car_shares: np.ndarray | None = None,
     wait_calc: str = "takt",
+    base_time_s: np.ndarray | None = None,
+    period_index: int = 0,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -394,7 +450,12 @@ def _assign_od(
         # Время каждой поездки; перегрузка ожидания (crowding) добавляется
         # по маршрутам его ножек.
         raw_times = np.asarray([j[0] for j in journeys], dtype=np.float64)
-        travel_times = raw_times + _journey_wait_extra(journeys, wait_extra)
+        travel_times = raw_times + _journey_crowd_extra(
+            journeys,
+            route_sequences,
+            crowd_state,
+            seq_headway_min,
+        )
 
         if mode is not None:
             transit_trips = _split_transit_trips(
@@ -402,7 +463,16 @@ def _assign_od(
                 mode=mode,
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
-                best_time_min=float(travel_times.min()),
+                transit_s=float(_takt_route_choice(travel_times * 60.0)[1]),
+                base_time_s=(
+                    float(base_time_s[period_index, zi, zj])
+                    if base_time_s is not None and base_time_s.ndim == 3
+                    else (
+                        float(base_time_s[zi, zj])
+                        if base_time_s is not None
+                        else None
+                    )
+                ),
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
