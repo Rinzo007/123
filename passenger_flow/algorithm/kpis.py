@@ -280,6 +280,35 @@ def _route_cycle(
         cycle_km = 2.0 * one_way_km
     return cycle_km, cycle_s / 60.0
 
+def _station_min_headways(
+    route_sequences: list[dict[str, Any]],
+    period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None,
+) -> dict[int, float]:
+    """Минимальный headway из станционного dwell/turnback ограничения Qa."""
+    result: dict[int, float] = {}
+    if not period_seq_stop_totals:
+        return result
+    for seq_idx, seq in enumerate(route_sequences):
+        rid = int(seq["route_id"])
+        mode = str(seq.get("route_type_key") or "").lower()
+        spec = vehicle_spec_for_route_type(mode)
+        if spec.capacity <= 0:
+            continue
+        station_min = 0.0
+        stops = seq.get("stops") or []
+        for stop_totals, hours in period_seq_stop_totals:
+            hours = max(float(hours), 1e-9)
+            peak_rate = 0.0
+            for stop_idx in range(len(stops)):
+                stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
+                peak_rate = max(peak_rate, stop_p / hours / float(spec.capacity))
+            n = 60.0 - float(spec.dwell_per_pax_s) * peak_rate / 60.0
+            dwell_min = (float(spec.dwell_s) + 25.0) / n if n > 6.0 else 999.0
+            turnback_min = 0.0 if seq.get("closed") else float(spec.turnback_s) / 120.0
+            station_min = max(station_min, dwell_min, turnback_min)
+        result[rid] = max(result.get(rid, 0.0), station_min)
+    return result
+
 def _build_line_kpis(
     route_sequences: list[dict[str, Any]],
     route_totals: Mapping[int, float],
@@ -293,6 +322,7 @@ def _build_line_kpis(
     seg_totals: Mapping[tuple[int, int], float] | None = None,
     seg_forward_totals: Mapping[tuple[int, int], float] | None = None,
     seg_reverse_totals: Mapping[tuple[int, int], float] | None = None,
+    period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None = None,
 ) -> list[LineResult]:
     """Эксплуатационные KPI линий (при заданном ``headway_min``).
 
@@ -309,6 +339,7 @@ def _build_line_kpis(
     shared_min_headway = _shared_capacity_min_headways(
         route_sequences, headway_min, headway_by_route
     )
+    station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals)
     shared_capital_sections: set[tuple[str, str]] = set()
     _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     for seq in route_sequences:
@@ -430,7 +461,10 @@ def _build_line_kpis(
                     / max(365.0 * max(float(capex_amort_years), 0.01), 1.0)
                 ),
                 crowding=max_nt,
-                min_headway=shared_min_headway.get(rid, 60.0 / max(spec.track_tph, 1e-6)),
+                min_headway=max(
+                    shared_min_headway.get(rid, 60.0 / max(spec.track_tph, 1e-6)),
+                    station_min_headway.get(rid, 0.0),
+                ),
                 passenger_km=pkm,
                 crowded_passenger_km=crowded_km,
                 excess_passenger_km=excess_km,
