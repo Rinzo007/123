@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .base.models import *
 from .base.models import (
     PURPOSE_DEFAULTS,
@@ -34,3 +36,5 @@ __all__ = [
     "VehicleSpec",
     "vehicle_spec_for_route_type",
 ]
+
+# Runtime-compatible structural type alias used by passenger_flow.core.\nRouteLike = Any\n
