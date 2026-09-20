@@ -218,6 +218,7 @@ def _journey_crowd_extra(
     route_sequences: list[dict[str, Any]],
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     seq_headway_min: Mapping[int, float] | None,
+    wait_extra: Mapping[int, float] | None = None,
 ) -> np.ndarray:
     """Дополнительное время поездки от сегментной и остановочной перегрузки."""
     if not crowd_state:
@@ -226,10 +227,12 @@ def _journey_crowd_extra(
     seg_reverse = crowd_state.get("seg_reverse", {})
     stop_extra = crowd_state.get("stop_extra", {})
     result = np.zeros(len(journeys), dtype=np.float64)
+    wait_extra = wait_extra or {}
     for jidx, journey in enumerate(journeys):
         extra_s = 0.0
         for seq_idx, a, b in journey[1]:
             seq = route_sequences[seq_idx]
+            extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
             lo, hi = sorted((a, b))
             forward = a <= b
             loads = seg_forward if forward else seg_reverse
@@ -455,6 +458,7 @@ def _assign_od(
             route_sequences,
             crowd_state,
             seq_headway_min,
+            wait_extra=wait_extra,
         )
 
         if mode is not None:
