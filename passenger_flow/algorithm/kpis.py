@@ -14,7 +14,7 @@ from ..base.models import (
     VehicleSpec,
     vehicle_spec_for_route_type,
 )
-from ..base.takt import _takt_crowding_km_classes
+from ..base.takt import TAKT_FLEET, _takt_crowding_km_classes
 from ..network.geometry import haversine_meters
 
 
@@ -78,6 +78,82 @@ def _shared_capacity_min_headways(
             residual = limit - others_tph
             min_headway[rid] = max(min_headway.get(rid, 0.0), 60.0 / residual) if residual > 0.01 else math.inf
     return min_headway
+
+def _sequence_capital_cost_eur(
+    seq: Mapping[str, Any],
+    spec: VehicleSpec,
+    capex_factor: float,
+) -> float:
+    """Сегментный CAPEX Takt с поддержкой row/segCostMul/fixedLegs/gaps.
+
+    При отсутствии явной инфраструктурной разметки возвращает прежний
+    type-level fallback через ``spec.capex_eur_per_km``.
+    """
+    stops = seq.get("stops") or []
+    n = len(stops)
+    if n < 2:
+        return 0.0
+    closed = bool(seq.get("closed"))
+    seg_count = n if closed else n - 1
+    rows = seq.get("rows")
+    fixed = seq.get("fixed_legs") or []
+    gaps = seq.get("gaps") or []
+    multipliers = seq.get("seg_cost_mul") or []
+    explicit = bool(seq.get("row_explicit")) or bool(rows) or bool(fixed) or bool(gaps) or bool(multipliers)
+    if not explicit:
+        cycle_one_way_km = sum(
+            haversine_meters(
+                stops[i]["lat"], stops[i]["lon"],
+                stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
+            ) / 1000.0
+            for i in range(seg_count)
+        )
+        multiplier = 2.0 if closed and seq.get("both_ways") else 1.0
+        return cycle_one_way_km * float(spec.capex_eur_per_km) * float(capex_factor) * multiplier
+
+    fleet = TAKT_FLEET.get(str(seq.get("route_type_key") or "").lower(), {})
+    row_table = fleet.get("rows", {}) if isinstance(fleet, Mapping) else {}
+    default_row = seq.get("row") or (fleet.get("default_row") if isinstance(fleet, Mapping) else None)
+    total = 0.0
+    for i in range(seg_count):
+        if i < len(gaps) and bool(gaps[i]):
+            continue
+        fixed_leg = fixed[i] if i < len(fixed) else None
+        if isinstance(fixed_leg, Mapping):
+            if bool(fixed_leg.get("rebuild")) and fixed_leg.get("rebuildCostM") is not None:
+                total += max(0.0, float(fixed_leg["rebuildCostM"])) * 1e6 * float(capex_factor)
+                continue
+            if fixed_leg.get("authored") is False and fixed_leg.get("costM") is not None:
+                total += max(0.0, float(fixed_leg["costM"])) * 1e6 * float(capex_factor)
+                continue
+        row = default_row
+        if isinstance(rows, (list, tuple)) and i < len(rows) and rows[i] is not None:
+            row = rows[i]
+        elif isinstance(rows, Mapping) and i in rows:
+            row = rows[i]
+        cost_per_km_m = None
+        if isinstance(row_table, Mapping):
+            data = row_table.get(row)
+            if data is None:
+                data = row_table.get(str(row))
+            if isinstance(data, Mapping) and data.get("cost_per_km") is not None:
+                cost_per_km_m = float(data["cost_per_km"])
+        if cost_per_km_m is None:
+            cost_per_km_eur = float(spec.capex_eur_per_km)
+        else:
+            cost_per_km_eur = cost_per_km_m * 1e6
+        distance_km = haversine_meters(
+            stops[i]["lat"], stops[i]["lon"],
+            stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
+        ) / 1000.0
+        multiplier = 1.0
+        if isinstance(multipliers, (list, tuple)) and i < len(multipliers):
+            try:
+                multiplier = max(0.0, float(multipliers[i]))
+            except (TypeError, ValueError):
+                multiplier = 1.0
+        total += distance_km * cost_per_km_eur * multiplier * float(capex_factor)
+    return total
 
 def _route_cycle(
     seq: dict[str, Any], spec: VehicleSpec
@@ -173,14 +249,8 @@ def _build_line_kpis(
             if seq.get("closed") and seq.get("both_ways")
             else (cycle_km if seq.get("closed") else cycle_km / 2.0)
         )
-        capital_multiplier = (
-            2.0 if seq.get("closed") and seq.get("both_ways") else 1.0
-        )
-        capital_cost_eur = (
-            one_way_km
-            * float(spec.capex_eur_per_km)
-            * capex_factor
-            * capital_multiplier
+        capital_cost_eur = _sequence_capital_cost_eur(
+            seq, spec, capex_factor
         )
 
         # Пассажиро-километры и классы: по сегментам направления при наличии
