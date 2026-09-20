@@ -410,7 +410,7 @@ def _build_route_stop_sequence(
         route_capacity = _optional_value(route, ("capacity",))
         route_track_id = _optional_value(route, ("trackId", "track_id"))
         route_type_label = _route_type_label(route.route_type)
-        fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
+        fleet_defaults = TAKT_FLEET.get(route_type_key, {})
         explicit_route_row = _optional_value(route, ("row", "track_row"))
         route_rows = _optional_value(route, ("rows", "track_rows"))
         route_seg_cost_mul = _optional_value(route, ("segCostMul", "seg_cost_mul"))
