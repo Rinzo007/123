@@ -249,6 +249,16 @@ tests/test_passenger_flow_takt_parity.py
 разбиение JS ``Ja/Xa`` по промежуточным пересечениям остаётся следующим
 уровнем exact parity.
 
+### P2-B/P2-E parity update — ri/co/Fr
+
+`ri()` теперь получает реальные `nearD` расстояния от OD-зоны до boarding/alighting остановок.
+Access/egress использует Takt `circuity/contSpeed`, `baseT` fallback и множитель `ns=1.5`;
+добавлен фиксированный `An=Sn(62)` anchor. Старые 3-tuple вызовы `build_journeys()` сохранены.
+
+`co()/Rr()` для first-leg route split теперь использует обратное ожидание:
+`1 / max(1, wait × unev × ti(load))`, а `Fr()` переносит `unev=1+H²` из crowd feedback.
+Остаётся отдельный узел точного `co()` для transfer-leg alternative sets и возможность
+повторного использования одной линии.
 ## P2 — crowd-aware shortest-path routing
 
 Shortest-path теперь учитывает текущую directional crowding-нагрузку уже на
