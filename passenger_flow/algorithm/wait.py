@@ -272,6 +272,7 @@ def _run_msa_period(
             no_car_shares=no_car_shares,
             wait_calc=wait_calc,
             base_time_s=base_time_s,
+            car_base_time_s=car_base_time_s,
             period_index=period_index,
             crowd_state=crowd_state,
             transfer_index=transfer_index,
