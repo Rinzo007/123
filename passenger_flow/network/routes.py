@@ -97,6 +97,9 @@ def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float | l
 
 def _segment_time_s(seq: dict[str, Any], seg_idx: int) -> float:
     """Время движения физического сегмента по cumT, без ожидания."""
+    cached = seq.get("segment_time_s")
+    if cached is not None and 0 <= seg_idx < len(cached):
+        return float(cached[seg_idx])
     cum = seq.get("cum_t_s") or []
     if seg_idx < 0 or seg_idx >= len(cum):
         return 0.0
@@ -400,6 +403,16 @@ def _build_route_stop_sequence(
                     "phase_s": phase_s,
                     "open": open_values,
                     "open_pre": open_pre,
+                    "segment_time_s": tuple(
+                        max(0.0, float(cum_t_s[i + 1]) - float(cum_t_s[i]))
+                        for i in range(max(0, len(cum_t_s) - 1))
+                    ) + (
+                        (
+                            max(0.0, float(cycle_run_s) - float(cum_t_s[-1])),
+                        )
+                        if closed and cum_t_s
+                        else ()
+                    ),
                 }
             )
     return sequences
