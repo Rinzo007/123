@@ -25,6 +25,93 @@ def _infra_stop_key(stop: Mapping[str, Any]) -> str:
     return f"xy:{float(stop['lat']):.6f},{float(stop['lon']):.6f}"
 
 
+def _atomic_infrastructure_sections(
+    route_sequences: list[dict[str, Any]],
+) -> tuple[
+    dict[tuple[str, str, str], set[int]],
+    dict[tuple[int, int], list[tuple[tuple[str, str, str], float]]],
+]:
+    """Разбивает линейные сегменты по вершинам других линий, как Takt Ja/Xa.
+
+    Входные маршруты представлены остановочными полилиниями, поэтому
+    используем локальную equirectangular-проекцию и делим сегмент в точках
+    других маршрутов, лежащих на той же геометрии. Это позволяет обнаружить
+    общий участок даже если одна линия имеет промежуточную остановку, а другая нет.
+    """
+    section_lines: dict[tuple[str, str, str], set[int]] = {}
+    by_segment: dict[tuple[int, int], list[tuple[tuple[str, str, str], float]]] = {}
+    segment_points: list[tuple[int, int, int, str, float, float]] = []
+    for seq_idx, seq in enumerate(route_sequences):
+        stops = seq.get("stops") or []
+        mode = str(seq.get("route_type_key") or "").lower()
+        n = len(stops)
+        seg_count = n if seq.get("closed") else max(0, n - 1)
+        for seg_i in range(seg_count):
+            a = stops[seg_i]; b = stops[(seg_i + 1) % n]
+            segment_points.append((
+                seq_idx, seg_i, int(seq["route_id"]), mode,
+                float(a["lat"]), float(a["lon"]),
+            ))
+    # Все вершины потенциального overlap-кандидата собираются по mode.
+    vertices_by_mode: dict[str, list[tuple[float, float]]] = {}
+    for seq in route_sequences:
+        mode = str(seq.get("route_type_key") or "").lower()
+        bucket = vertices_by_mode.setdefault(mode, [])
+        bucket.extend((float(st["lat"]), float(st["lon"])) for st in (seq.get("stops") or []))
+
+    def project(lat: float, lon: float, lat0: float) -> tuple[float, float]:
+        rad = math.pi / 180.0
+        x = (lon * rad) * math.cos(lat0 * rad) * 6_371_000.0
+        y = (lat * rad) * 6_371_000.0
+        return x, y
+
+    def point_on_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float | None:
+        vx, vy = bx - ax, by - ay
+        wx, wy = px - ax, py - ay
+        length2 = vx * vx + vy * vy
+        if length2 <= 1e-12:
+            return None
+        cross = abs(vx * wy - vy * wx) / math.sqrt(length2)
+        if cross > 0.5:
+            return None
+        t = (wx * vx + wy * vy) / length2
+        if t <= 1e-9 or t >= 1.0 - 1e-9:
+            return None
+        return t
+
+    for seq_idx, seg_i, rid, mode, alat, alon in segment_points:
+        seq = route_sequences[seq_idx]
+        stops = seq["stops"]
+        bstop = stops[(seg_i + 1) % len(stops)]
+        blat, blon = float(bstop["lat"]), float(bstop["lon"])
+        lat0 = (alat + blat) * 0.5
+        ax, ay = project(alat, alon, lat0)
+        bx, by = project(blat, blon, lat0)
+        cuts = [(0.0, alat, alon), (1.0, blat, blon)]
+        for plat, plon in vertices_by_mode.get(mode, []):
+            px, py = project(plat, plon, lat0)
+            t = point_on_segment(px, py, ax, ay, bx, by)
+            if t is not None:
+                cuts.append((t, plat, plon))
+        cuts.sort(key=lambda item: item[0])
+        unique: list[tuple[float, float, float]] = []
+        for cut in cuts:
+            if not unique or abs(cut[0] - unique[-1][0]) > 1e-8:
+                unique.append(cut)
+        pieces: list[tuple[tuple[str, str, str], float]] = []
+        for left, right in zip(unique, unique[1:]):
+            if right[0] - left[0] <= 1e-9:
+                continue
+            p1 = f"{left[1]:.5f},{left[2]:.5f}"
+            p2 = f"{right[1]:.5f},{right[2]:.5f}"
+            edge = tuple(sorted((p1, p2)))
+            key = (mode, edge[0], edge[1])
+            length_m = haversine_meters(left[1], left[2], right[1], right[2])
+            pieces.append((key, length_m))
+            section_lines.setdefault(key, set()).add(rid)
+        by_segment[(seq_idx, seg_i)] = pieces
+    return section_lines, by_segment
+
 def _shared_capacity_min_headways(
     route_sequences: list[dict[str, Any]],
     default_headway_min: float,
@@ -36,29 +123,7 @@ def _shared_capacity_min_headways(
     транспорта. Для каждой линии residual capacity равна `track_tph` секции
     минус частота остальных линий, использующих ту же секцию.
     """
-    section_lines: dict[tuple[str, str, str], set[int]] = {}
-    line_mode: dict[int, str] = {}
-    line_limit: dict[int, float] = {}
-    for seq in route_sequences:
-        rid = int(seq["route_id"])
-        mode = str(seq.get("route_type_key") or "").lower()
-        line_mode[rid] = mode
-        spec = vehicle_spec_for_route_type(mode)
-        line_limit[rid] = float(spec.track_tph)
-        stops = seq.get("stops") or []
-        n = len(stops)
-        if n < 2:
-            continue
-        seg_count = n if seq.get("closed") else n - 1
-        for i in range(seg_count):
-            a = stops[i]
-            b = stops[(i + 1) % n]
-            ka = _infra_stop_key(a)
-            kb = _infra_stop_key(b)
-            edge = tuple(sorted((ka, kb)))
-            key = (mode, edge[0], edge[1])
-            section_lines.setdefault(key, set()).add(rid)
-
+    section_lines, _ = _atomic_infrastructure_sections(route_sequences)
     min_headway: dict[int, float] = {rid: 60.0 / max(tph, 1e-9) for rid, tph in line_limit.items()}
     line_headway = lambda rid: float(headway_by_route.get(rid, default_headway_min)) if headway_by_route is not None else float(default_headway_min)
     for key, lines in section_lines.items():
@@ -84,6 +149,7 @@ def _sequence_capital_cost_eur(
     spec: VehicleSpec,
     capex_factor: float,
     shared_sections: set[tuple[str, str]] | None = None,
+    atomic_sections: Mapping[tuple[int, int], list[tuple[tuple[str, str, str], float]]] | None = None,
 ) -> float:
     """Сегментный CAPEX Takt с поддержкой row/segCostMul/fixedLegs/gaps.
     При переданном ``shared_sections`` одинаковые физические секции
@@ -145,22 +211,35 @@ def _sequence_capital_cost_eur(
             cost_per_km_eur = float(spec.capex_eur_per_km)
         else:
             cost_per_km_eur = cost_per_km_m * 1e6
-        section_key = tuple(sorted((_infra_stop_key(stops[i]), _infra_stop_key(stops[(i + 1) % n]))))
-        if shared_sections is not None and section_key in shared_sections:
-            continue
-        if shared_sections is not None:
-            shared_sections.add(section_key)
-        distance_km = haversine_meters(
-            stops[i]["lat"], stops[i]["lon"],
-            stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
-        ) / 1000.0
         multiplier = 1.0
         if isinstance(multipliers, (list, tuple)) and i < len(multipliers):
             try:
                 multiplier = max(0.0, float(multipliers[i]))
             except (TypeError, ValueError):
                 multiplier = 1.0
-        total += distance_km * cost_per_km_eur * multiplier * float(capex_factor)
+        pieces = (
+            atomic_sections.get((int(seq.get("_seq_idx", -1)), i), [])
+            if atomic_sections is not None
+            else []
+        )
+        if pieces:
+            for section_key, length_m in pieces:
+                if shared_sections is not None:
+                    simple_key = (section_key[1], section_key[2])
+                    if simple_key in shared_sections:
+                        continue
+                    shared_sections.add(simple_key)
+                total += (length_m / 1000.0) * cost_per_km_eur * multiplier * float(capex_factor)
+        else:
+            distance_km = haversine_meters(
+                stops[i]["lat"], stops[i]["lon"],
+                stops[(i + 1) % n]["lat"], stops[(i + 1) % n]["lon"],
+            ) / 1000.0
+            section_key = tuple(sorted((_infra_stop_key(stops[i]), _infra_stop_key(stops[(i + 1) % n]))))
+            if shared_sections is None or section_key not in shared_sections:
+                if shared_sections is not None:
+                    shared_sections.add(section_key)
+                total += distance_km * cost_per_km_eur * multiplier * float(capex_factor)
     return total
 
 def _route_cycle(
@@ -231,6 +310,7 @@ def _build_line_kpis(
         route_sequences, headway_min, headway_by_route
     )
     shared_capital_sections: set[tuple[str, str]] = set()
+    _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     for seq in route_sequences:
         rid = seq["route_id"]
         if rid in seen:
@@ -263,6 +343,7 @@ def _build_line_kpis(
             spec,
             capex_factor,
             shared_capital_sections,
+            atomic_sections,
         )
 
         # Пассажиро-километры и классы: по сегментам направления при наличии
