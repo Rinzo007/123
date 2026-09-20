@@ -36,6 +36,7 @@ from .algorithm.wait import (
     _reliability_min,
     _run_msa_period,
 )
+from .algorithm.mode_choice import _takt_no_car_shares
 from .base.models import (
     FlowResult,
     LineResult,
@@ -180,6 +181,10 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         raise PassengerFlowError("two_wheel_speed_mps должен быть положительным")
     if mode_choice.two_wheel_reach_m < 0:
         raise PassengerFlowError("two_wheel_reach_m не может быть отрицательным")
+    if mode_choice.car_no_car_factor < 0:
+        raise PassengerFlowError("car_no_car_factor не может быть отрицательным")
+    if mode_choice.rider_bias_s < 0:
+        raise PassengerFlowError("rider_bias_s не может быть отрицательным")
     for name, value in (
         ("car_parking_min", mode_choice.car_parking_min),
         ("car_cost_per_km_eur", mode_choice.car_cost_per_km_eur),
@@ -451,8 +456,10 @@ class _AssignContext:
     logit_temp: float
     mode_choice: ModeChoiceConfig | None
     zones: Zones
+    no_car_shares: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
+    wait_calc: str
 
     def _common_kwargs(self) -> dict[str, Any]:
         return {
@@ -467,8 +474,10 @@ class _AssignContext:
             "logit_temp": self.logit_temp,
             "mode": self.mode_choice,
             "zones": self.zones,
+            "no_car_shares": self.no_car_shares,
             "seq_headway_min": self.seq_headway_min,
             "seq_jitter_s": self.seq_jitter_s,
+            "wait_calc": self.wait_calc,
         }
 
     def assign(
@@ -583,6 +592,7 @@ def run_passenger_flow(
     od_matrix: np.ndarray,
     zones: Zones,
     *,
+    population: np.ndarray | None = None,
     od_sparse: Any = None,
     stop_time_min: float = _DEFAULT_STOP_TIME_MIN,
     logit_temp: float = _LOGIT_TEMP,
@@ -603,7 +613,7 @@ def run_passenger_flow(
     capex_factor: float = 1.0,
     capex_amort_years: float = 30.0,
     reporter: Any = None,
-    wait_calc: str = "linear",
+    wait_calc: str = "takt",
     include_reliability: bool = False,
     msa_max_iterations: int | None = None,
     msa_gap: float = 0.01,
@@ -619,6 +629,9 @@ def run_passenger_flow(
         ``(len(zones) x len(zones))``, конечной и неотрицательной.
     zones : Zones
         Зоны транспортной сетки.
+    population : optional
+        Население по зонам. При передаче движок применяет плотностную поправку
+        Takt к доле домохозяйств без автомобиля для каждого origin.
     od_sparse : optional
         CSR-представление OD-матрицы (scipy.sparse.csr_matrix) для обхода
         только ненулевых пар; при None ненулевые пары ищутся по ``od_matrix``.
@@ -693,6 +706,17 @@ def run_passenger_flow(
 
     n_zones = len(zones)
     matrix = np.asarray(od_matrix, dtype=np.float64)
+    population_arr: np.ndarray | None = None
+    if population is not None:
+        population_arr = np.asarray(population, dtype=np.float64)
+        if population_arr.shape != (n_zones,):
+            raise PassengerFlowError(
+                "population должен иметь длину, равную числу зон"
+            )
+        if not np.isfinite(population_arr).all() or np.any(population_arr < 0.0):
+            raise PassengerFlowError(
+                "population должен содержать конечные неотрицательные значения"
+            )
 
     # Выбор режима «транзит / авто / пешком» включён по умолчанию (в движке
     # Takt он выполняется всегда), дефолты ModeChoiceConfig = va/wa/ga/Pa.
@@ -777,8 +801,10 @@ def run_passenger_flow(
         logit_temp=logit_temp,
         mode_choice=mode_choice,
         zones=zones,
+        no_car_shares=_takt_no_car_shares(mode_choice, population_arr),
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
+        wait_calc=wait_calc,
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
