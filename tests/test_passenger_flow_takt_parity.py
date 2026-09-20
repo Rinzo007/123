@@ -32,7 +32,7 @@ from passenger_flow.algorithm.kpis import (
     _sequence_capital_cost_eur,
     _shared_capacity_min_headways,
 )
-from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences
+from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
@@ -92,6 +92,26 @@ def test_od_uses_one_takt_model() -> None:
     assert not hasattr(od, "build_gravity_od")
     assert "engine" not in inspect.signature(build_purpose_od).parameters
 
+
+def test_period_validation_rejects_non_finite_coefficients() -> None:
+    from passenger_flow.base.models import Period
+    from passenger_flow.core import _validate_periods
+    with pytest.raises(PassengerFlowError):
+        _validate_periods((Period(key="x", label="x", out=float("nan"), ret=1.0),))
+
+
+def test_sparse_od_validation_rejects_bad_shape_and_values() -> None:
+    class SparseStub:
+        shape = (2, 3)
+        data = np.asarray([1.0], dtype=np.float64)
+    with pytest.raises(PassengerFlowError):
+        _validate_sparse_od(SparseStub(), 2)
+
+    class SparseBadData:
+        shape = (2, 2)
+        data = np.asarray([float("inf")], dtype=np.float64)
+    with pytest.raises(PassengerFlowError):
+        _validate_sparse_od(SparseBadData(), 2)
 
 def test_flow_input_validation_rejects_non_finite_scalars() -> None:
     from passenger_flow.base.takt import TAKT_PERIODS
