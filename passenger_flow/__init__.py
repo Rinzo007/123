@@ -39,6 +39,7 @@ from .base.models import (
     FlowResult,
     LineResult,
     ModeChoiceConfig,
+    PreparedPassengerFlow,
     PassengerFlowError,
     Period,
     PeriodFlow,
@@ -51,11 +52,14 @@ from .base.takt import _takt_hs as _takt_hs
 from .base.takt import _takt_jo as _takt_jo
 from .base.takt import _takt_logit_prob as _takt_logit_prob
 from .base.takt import _takt_logit_shift as _takt_logit_shift
-from .core import run_passenger_flow
+from .core import prepare_passenger_flow, run_passenger_flow
 from .network.geometry import _find_nearest_stops as _find_nearest_stops
 from .network.geometry import _takt_transfer_penalty_min as _takt_transfer_penalty_min
 from .network.geometry import haversine_meters as haversine_meters
-from .network.routes import _build_route_stop_sequence as _build_route_stop_sequence
+from .network.routes import (
+    JourneyAlternative,
+    _build_route_stop_sequence as _build_route_stop_sequence,
+)
 from .network.spacing import (
     STOP_SPACING_BANDS,
     StopSpacingVerdict,
@@ -73,13 +77,16 @@ __all__ = [
     "FlowResult",
     "LineResult",
     "ModeChoiceConfig",
+    "PreparedPassengerFlow",
     "PassengerFlowError",
     "Period",
     "PeriodFlow",
     "Purpose",
+    "JourneyAlternative",
     "StopSpacingVerdict",
     "VehicleSpec",
     "check_stop_spacing",
+    "prepare_passenger_flow",
     "run_passenger_flow",
     "stop_spacing_band",
     "stop_spacing_verdict",
