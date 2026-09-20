@@ -17,8 +17,6 @@ from ...support import type_label
 from ..base.models import vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_ALTS,
-    _TAKT_ALT_DETOUR_FACTOR,
-    _TAKT_ALT_DETOUR_FIXED_S,
     _TAKT_FLEET,
     _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
