@@ -82,30 +82,49 @@ def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float) ->
     return result
 
 
+def _route_segment_indices(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+) -> list[tuple[int, bool]]:
+    """Возвращает физические сегменты и направление выбранной ножки."""
+    n = len(seq["stops"])
+    if orig_pos == dest_pos or n < 2:
+        return []
+    if not seq.get("closed"):
+        if orig_pos < dest_pos:
+            return [(i, True) for i in range(orig_pos, dest_pos)]
+        return [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+    cum = seq["cum_t_s"]
+    cycle = float(seq["cycle_run_s"])
+    forward_s = ((float(cum[dest_pos]) - float(cum[orig_pos])) % cycle)
+    use_forward = True
+    if seq.get("both_ways") and forward_s > cycle - forward_s:
+        use_forward = False
+    if use_forward:
+        result: list[tuple[int, bool]] = []
+        i = orig_pos
+        while i != dest_pos:
+            result.append((i, True))
+            i = (i + 1) % n
+        return result
+    result = []
+    i = orig_pos
+    while i != dest_pos:
+        result.append(((i - 1) % n, False))
+        i = (i - 1 + n) % n
+    return result
+
 def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> float:
     """Время поездки между остановками с семантикой Takt C(...)."""
     if orig_pos == dest_pos:
         return 0.0
-    stops = seq["stops"]
-    cum = seq["cum_t_s"]
-    dwell_s = float(seq["dwell_s"])
-    closed = bool(seq.get("closed"))
-
-    def forward(a: int, b: int) -> tuple[float, int]:
-        if b >= a:
-            return cum[b] - cum[a], b - a
-        cycle = float(seq["cycle_run_s"])
-        return cycle - cum[a] + cum[b], len(stops) - a + b
-
-    fwd_s, fwd_steps = forward(orig_pos, dest_pos)
-    fwd_dwell_steps = max(0, fwd_steps - 1)
-    if not closed:
-        return (fwd_s + fwd_dwell_steps * dwell_s) / 60.0
-    rev_s, rev_steps = forward(dest_pos, orig_pos)
-    rev_dwell_steps = max(0, rev_steps - 1)
-    if bool(seq.get("both_ways")) and rev_s < fwd_s:
-        return (rev_s + rev_dwell_steps * dwell_s) / 60.0
-    return (fwd_s + fwd_dwell_steps * dwell_s) / 60.0
+    segments = _route_segment_indices(seq, orig_pos, dest_pos)
+    if not segments:
+        return 0.0
+    movement_s = sum(_segment_time_s(seq, seg_idx) for seg_idx, _forward in segments)
+    dwell_steps = max(0, len(segments) - 1)
+    return (movement_s + dwell_steps * float(seq["dwell_s"])) / 60.0
 
 
 def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
