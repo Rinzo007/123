@@ -320,6 +320,41 @@ def test_journey_alternative_exposes_named_fields() -> None:
     assert option[0] == option.total_time_min
 
 
+def test_takt_purposes_base_time_roundtrip(tmp_path) -> None:
+    from od.demand.takt import load_takt_purposes, write_takt_purposes_bundle
+    from od.model import TaktPurposeLayer, TaktPurposes
+
+    pairs = np.asarray(
+        [[0.0, 1.0, 7.0, 900.0], [1.0, 0.0, 3.0, 1200.0]],
+        dtype="<f4",
+    )
+    base_time = np.asarray(
+        [[900.0, 1200.0], [930.0, 1260.0]],
+        dtype="<f4",
+    )
+    commute = np.asarray([[600.0, 800.0], [630.0, 840.0]], dtype="<f4")
+    source = TaktPurposes(
+        layers=(
+            TaktPurposeLayer(
+                key="edu",
+                out=(0.1, 0.9),
+                ret=(0.8, 0.2),
+                pairs=pairs,
+                base_time=base_time,
+            ),
+        ),
+        commute_base_time=commute,
+    )
+    path = tmp_path / "purposes.bin.json"
+    write_takt_purposes_bundle(source, path)
+    loaded = load_takt_purposes(path)
+
+    assert loaded.layers[0].key == source.layers[0].key
+    assert np.array_equal(loaded.layers[0].pairs, source.layers[0].pairs)
+    assert np.array_equal(loaded.layers[0].base_time, source.layers[0].base_time)
+    assert np.array_equal(loaded.commute_base_time, source.commute_base_time)
+
+
 def test_prepared_flow_api_accepts_reusable_static_context(monkeypatch) -> None:
     import passenger_flow.core as core
 
