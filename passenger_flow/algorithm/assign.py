@@ -243,11 +243,9 @@ def _journey_crowd_extra(
     wait_extra: Mapping[int, float] | None = None,
 ) -> np.ndarray:
     """Дополнительное время поездки от сегментной и остановочной перегрузки."""
-    if not crowd_state:
-        return np.zeros(len(journeys), dtype=np.float64)
-    seg_forward = crowd_state.get("seg_forward", {})
-    seg_reverse = crowd_state.get("seg_reverse", {})
-    stop_extra = crowd_state.get("stop_extra", {})
+    seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
+    seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
+    stop_extra = crowd_state.get("stop_extra", {}) if crowd_state else {}
     result = np.zeros(len(journeys), dtype=np.float64)
     wait_extra = wait_extra or {}
     for jidx, journey in enumerate(journeys):
