@@ -188,6 +188,7 @@ def _sequence_capital_cost_eur(
         if i < len(gaps) and bool(gaps[i]):
             continue
         fixed_leg = fixed[i] if i < len(fixed) else None
+        fixed_full_build = False
         if isinstance(fixed_leg, Mapping):
             if bool(fixed_leg.get("rebuild")) and fixed_leg.get("rebuildCostM") is not None:
                 total += max(0.0, float(fixed_leg["rebuildCostM"])) * 1e6 * float(capex_factor)
@@ -195,6 +196,7 @@ def _sequence_capital_cost_eur(
             if fixed_leg.get("authored") is False and fixed_leg.get("costM") is not None:
                 total += max(0.0, float(fixed_leg["costM"])) * 1e6 * float(capex_factor)
                 continue
+            fixed_full_build = bool(fixed_leg.get("buildRanges"))
         row = default_row
         if isinstance(rows, (list, tuple)) and i < len(rows) and rows[i] is not None:
             row = rows[i]
@@ -218,7 +220,9 @@ def _sequence_capital_cost_eur(
             except (TypeError, ValueError):
                 multiplier = 1.0
         pieces = (
-            atomic_sections.get((int(seq.get("_seq_idx", -1)), i), [])
+            []
+            if fixed_full_build
+            else atomic_sections.get((int(seq.get("_seq_idx", -1)), i), [])
             if atomic_sections is not None
             else []
         )
