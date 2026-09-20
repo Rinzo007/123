@@ -405,3 +405,29 @@ def test_prepared_flow_api_accepts_reusable_static_context(monkeypatch) -> None:
     assert prepared.zones is zones
     assert len(prepared.route_sequences) == 1
     assert 0 in prepared.zone_nearest and 1 in prepared.zone_nearest
+
+
+def test_run_passenger_flow_reuses_prepared_context() -> None:
+    from od.model import Zones
+    from passenger_flow.core import PreparedPassengerFlow, run_passenger_flow
+
+    zones = Zones(
+        xy=np.asarray([[4.0, 52.0], [4.002, 52.002]], dtype=float),
+        ids=np.asarray([1, 2], dtype=np.int64),
+        polygons=(None, None),
+        bounds=(4.0, 52.0, 4.002, 52.002),
+    )
+    prepared = PreparedPassengerFlow(
+        zones=zones,
+        stop_search_radius_m=1500.0,
+        route_sequences=(),
+        zone_nearest={0: [], 1: []},
+    )
+    result = run_passenger_flow(
+        [],
+        np.zeros((2, 2), dtype=np.float64),
+        zones,
+        prepared=prepared,
+    )
+    assert result.routes_served == 0
+    assert result.total_trips == 0.0
