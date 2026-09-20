@@ -91,6 +91,8 @@ class _OdTotals:
     period_total: float = 0.0
     last_transit_s: float = 0.0
     transit_s_by_period: dict[int, float] = field(default_factory=dict)
+    car_base_by_period: dict[int, float] = field(default_factory=dict)
+    car_multiplier_by_period: dict[int, float] = field(default_factory=dict)
     route_totals: dict[int, float] = field(
         default_factory=lambda: defaultdict(float)
     )
@@ -135,6 +137,8 @@ class _OdTotals:
             "seq_stop_totals": self.seq_stop_totals,
             "last_transit_s": self.last_transit_s,
             "transit_s_by_period": self.transit_s_by_period,
+            "car_base_by_period": self.car_base_by_period,
+            "car_multiplier_by_period": self.car_multiplier_by_period,
         }
 
 
@@ -244,6 +248,8 @@ def _split_transit_trips(
         od_meters,
         transit_s / 60.0 if transit_s > 0.0 else None,
     )
+    if car_base_time_s is not None:
+        totals.car_base_by_period.setdefault(0, float(car_base_time_s))
     transit_share, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares(
         mode,
         od_meters,
@@ -718,6 +724,9 @@ def _assign_od(
             )
             totals.last_transit_s = transit_cost_s
             totals.transit_s_by_period.setdefault(int(period_index), transit_cost_s)
+            if car_base_time_pair_s is not None:
+                totals.car_base_by_period[int(period_index)] = float(car_base_time_pair_s)
+            totals.car_multiplier_by_period[int(period_index)] = float(car_period_multiplier)
             transit_trips = _split_transit_trips(
                 totals,
                 mode=mode,
