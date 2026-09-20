@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Sequence
 
 from ..base.models import (
     LineResult,
