@@ -145,6 +145,45 @@ load factor ≈ пассажиры на участке / доступная вм
 
 > `lr` — **грубая** подвыборка OD-строк (а не «запас на поворот»), `jc` — мелкая.
 
+## Roadmap — Takt parity / production
+
+Текущий source-level audit выполнен по расчётному bundle `scripts/bd956ff0a1875604740f.js`.
+
+| Этап | Статус | Что осталось |
+| --- | --- | --- |
+| **P0** | ✅ закрыт | Базовые Takt constants, OD, wait, fare, reliability, mode-choice primitives. |
+| **P1** | ✅ закрыт | Базовая parity `passenger_flow` с расчётным bundle. |
+| **P2-A Automobile** | ✅ закрыт | Периодный `yt` для автомобиля; `baseT`/fallback и разделение monetary/parking части. |
+| **P2-B Routing** | 🟡 почти закрыт | Базовый `we/ri` graph parity есть; осталось exact access/egress cost, `co()` split и проверка повторного использования линии. |
+| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa`, shared atomic sections и row CAPEX есть; осталось per-period headway API и полный JS polyline/onTrack reuse. |
+| **P2-D Economics** | 🟡 почти закрыт | Fare/CAPEX/row metadata перенесены; остаётся exact period fleet/OPEX с occupancy factor. |
+| **P2-E Crowding/reliability** | 🟡 | Directional segment/dwell feedback и MSA есть; осталось перенести `Fr → unev → Rr` в route cost. |
+| **P3 Differential** | 🟡 | Comparator и golden snapshot готовы; нужен реальный browser-exported JS snapshot против Python на одинаковом входе. |
+| **P4 Performance** | 🟡 | Spatial transfer index и O(1) ride timing кэшированы; следующий шаг — профиль полного OD assignment и устранение повторных edge-cost расчётов без изменения результатов. |
+| **P5 Hardening** | 🟢 | Входные данные и route graph валидируются; остаётся CI/packaging/runtime verification. |
+| **P6 Release parity** | ⏳ | Зафиксировать golden city cases, versioned bundle provenance и release gate на differential parity. |
+
+Последовательность дальнейших работ:
+
+```text
+P2-B exact access/egress + co()
+        ↓
+P2-E Fr/unev reliability feedback
+        ↓
+P2-C per-period headway / Ga+Qa
+        ↓
+P2-D exact fleet + OPEX occupancy
+        ↓
+P2-C exact polyline/onTrack CAPEX reuse
+        ↓
+P3 browser differential
+        ↓
+P4 full-assignment profiling
+        ↓
+P5 CI + packaging + runtime verification
+        ↓
+P6 release parity gate
+```
 ## P0 — выравнивание `passenger_flow` с текущим Takt
 
 После аудита `scripts/bd956ff0a1875604740f.js` Python-слой `passenger_flow` получил первый пакет parity-правок:
