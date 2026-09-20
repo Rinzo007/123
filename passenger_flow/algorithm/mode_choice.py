@@ -1,15 +1,9 @@
-"""Mode choice: transit / car / walk / eBike shares by Takt hierarchy.
+"""Единая модель выбора режима и маршрута Takt.
 
-Две модели:
-- ``_takt_mode_shares`` — иерархия движка Takt (``po``, 085f71988f12f8f584de.js):
-  полезности ``exp(-cost_s / ks)``, ``ks`` — VOT с/€ (Pa = 360); доля зоны
-  без авто ``be`` (Z[qt]) смешивает l- и r-варианты;
-- ``_mode_minutes``/``_logit_probs``/``_car_cap_prob`` — прежний простой
-  логит по обобщённым минутам (резерв на время миграции).
-
-Общие стоимости режимов считаются в секундах:
-car = время движения + parking + (км×€/км + €/парк)×VOT;
-walk = дистанция×circuity / скорость; eBike — c жёстким порогом reach.
+Используется одна иерархическая модель полезностей Takt: транзит, авто,
+пешком, eBike и альтернативный ``rest/baseT``. Стоимости приводятся к
+секундам обобщённого времени через VOT; доля без автомобиля задаёт
+иерархическое смешивание полной и no-car совокупностей.
 """
 from __future__ import annotations
 
@@ -51,81 +45,6 @@ def _takt_no_car_shares(
     return shares.astype(np.float64, copy=False)
 
 
-def _mode_minutes(
-    mode: ModeChoiceConfig,
-    od_meters: float,
-    transit_min: float | None,
-    fare_add_min: float,
-) -> tuple[list[float], int, int, int, int]:
-    """Стоимости режимов в минутах и индексы (transit/car/walk/ebike).
-
-    Возвращает (минуты, индекс transit, индекс car, индекс walk,
-    индекс ebike). ``transit`` включается, только если найден маршрут
-    (``transit_min`` не None); ``car`` и ``walk`` присутствуют всегда;
-    ``ebike`` активен, только если ``two_wheel_share > 0`` и поездка не
-    длиннее ``two_wheel_reach_m`` (индекс −1 в противном случае).
-    """
-    minutes: list[float] = []
-    transit_index = -1
-    od_km = od_meters / 1000.0
-
-    if transit_min is not None:
-        transit_index = len(minutes)
-        minutes.append(transit_min + fare_add_min)
-
-    car_index = len(minutes)
-    car_cost_s = (
-        od_km * mode.car_circuity / (mode.car_speed_kmh / 3.6)
-        + mode.car_parking_min * 60.0
-        + (
-            od_km * mode.car_circuity * mode.car_cost_per_km_eur
-            + mode.car_parking_eur
-        )
-        * mode.vot_per_eur_s
-    )
-    minutes.append(car_cost_s / 60.0)
-
-    walk_index = len(minutes)
-    walk_min = od_meters * mode.walk_circuity / (mode.walk_speed_mps * 60.0)
-    minutes.append(walk_min)
-
-    ebike_index = -1
-    if (
-        mode.two_wheel_share > 0.0
-        and od_meters <= mode.two_wheel_reach_m
-    ):
-        ebike_index = len(minutes)
-        extra_km = max(0.0, od_meters - 6000.0)
-        ebike_s = (
-            mode.two_wheel_fixed_s
-            + (od_meters + extra_km)
-            / mode.two_wheel_speed_mps
-            * mode.two_wheel_circuity
-            + od_km * mode.two_wheel_per_km_eur * mode.vot_per_eur_s
-        )
-        minutes.append(ebike_s / 60.0)
-
-    return minutes, transit_index, car_index, walk_index, ebike_index
-
-def _car_cap_prob(
-    probs: np.ndarray,
-    car_index: int,
-    no_car_share: float,
-) -> None:
-    """Ограничивает долю авто долей населения без машины, перераспределяя
-    избыток на остальные режимы пропорционально."""
-    cap = max(0.0, 1.0 - no_car_share)
-    if cap >= probs[car_index]:
-        return
-    excess = probs[car_index] - cap
-    probs[car_index] = cap
-    others = [i for i in range(len(probs)) if i != car_index]
-    total = float(sum(probs[i] for i in others))
-    if total <= 0.0:
-        return
-    for i in others:
-        probs[i] += excess * (probs[i] / total)
-
 def _od_fare_eur(
     mode: ModeChoiceConfig,
     od_meters: float,
@@ -152,29 +71,6 @@ def _od_fare_eur(
     else:
         fare = max(rawe, lower)
     return max(fare, 0.0)
-
-def _od_fare_min(
-    mode: ModeChoiceConfig,
-    od_meters: float,
-    transit_min: float | None,
-) -> float:
-    """Тариф поездки, пересчитанный в минуты через VOT."""
-    return _od_fare_eur(mode, od_meters, transit_min) * mode.vot_per_eur_s / 60.0
-
-def _logit_probs(costs: np.ndarray, logit_temp: float) -> np.ndarray:
-    """Мягкий max по стоимостям; при logit_temp <= 0 — жёсткий выбор."""
-    if logit_temp > 0:
-        shifted = -(costs / logit_temp)
-        shifted = shifted - shifted.max()
-        exp = np.exp(shifted)
-        total = exp.sum()
-        if total <= 0:
-            return np.zeros_like(exp)
-        return exp / total
-    best = np.zeros_like(costs)
-    best[int(np.argmin(costs))] = 1.0
-    return best
-
 
 def _takt_car_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
     """Стоимость авто в секундах обобщённого времени (Takt ``Oe``).
@@ -210,7 +106,7 @@ def _takt_walk_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
     return od_meters * mode.walk_circuity / mode.walk_speed_mps
 
 
-def _takt_mode_shares_with_rest(
+def _takt_mode_shares(
     mode: ModeChoiceConfig,
     od_meters: float,
     transit_s: float | None,
@@ -255,18 +151,6 @@ def _takt_mode_shares_with_rest(
     rest = (1.0 - be) * (rest_u / us) + be * (rest_u / hr)
     return transit, car, walk, ebike, rest
 
-
-def _takt_mode_shares(
-    mode: ModeChoiceConfig,
-    od_meters: float,
-    transit_s: float | None,
-    fare_eur: float,
-    no_car_share: float | None = None,
-) -> tuple[float, float, float, float]:
-    """Совместимый 4-режимный интерфейс без ``baseT``."""
-    return _takt_mode_shares_with_rest(
-        mode, od_meters, transit_s, fare_eur, no_car_share=no_car_share
-    )[:4]
 
 def _takt_route_choice(costs_s: np.ndarray) -> tuple[np.ndarray, float]:
     """Возвращает частотные доли и предельную стоимость набора маршрутов."""
