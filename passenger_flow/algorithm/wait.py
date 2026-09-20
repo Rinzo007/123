@@ -84,6 +84,7 @@ def _build_crowd_state(
     seq_headway_min: Mapping[int, float] | None,
     vehicle_specs: Mapping[str, VehicleSpec] | None,
     period_hours: float,
+    period_index: int = 0,
 ) -> dict[str, dict[tuple[int, int], float]]:
     """Строит segment/stop feedback в том же пространстве, что JS Fr()."""
     state: dict[str, dict[tuple[int, int], float]] = {
@@ -143,7 +144,7 @@ def _build_crowd_state(
             1.0,
             float(spec.jitter_s) * math.exp(dwell_integral) / (h * 60.0),
         )
-        state["unreliability"][(seq_idx, 0)] = 1.0 + H * H
+        state["unreliability"][(seq_idx, period_index)] = 1.0 + H * H
         dwell_runs = direction_factor * period_runs
         if dwell_runs > 0.0:
             for stop_idx in range(len(seq["stops"])):
@@ -310,6 +311,7 @@ def _run_msa_period(
             seq_headway_min,
             vehicle_specs,
             period_hours,
+            period_index=period_index,
         )
         final_gap = _takt_msa_gap(
             prev_smoothed,
