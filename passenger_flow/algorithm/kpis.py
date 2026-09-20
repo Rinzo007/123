@@ -72,7 +72,7 @@ def _atomic_infrastructure_sections(
         if length2 <= 1e-12:
             return None
         cross = abs(vx * wy - vy * wx) / math.sqrt(length2)
-        if cross > 0.5:
+        if cross > 1e-4:
             return None
         t = (wx * vx + wy * vy) / length2
         if t <= 1e-9 or t >= 1.0 - 1e-9:
