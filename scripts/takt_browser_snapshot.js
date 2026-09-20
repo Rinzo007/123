@@ -72,30 +72,31 @@ sandbox.self = {
   postMessage() {},
 };
 
-const debugNeedle = "const Xt=at*k+G;";
-const debugIndex = bundle.indexOf(debugNeedle, bundle.indexOf("async function Bs("));
-if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
+const bundleStart = bundle.indexOf("async function Bs(");
 const odNeedle = "const Wr=G=>fo*yt[G]+Oe,uo=c?et.fareJ[at]:ma(f,Ze);";
-const odIndex = bundle.indexOf(odNeedle, debugIndex);
+const odIndex = bundle.indexOf(odNeedle, bundleStart);
 if (odIndex < 0) throw new Error("Could not locate Takt OD cost block");
+const debugNeedle = "const Xt=at*k+G;";
+const debugIndex = bundle.indexOf(debugNeedle, odIndex);
+if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
 const modeNeedle = "return{lines:cn,modeSplit:";
-const modeIndex = bundle.indexOf(modeNeedle, odIndex);
+const modeIndex = bundle.indexOf(modeNeedle, debugIndex);
 if (modeIndex < 0) throw new Error("Could not locate Takt final return");
+const odDebugCode = "\nif (H === 0 && at === 0) globalThis.__TAKT_debug_od = { distanceM: Ze, carBase: fo, carFixedS: Oe, fareEur: uo, noCarShare: be, eBikeU: Te, walkU: ln, carU0: ho(0), restU0: po(0), carYt0: yt[0], baseT0: z.baseT ? z.baseT[0][at] : null };\n";
 const routeDebugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug = {
   ds: ds[0], Ge: Ge[0], rn: rn[0], ride: no[0], crowd: oo[0],
   transferWait: ro[0], transfer: ao[0], co: co(bt[0].legs[0], 0, G),
   btS: bt[0].s, Lr: Lr(bt[0].legs[0], 0), legs: bt[0].legs
 };\n`;
-const odDebugCode = "\nif (H === 0 && at === 0) globalThis.__TAKT_debug_od = { distanceM: Ze, carBase: fo, carFixedS: Oe, fareEur: uo, noCarShare: be, eBikeU: Te, walkU: ln, carU0: ho(0), restU0: po(0), carYt0: yt[0], baseT0: z.baseT ? z.baseT[0][at] : null };\n";
 const modeDebugCode = `\nglobalThis.__TAKT_debug_modes = {
   transit: Ht.transit, car: Ht.car, walk: Ht.walk, rest: Ht.rest
 };\n`;
 const instrumented =
-  bundle.slice(0, debugIndex) +
-  routeDebugCode +
-  bundle.slice(debugIndex, odIndex) +
+  bundle.slice(0, odIndex) +
   odDebugCode +
-  bundle.slice(odIndex, modeIndex) +
+  bundle.slice(odIndex, debugIndex) +
+  routeDebugCode +
+  bundle.slice(debugIndex, modeIndex) +
   modeDebugCode +
   bundle.slice(modeIndex, markerIndex) +
   "\nglobalThis.__TAKT_Bs = Bs;\n" +
