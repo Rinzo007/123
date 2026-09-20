@@ -125,6 +125,20 @@ class _OdTotals:
 
 
 # ===== Расстояния и режимы =====
+def _base_time_for_pair(
+    base_time_s: np.ndarray | None,
+    period_index: int,
+    zi: int,
+    zj: int,
+) -> float | None:
+    if base_time_s is None:
+        return None
+    if base_time_s.ndim == 3:
+        value = float(base_time_s[period_index, zi, zj])
+    else:
+        value = float(base_time_s[zi, zj])
+    return value if value > 0.0 else None
+
 def _segment_time_s(seq: dict[str, Any], seg_idx: int) -> float:
     """Время движения физического сегмента по cumT, без ожидания."""
     cum = seq.get("cum_t_s") or []
@@ -154,6 +168,7 @@ def _apply_car_only_modes(
     zi: int,
     zj: int,
     no_car_share: float | None = None,
+    rest_s: float | None = None,
 ) -> None:
     """Fallback без транзитного пути: авто, пешком и (возможно) eBike.
 
@@ -168,7 +183,7 @@ def _apply_car_only_modes(
         od_meters,
         None,
         0.0,
-        rest_s=None,
+        rest_s=rest_s,
         no_car_share=no_car_share,
     )
     totals.car_trips += trips * car_s
@@ -234,21 +249,32 @@ def _journey_crowd_extra(
             seq = route_sequences[seq_idx]
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
             selected_segments = _route_segment_indices(seq, a, b)
-            for seg_i, is_forward in selected_segments:
-                loads = seg_forward if is_forward else seg_reverse
-                lf = float(loads.get((seq_idx, seg_i), 0.0))
+            for seg_i, _is_forward in selected_segments:
+                lf = max(
+                    float(seg_forward.get((seq_idx, seg_i), 0.0)),
+                    float(seg_reverse.get((seq_idx, seg_i), 0.0)),
+                )
                 if lf <= 0.0:
                     continue
                 extra_s += _segment_time_s(seq, seg_i) * (
                     _takt_crowding_ride_mult(lf) - 1.0
                 )
-            lo, hi = sorted((a, b))
-            for stop_i in range(lo + 1, hi + 1):
-                extra_s += float(stop_extra.get((seq_idx, stop_i), 0.0))
+            if selected_segments:
+                prev_stop = a
+                for seg_i, is_forward in selected_segments:
+                    if is_forward:
+                        arrival_stop = (seg_i + 1) % len(seq["stops"])
+                    else:
+                        arrival_stop = seg_i % len(seq["stops"])
+                    if arrival_stop != prev_stop:
+                        extra_s += float(stop_extra.get((seq_idx, arrival_stop), 0.0))
+                    prev_stop = arrival_stop
             if seq_headway_min is not None and seq_idx in seq_headway_min and selected_segments:
-                first_seg, first_forward = selected_segments[0]
-                loads = seg_forward if first_forward else seg_reverse
-                lf = float(loads.get((seq_idx, first_seg), 0.0))
+                first_seg, _first_forward = selected_segments[0]
+                lf = max(
+                    float(seg_forward.get((seq_idx, first_seg), 0.0)),
+                    float(seg_reverse.get((seq_idx, first_seg), 0.0)),
+                )
                     if lf > 1.0:
                         base_wait_s = _takt_po_seconds(
                             float(seq_headway_min[seq_idx])
@@ -420,6 +446,7 @@ def _assign_od(
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                rest_s=_base_time_for_pair(base_time_s, period_index, zi, zj),
             )
             continue
 
@@ -450,6 +477,7 @@ def _assign_od(
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                rest_s=_base_time_for_pair(base_time_s, period_index, zi, zj),
             )
             continue
 
@@ -471,18 +499,13 @@ def _assign_od(
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
                 transit_s=float(_takt_route_choice(travel_times * 60.0)[1]),
-                base_time_s=(
-                    float(base_time_s[period_index, zi, zj])
-                    if base_time_s is not None and base_time_s.ndim == 3
-                    else (
-                        float(base_time_s[zi, zj])
-                        if base_time_s is not None
-                        else None
-                    )
+                base_time_s=_base_time_for_pair(
+                    base_time_s, period_index, zi, zj
                 ),
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                rest_s=_base_time_for_pair(base_time_s, period_index, zi, zj),
             )
         else:
             transit_trips = trips
