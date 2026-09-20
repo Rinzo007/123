@@ -154,10 +154,10 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P0** | ✅ закрыт | Базовые Takt constants, OD, wait, fare, reliability, mode-choice primitives. |
 | **P1** | ✅ закрыт | Базовая parity `passenger_flow` с расчётным bundle. |
 | **P2-A Automobile** | ✅ закрыт | Периодный `yt` для автомобиля; `baseT`/fallback и разделение monetary/parking части. |
-| **P2-B Routing** | 🟡 почти закрыт | `ri()` access/egress и `co()` inverse-wait split перенесены; остаётся exact `fromLi`/transfer-frequency semantics и проверка повторного использования линии. |
-| **P2-C Infrastructure** | 🟡 почти закрыт | `Ga/Qa` периодные; `headways[0..4]` проходят в assignment/KPI; `La()` decoded-polyline reuse перенесён при наличии `legs`; остаётся разрешение `onTrack`-цепочек без decoded geometry. |
+| **P2-B Routing** | 🟡 | `ri()` access/egress и first-leg `co()/Rr()` перенесены; transfer-leg `hs×ti` теперь тоже учитывается. Остаётся exact per-leg alternative branching и проверка повторного использования линии. |
+| **P2-C Infrastructure** | 🟢 | `Ga/Qa` периодные; `headways[0..4]` проходят в assignment/KPI; `La()` decoded-polyline reuse и source-`onTrack` resolution перенесены при наличии geometry. Остаток — fallback без source geometry. |
 | **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
-| **P2-E Crowding/reliability** | 🟡 почти закрыт | `Fr → unev → Rr` теперь участвует в first-leg wait/split; остаётся точное согласование transfer-leg `hs×ti` с route-choice cost. |
+| **P2-E Crowding/reliability** | 🟢 | `Fr → unev → Rr` участвует в first-leg, а transfer-leg использует `hs×ti` без double-count. Остаток — per-leg alternative branching из JS `co()`. |
 | **P3 Differential** | 🟡 | Comparator и golden snapshot готовы; нужен реальный browser-exported JS snapshot против Python на одинаковом входе. |
 | **P4 Performance** | 🟡 | Spatial transfer index и O(1) ride timing кэшированы; следующий шаг — профиль полного OD assignment и устранение повторных edge-cost расчётов без изменения результатов. |
 | **P5 Hardening** | 🟢 | Входные данные и route graph валидируются; остаётся CI/packaging/runtime verification. |
@@ -166,15 +166,7 @@ load factor ≈ пассажиры на участке / доступная вм
 Последовательность дальнейших работ:
 
 ```text
-P2-B exact access/egress + co()
-        ↓
-P2-E Fr/unev reliability feedback
-        ↓
-P2-C per-period headway / Ga+Qa
-        ↓
-P2-D exact fleet + OPEX occupancy
-        ↓
-P2-C exact polyline/onTrack CAPEX reuse
+P2-B per-leg co()/alternative branching
         ↓
 P3 browser differential
         ↓
