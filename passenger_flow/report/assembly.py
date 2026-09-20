@@ -301,4 +301,5 @@ def assemble_flow_result(
         raw_rest_trips=float(rest_trips),
         raw_revenue_day=float(raw_revenue_day),
         raw_opex_day=float(raw_opex_day),
+        raw_transit_s=float(getattr(result, "last_transit_s", 0.0)),
     )
