@@ -165,7 +165,10 @@ def _shared_capacity_min_headways(
     return result
 def _geometry_point_key(point: Any) -> str:
     lon = float(point[0]); lat = float(point[1])
-    return f"{round(lon * 1e5):.0f},{round(lat * 1e5):.0f}"
+    # JS Math.round semantics (including negative coordinates).
+    lon_i = math.floor(lon * 1e5 + 0.5)
+    lat_i = math.floor(lat * 1e5 + 0.5)
+    return f"{lon_i},{lat_i}"
 
 
 def _geometry_edge_key(a: Any, b: Any) -> tuple[str, str]:
