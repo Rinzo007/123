@@ -49,12 +49,15 @@ from passenger_flow.base.takt import (
 )
 from passenger_flow.network.geometry import haversine_meters
 from scripts.takt_differential import compare_snapshots
+from passenger_flow.algorithm.assign import _takt_co_route_probs
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
     _build_transfer_edge_index,
     _ride_edge_time_min,
     _route_ride_time_min,
+    _takt_ri_access_min,
+    _takt_ri_anchor_min,
     build_journeys,
     _build_route_stop_sequence,
 )
@@ -172,6 +175,29 @@ def test_flow_input_validation_rejects_non_finite_logit_temperature() -> None:
     )
     with pytest.raises(PassengerFlowError):
         _validate_flow_inputs(np.zeros((1, 1)), 1, **kwargs)
+
+def test_takt_ri_access_uses_real_near_distance() -> None:
+    assert math.isclose(
+        _takt_ri_access_min(100.0, od_distance_m=5000.0, base_time_s=None),
+        100.0 * 1.3 / (5.0 / 3.6) * 1.5 / 60.0,
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    )
+    assert math.isclose(_takt_ri_anchor_min(), 420.5 / 60.0, rel_tol=1e-12)
+
+
+def test_takt_co_route_split_uses_inverse_wait_cost() -> None:
+    a = _synthetic_sequence([1, 2, 3]); b = _synthetic_sequence([4, 5, 6])
+    a["_seq_idx"] = 0; b["_seq_idx"] = 1
+    journeys = [
+        JourneyAlternative(10.0, ((0, 0, 2),)),
+        JourneyAlternative(10.0, ((1, 0, 2),)),
+    ]
+    probs = _takt_co_route_probs(
+        journeys, [a, b], period_index=0,
+        seq_headway_min={0: 10.0, 1: 20.0}, crowd_state=None,
+    )
+    assert np.allclose(probs, [480.0 / 780.0, 300.0 / 780.0], rtol=1e-12, atol=1e-12)
 
 def test_takt_defaults_are_the_reference_defaults() -> None:
     mode = ModeChoiceConfig()
