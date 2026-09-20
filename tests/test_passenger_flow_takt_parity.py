@@ -318,6 +318,31 @@ def test_route_sequence_preserves_row_specific_takt_speed() -> None:
     seq = _build_route_stop_sequence([route])[0]
     assert seq["row"] == "reserved"
     assert math.isclose(seq["speed_kmh"], 25.0, rel_tol=1e-12, abs_tol=1e-12)
+def test_route_sequence_uses_per_segment_row_speed_without_cumt() -> None:
+    from types import SimpleNamespace
+
+    stops = [
+        SimpleNamespace(id=1, name="A", latitude=52.0, longitude=4.0),
+        SimpleNamespace(id=2, name="B", latitude=52.0, longitude=4.01),
+        SimpleNamespace(id=3, name="C", latitude=52.0, longitude=4.02),
+    ]
+    direction = SimpleNamespace(name="D", stops=stops)
+    route = SimpleNamespace(
+        ok=True,
+        route_id=502,
+        name="tram mixed rows",
+        route_type="tram",
+        directions=[direction],
+        rows=["reserved", "mixed"],
+        closed=False,
+        bothWays=False,
+    )
+    seq = _build_route_stop_sequence([route])[0]
+    first = seq["cum_t_s"][1] - seq["cum_t_s"][0]
+    second = seq["cum_t_s"][2] - seq["cum_t_s"][1]
+    assert first < second
+
+
 
 def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
     seq = _synthetic_sequence([1, 2, 3])
