@@ -20,11 +20,13 @@ jobs:
       - name: Fetch pinned Takt bundle
         env:
           GH_TOKEN: "${{ github.token }}"
+          TAKT_BUNDLE_BLOB_SHA: "5d1b626ff2c8c0aa9b22a3e37dfd03d60d9f3c4d"
         run: |
+          set -o pipefail
           curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/Rinzo007/123/contents/scripts/bd956ff0a1875604740f7.js?ref=${GITHUB_SHA}" \
+            "https://api.github.com/repos/Rinzo007/123/git/blobs/${TAKT_BUNDLE_BLOB_SHA}" \
             | jq -r .content | tr -d "\\n" | base64 --decode \
             > "${RUNNER_TEMP}/bd956ff0a1875604740f7.js"
 
