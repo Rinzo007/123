@@ -1,0 +1,1 @@
+window.scrollBy(0, window.innerHeight || document.body.clientHeight || 0);

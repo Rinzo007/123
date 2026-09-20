@@ -1,0 +1,79 @@
+{
+  "city": "Berlin",
+  "mobility": {
+    "noCar": 0.5,
+    "twoWheelShare": 0.78,
+    "twoWheelSpeed": 4.2,
+    "twoWheelReachM": 8000,
+    "twoWheelPerKm": 0.03
+  },
+  "rest": {
+    "baseSpeed": 3.6,
+    "contSpeed": 5,
+    "accessS": 420,
+    "waitS": 240,
+    "circuity": 1.3,
+    "note": "the defaults; restMeasured is what the feed says"
+  },
+  "restMeasured": {
+    "baseSpeed": 5.47,
+    "contSpeed": 6.83,
+    "accessS": 1470,
+    "waitS": 442,
+    "circuity": 1.3,
+    "computed": "from baseline.json and demand.json, 345 timed lines, 1,195,417 commuters in the fit, 2026-08-31"
+  },
+  "sources": {
+    "noCar": "about half of Berlin households own no car, among the highest in any rich city; Mobilität in Deutschland, wants the table cited",
+    "twoWheelShare": "tuned: Berlin cycles 18 per cent of its trips; 0.55 reached about 13, 0.78 brings the split home (2026-08-21)",
+    "car": "the model's original constants: ADAC running cost about €0.25/km; €1.50 a trip averages free and paid parking; four minutes to park in the inner city (estimates, 2026-08-17)",
+    "votSPerEur": "360 s a euro is €10 an hour, about half Berlin's median wage; the original constant"
+  },
+  "credits": {
+    "people": {
+      "text": "Zensus 2022, Statistische Ämter des Bundes und der Länder",
+      "url": "https://www.zensus2022.de/",
+      "licence": "dl-de/by-2-0",
+      "licenceUrl": "https://www.govdata.de/dl-de/by-2-0",
+      "note": "jobs and streets from OpenStreetMap"
+    },
+    "timetables": {
+      "text": "VBB Verkehrsverbund Berlin-Brandenburg, public GTFS feed",
+      "url": "https://www.vbb.de/vbb-services/api-open-data/datensaetze/",
+      "licence": "CC BY 4.0"
+    }
+  },
+  "car": {
+    "costPerKm": 0.25,
+    "parkEur": 1.5,
+    "parkingS": 240
+  },
+  "votSPerEur": 360,
+  "signs": {
+    "metro": {
+      "prefix": "U",
+      "start": 1,
+      "shape": "square",
+      "label": "U-Bahn"
+    },
+    "rail": {
+      "prefix": "S",
+      "start": 1,
+      "shape": "pill",
+      "label": "S-Bahn"
+    },
+    "tram": {
+      "prefix": "M",
+      "start": 1,
+      "shape": "rect",
+      "label": "tram"
+    },
+    "bus": {
+      "prefix": "",
+      "start": 100,
+      "shape": "rect",
+      "label": "bus"
+    },
+    "note": "BVG and S-Bahn Berlin line signs: U on a square, S on a pill, MetroTram and bus on a rectangle; buses from 100"
+  }
+}
