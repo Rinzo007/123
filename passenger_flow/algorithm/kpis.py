@@ -249,7 +249,15 @@ def _geometry_reuse_edges(
         gaps = seq.get("gaps") or []
         built = seq.get("built_segs")
         legs = seq.get("geometry_legs")
-        seg_count = len(legs) if isinstance(legs, (list, tuple)) else max(0, len(seq.get("stops") or []) - 1)
+        seg_count = (
+        len(legs)
+        if isinstance(legs, (list, tuple))
+        else (
+            len(seq.get("stops") or [])
+            if seq.get("closed")
+            else max(0, len(seq.get("stops") or []) - 1)
+        )
+    )
         for seg_i in range(seg_count):
             if seg_i < len(gaps) and bool(gaps[seg_i]):
                 continue
