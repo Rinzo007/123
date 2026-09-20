@@ -837,6 +837,42 @@ def test_shared_capacity_uses_atomic_overlap_with_intermediate_stop() -> None:
     assert math.isclose(got[911], 2.0, rel_tol=1e-9, abs_tol=1e-9)
     assert math.isclose(got[912], 6.0, rel_tol=1e-9, abs_tol=1e-9)
 
+def test_takt_co_branches_only_the_transfer_leg() -> None:
+    a = _synthetic_sequence([1, 2, 3])
+    b = _synthetic_sequence([2, 4, 5])
+    c = _synthetic_sequence([2, 6, 5])
+    for idx, seq in enumerate((a, b, c)):
+        seq["_seq_idx"] = idx
+    a["route_id"] = 801; b["route_id"] = 802; c["route_id"] = 803
+    journeys = [JourneyAlternative(20.0, ((0, 0, 1), (1, 0, 2)))]
+    transfer_index = {
+        (0, 1): (
+            (1, b["stops"][0], b["stops"][0]),
+            (2, c["stops"][0], c["stops"][0]),
+        )
+    }
+    state = {
+        "seg_forward": {(1, 0): 1.0, (2, 0): 1.0},
+        "seg_reverse": {}, "stop_extra": {}, "unreliability": {},
+    }
+    base_candidates, base_probs = _takt_leg_choice_probs(
+        journeys[0], 0, [a, b, c],
+        period_index=0, seq_headway_min={0: 10.0, 1: 10.0, 2: 20.0},
+        seq_jitter_s={0: 0.0, 1: 0.0, 2: 0.0}, crowd_state=state,
+        transfer_index=transfer_index, stop_time_min=0.0, transfer_radius_m=800.0,
+    )
+    leg_candidates, leg_probs = _takt_leg_choice_probs(
+        journeys[0], 1, [a, b, c],
+        period_index=0, seq_headway_min={0: 10.0, 1: 10.0, 2: 20.0},
+        seq_jitter_s={0: 0.0, 1: 0.0, 2: 0.0}, crowd_state=state,
+        transfer_index=transfer_index, stop_time_min=0.0, transfer_radius_m=800.0,
+    )
+    assert base_candidates == ((0, 0, 1),)
+    assert np.allclose(base_probs, [1.0])
+    assert len(leg_candidates) >= 1
+    assert math.isclose(float(leg_probs.sum()), 1.0, rel_tol=1e-12, abs_tol=1e-12)
+    assert any(leg[0] == 2 for leg in leg_candidates[1:])
+
 def test_transfer_crowding_uses_hs_times_load_factor() -> None:
     a = _synthetic_sequence([1, 2, 3])
     b = _synthetic_sequence([1, 4, 5])
