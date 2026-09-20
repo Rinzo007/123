@@ -20,6 +20,10 @@ TAKT_CAR_PARKING_S = 240.0
 TAKT_CAR_CIRCUITY = 1.3
 TAKT_CAR_SPEED_KMH = 25.0
 
+# Периодная поправка времени движения авто из Takt (yt = min(mt, 1 + nt·max(0, N/T - 1))).
+TAKT_CAR_PERIOD_NT = 0.6
+TAKT_CAR_PERIOD_MT = 1.8
+
 TAKT_FARE_BASE_EUR = 0.6
 TAKT_FARE_PER_KM_EUR = 0.12
 TAKT_FARE_CAP_EUR = 3.0

@@ -12,6 +12,7 @@ import math
 import numpy as np
 
 from ..base.models import ModeChoiceConfig
+from ..base.defaults import TAKT_CAR_PERIOD_MT, TAKT_CAR_PERIOD_NT
 
 
 def _takt_no_car_shares(
@@ -72,20 +73,56 @@ def _od_fare_eur(
         fare = max(rawe, lower)
     return max(fare, 0.0)
 
-def _takt_car_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
-    """Стоимость авто в секундах обобщённого времени (Takt ``Oe``).
+def _takt_car_period_multiplier(
+    period_demand_per_hour: float,
+    average_demand_per_hour: float,
+) -> float:
+    """Периодный множитель времени авто из Takt yt.
 
-    = время движения (км×circuity / speed) + parking_s +
-      (км×circuity×costPerKm + parkEur)×VOT.
+    yt = min(1.8, 1 + 0.6 * max(0, N/T - 1)).
+    При отсутствующем/нулевом среднем спросе возвращается 1.0.
     """
-    od_km = od_meters / 1000.0
-    return (
-        od_km * mode.car_circuity / (mode.car_speed_kmh / 3.6)
-        + mode.car_parking_min * 60.0
-        + (od_km * mode.car_circuity * mode.car_cost_per_km_eur + mode.car_parking_eur)
-        * mode.vot_per_eur_s
+    avg = float(average_demand_per_hour)
+    demand = float(period_demand_per_hour)
+    if not math.isfinite(avg) or avg <= 0.0 or not math.isfinite(demand):
+        return 1.0
+    return min(
+        TAKT_CAR_PERIOD_MT,
+        1.0 + TAKT_CAR_PERIOD_NT * max(0.0, demand / avg - 1.0),
     )
 
+def _takt_car_cost_s(
+    mode: ModeChoiceConfig,
+    od_meters: float,
+    *,
+    road_time_s: float | None = None,
+    period_multiplier: float = 1.0,
+) -> float:
+    """Стоимость авто в секундах обобщённого времени по модели Takt Wr/Oe.
+
+    Время движения берётся из baseT/road_time_s, когда оно задано;
+    иначе используется геометрический fallback. Затем применяется yt.
+    Парковка и денежная часть остаются без периодного множителя.
+    """
+    od_km = od_meters / 1000.0
+    fallback_time_s = od_km * mode.car_circuity / (mode.car_speed_kmh / 3.6)
+    try:
+        base_time = float(road_time_s) if road_time_s is not None else fallback_time_s
+    except (TypeError, ValueError):
+        base_time = fallback_time_s
+    if not math.isfinite(base_time) or base_time < 0.0:
+        base_time = fallback_time_s
+    try:
+        multiplier = float(period_multiplier)
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    if not math.isfinite(multiplier) or multiplier <= 0.0:
+        multiplier = 1.0
+    monetary_s = (
+        od_km * mode.car_circuity * mode.car_cost_per_km_eur
+        + mode.car_parking_eur
+    ) * mode.vot_per_eur_s
+    return base_time * multiplier + mode.car_parking_min * 60.0 + monetary_s
 
 def _takt_bike_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
     """Стоимость eBike в секундах обобщённого времени (Takt ``Qt``).
@@ -113,6 +150,8 @@ def _takt_mode_shares(
     fare_eur: float,
     rest_s: float | None = None,
     no_car_share: float | None = None,
+    road_time_s: float | None = None,
+    car_period_multiplier: float = 1.0,
 ) -> tuple[float, float, float, float, float]:
     """Доли (transit, car, walk, ebike, rest) с альтернативой ``baseT``."""
     ks = mode.vot_per_eur_s
@@ -127,7 +166,15 @@ def _takt_mode_shares(
         if transit_s is not None
         else 0.0
     )
-    car_u = math.exp(-_takt_car_cost_s(mode, od_meters) / ks)
+    car_u = math.exp(
+        -_takt_car_cost_s(
+            mode,
+            od_meters,
+            road_time_s=road_time_s,
+            period_multiplier=car_period_multiplier,
+        )
+        / ks
+    )
     walk_u = math.exp(-_takt_walk_cost_s(mode, od_meters) / ks)
     ebike_u = (
         mode.two_wheel_share
