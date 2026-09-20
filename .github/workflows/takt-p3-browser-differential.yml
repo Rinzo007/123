@@ -1,0 +1,30 @@
+name: Takt P3 browser differential smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/bd956ff0a1875604740f7.js"
+      - "scripts/takt_browser_snapshot.js"
+  workflow_dispatch:
+
+jobs:
+  browser-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Execute Takt bundle
+        run: node scripts/takt_browser_snapshot.js tests/fixtures/takt_browser_snapshot.generated.json
+
+      - name: Upload JS snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: takt-p3-browser-snapshot
+          path: tests/fixtures/takt_browser_snapshot.generated.json
