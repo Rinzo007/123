@@ -21,7 +21,7 @@ from typing import Any
 logger = logging.getLogger("wikiroutes.gis.overture")
 
 
-def __sql_literal(value: str) -> str:
+def _sql_literal(value: str) -> str:
     """Экранирует строку для безопасной вставки в литерал SQL DuckDB."""
     return "'" + value.replace("'", "''") + "'"
 
