@@ -154,7 +154,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P0** | ✅ закрыт | Базовые Takt constants, OD, wait, fare, reliability, mode-choice primitives. |
 | **P1** | ✅ закрыт | Базовая parity `passenger_flow` с расчётным bundle. |
 | **P2-A Automobile** | ✅ закрыт | Периодный `yt` для автомобиля; `baseT`/fallback и разделение monetary/parking части. |
-| **P2-B Routing** | 🟡 | `ri()` access/egress и first-leg `co()/Rr()` перенесены; transfer-leg `hs×ti` теперь тоже учитывается. Остаётся exact per-leg alternative branching и проверка повторного использования линии. |
+| **P2-B Routing** | 🟡 | `ri()` access/egress, first-leg `co()/Rr()` и transfer-leg `hs×ti` перенесены; повторное использование линии теперь разрешено. Остаток — exact per-leg alternative branching. |
 | **P2-C Infrastructure** | 🟢 | `Ga/Qa` периодные; `headways[0..4]` проходят в assignment/KPI; `La()` decoded-polyline reuse и source-`onTrack` resolution перенесены при наличии geometry. Остаток — fallback без source geometry. |
 | **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
 | **P2-E Crowding/reliability** | 🟢 | `Fr → unev → Rr` участвует в first-leg, а transfer-leg использует `hs×ti` без double-count. Остаток — per-leg alternative branching из JS `co()`. |
@@ -251,6 +251,10 @@ Access/egress использует Takt `circuity/contSpeed`, `baseT` fallback �
 `1 / max(1, wait × unev × ti(load))`, а `Fr()` переносит `unev=1+H²` из crowd feedback.
 Остаётся отдельный узел точного `co()` для transfer-leg alternative sets и возможность
 повторного использования одной линии.
+### P2-B parity update — repeated-line state
+
+Dijkstra state больше не запрещает `seq_b` из `used`: повторная посадка на ранее использованную линию разрешена.
+Ограничение по `max_legs`/числу пересадок сохраняет конечность поиска. Добавлен regression `line A → line B → line A`.
 ### P2-C/P2-D parity update — headways/Ga/Qa/fleet
 
 Route sequence сохраняет `headways[0..4]` из route/direction metadata; каждый период assignment получает собственный `seq_headway_min`.
