@@ -804,7 +804,7 @@ def _compute_purpose_matrix(
     Возвращает ``(matrix, purpose_periods, purpose_trips, purpose_keys,
     purpose_meta, purpose_od)``.
     """
-    purpose_od = build_purpose_od(production, zones)
+    purpose_od = build_purpose_od(production, zones, attraction=attraction)
     matrix = purpose_od.matrix
     purpose_periods = periods_from_purpose_blend(
         purpose_od.period_out, purpose_od.period_ret
