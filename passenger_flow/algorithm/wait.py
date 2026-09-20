@@ -134,6 +134,36 @@ def _build_crowd_state(
     return state
 
 
+def _takt_msa_gap(
+    previous_route: Mapping[int, float],
+    current_route: Mapping[int, float],
+    previous_seg_forward: Mapping[tuple[int, int], float],
+    current_seg_forward: Mapping[tuple[int, int], float],
+    previous_seg_reverse: Mapping[tuple[int, int], float],
+    current_seg_reverse: Mapping[tuple[int, int], float],
+    previous_stop: Mapping[tuple[int, int], float],
+    current_stop: Mapping[tuple[int, int], float],
+) -> float:
+    """Takt MSA gap: сумма абсолютных шагов / сумма текущих нагрузок."""
+    def step(a: Mapping[Any, float], b: Mapping[Any, float]) -> float:
+        keys = set(a) | set(b)
+        return sum(abs(float(b.get(key, 0.0)) - float(a.get(key, 0.0))) for key in keys)
+
+    numerator = (
+        step(previous_route, current_route)
+        + step(previous_seg_forward, current_seg_forward)
+        + step(previous_seg_reverse, current_seg_reverse)
+        + step(previous_stop, current_stop)
+    )
+    denominator = max(
+        sum(float(v) for v in current_route.values())
+        + sum(float(v) for v in current_seg_forward.values())
+        + sum(float(v) for v in current_seg_reverse.values())
+        + sum(float(v) for v in current_stop.values()),
+        1.0,
+    )
+    return numerator / denominator
+
 def _run_msa_period(
     od_rows: np.ndarray,
     od_cols: np.ndarray,
@@ -225,6 +255,9 @@ def _run_msa_period(
         raw_seg_forward = agg.get("seg_forward_totals", {})
         raw_seg_reverse = agg.get("seg_reverse_totals", {})
         raw_stop = agg.get("seq_stop_totals", {})
+        previous_seg_forward = dict(smoothed_seg_forward)
+        previous_seg_reverse = dict(smoothed_seg_reverse)
+        previous_stop = dict(smoothed_stop)
         for key in set(raw_seg_forward) | set(smoothed_seg_forward):
             smoothed_seg_forward[key] = (
                 (1.0 - alpha) * smoothed_seg_forward.get(key, 0.0)
@@ -252,30 +285,15 @@ def _run_msa_period(
             vehicle_specs,
             period_hours,
         )
-        denom = max(sum(smoothed.values()), 1.0)
-        final_gap = (
-            sum(
-                abs(smoothed.get(r, 0.0) - prev_smoothed.get(r, 0.0))
-                for r in rids
-            )
-            + sum(
-                abs(v - smoothed_seg_forward.get(k, 0.0))
-                for k, v in raw_seg_forward.items()
-            )
-            + sum(
-                abs(v - smoothed_seg_reverse.get(k, 0.0))
-                for k, v in raw_seg_reverse.items()
-            )
-            + sum(
-                abs(v - smoothed_stop.get(k, 0.0))
-                for k, v in raw_stop.items()
-            )
-        ) / max(
-            denom
-            + sum(smoothed_seg_forward.values())
-            + sum(smoothed_seg_reverse.values())
-            + sum(smoothed_stop.values()),
-            1.0,
+        final_gap = _takt_msa_gap(
+            prev_smoothed,
+            smoothed,
+            previous_seg_forward,
+            smoothed_seg_forward,
+            previous_seg_reverse,
+            smoothed_seg_reverse,
+            previous_stop,
+            smoothed_stop,
         )
         prev_smoothed = dict(smoothed)
         if iteration > 1 and final_gap <= gap_tol:
