@@ -1,4 +1,4 @@
-\n\ndef test_core_additional_options_enabled_by_default() -> None:\n    import inspect\n\n    from passenger_flow.core import run_passenger_flow\n    sig = inspect.signature(run_passenger_flow)\n    assert sig.parameters["max_transfers"].default == 3\n    assert sig.parameters["headway_min"].default == 10.0\n    assert sig.parameters["wait_crowding_per_100_min"].default == 0.1\n    assert sig.parameters["periods"].default == __import__("passenger_flow").TAKT_PERIODS\n    assert sig.parameters["include_reliability"].default is True\n    assert sig.parameters["msa_max_iterations"].default == 20\n    assert sig.parameters["msa_gap"].default == 0.01\n"""Golden/regression checks for the Takt-compatible passenger-flow core."""
+"""Golden/regression checks for the Takt-compatible passenger-flow core."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from passenger_flow.core import _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
     _takt_mode_shares,
-    _takt_mode_shares,
     _takt_no_car_shares,
     _takt_route_probs,
 )
@@ -51,6 +50,22 @@ FIXTURE = json.loads(
         encoding="utf-8"
     )
 )
+
+
+def test_core_additional_options_enabled_by_default() -> None:
+    import inspect
+
+    from passenger_flow.core import run_passenger_flow
+    from passenger_flow.base.takt import TAKT_PERIODS
+
+    sig = inspect.signature(run_passenger_flow)
+    assert sig.parameters["max_transfers"].default == 3
+    assert sig.parameters["headway_min"].default == 10.0
+    assert sig.parameters["wait_crowding_per_100_min"].default == 0.1
+    assert sig.parameters["periods"].default == TAKT_PERIODS
+    assert sig.parameters["include_reliability"].default is True
+    assert sig.parameters["msa_max_iterations"].default == 20
+    assert sig.parameters["msa_gap"].default == 0.01
 
 
 def test_takt_defaults_are_the_reference_defaults() -> None:
