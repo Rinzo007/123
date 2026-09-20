@@ -248,50 +248,30 @@ def _journey_crowd_extra(
     seq_headway_min: Mapping[int, float] | None,
     wait_extra: Mapping[int, float] | None = None,
 ) -> np.ndarray:
-    """Дополнительное время поездки от сегментной и остановочной перегрузки."""
+    """Дополнительное время ожидания из crowd/reliability feedback.
+
+    Ride-time и stop-dwell feedback уже входят в shortest-path edge cost.
+    Здесь остаётся crowding-множитель ожидания и внешний reliability extra.
+    """
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
     seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
-    stop_extra = crowd_state.get("stop_extra", {}) if crowd_state else {}
     result = np.zeros(len(journeys), dtype=np.float64)
     wait_extra = wait_extra or {}
     for jidx, journey in enumerate(journeys):
         extra_s = 0.0
         for seq_idx, a, b in journey[1]:
-            seq = route_sequences[seq_idx]
+            if seq_headway_min is not None and seq_idx in seq_headway_min:
+                selected_segments = _route_segment_indices(route_sequences[seq_idx], a, b)
+                if selected_segments:
+                    first_seg, first_forward = selected_segments[0]
+                    loads = seg_forward if first_forward else seg_reverse
+                    lf = float(loads.get((seq_idx, first_seg), 0.0))
+                    if lf > 1.0:
+                        base_wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
+                        extra_s += base_wait_s * (_takt_crowding_wait_mult(lf) - 1.0)
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
-            selected_segments = _route_segment_indices(seq, a, b)
-            for seg_i, is_forward in selected_segments:
-                loads = seg_forward if is_forward else seg_reverse
-                lf = float(loads.get((seq_idx, seg_i), 0.0))
-                if lf <= 0.0:
-                    continue
-                extra_s += _segment_time_s(seq, seg_i) * (
-                    _takt_crowding_ride_mult(lf) - 1.0
-                )
-            if selected_segments:
-                prev_stop = a
-                for seg_i, is_forward in selected_segments:
-                    if is_forward:
-                        arrival_stop = (seg_i + 1) % len(seq["stops"])
-                    else:
-                        arrival_stop = seg_i % len(seq["stops"])
-                    if arrival_stop != prev_stop:
-                        extra_s += float(stop_extra.get((seq_idx, arrival_stop), 0.0))
-                    prev_stop = arrival_stop
-            if seq_headway_min is not None and seq_idx in seq_headway_min and selected_segments:
-                first_seg, first_forward = selected_segments[0]
-                loads = seg_forward if first_forward else seg_reverse
-                lf = float(loads.get((seq_idx, first_seg), 0.0))
-                if lf > 1.0:
-                    base_wait_s = _takt_po_seconds(
-                        float(seq_headway_min[seq_idx])
-                    )
-                    extra_s += base_wait_s * (
-                        _takt_crowding_wait_mult(lf) - 1.0
-                    )
         result[jidx] = extra_s / 60.0
     return result
-
 
 # ===== Накопление загрузок по вариантам =====
 
@@ -478,6 +458,7 @@ def _assign_od(
             seq_headway_min=seq_headway_min,
             seq_jitter_s=seq_jitter_s,
             wait_calc=wait_calc,
+            crowd_state=crowd_state,
         )
         if not journeys:
             _apply_car_only_modes(
