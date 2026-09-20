@@ -356,3 +356,14 @@ P1 cleanup: `mode_choice.py` оставляет только единую Takt-�
 - один общий `_sql_literal` в `overture/http.py`, используемый из `download.py`;
 - одна реализация `resolve_poi_place_file` в `overture/poi.py`, а `download.py` и `load.py` делают только реэкспорт.
 Добавлен регрессионный тест на отсутствие одинаковых функций верхнего уровня и на идентичность совместимых алиасов.
+## P2 — shared infrastructure geometry and station headway
+
+Shared infrastructure now uses atomic geometric sections: a segment is split
+at intermediate stop vertices of same-mode lines, matching the effective
+Ja/Xa overlap semantics for the stop-polyline representation. CAPEX reuse
+and residual track capacity operate on these atomic sections.
+
+Station minimum headway follows Takt Qa per period: the maximum stop
+throughput is converted into the dwell constraint and combined with the
+open-route turnback constraint. The scalar Python LineResult.min_headway
+takes the maximum station/track constraint across supplied periods.
