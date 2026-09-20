@@ -320,6 +320,40 @@ def test_journey_alternative_exposes_named_fields() -> None:
     assert option[0] == option.total_time_min
 
 
+def test_purpose_od_writer_preserves_base_time(tmp_path) -> None:
+    from od.demand.takt import load_takt_purposes, write_takt_purposes
+    from od.model import PurposeOd
+    from passenger_flow.models import Purpose
+    from scipy import sparse
+
+    purpose = Purpose(
+        key="edu", label="Education", trips_per_res=0.1, d0_m=1000.0,
+        out=(1.0,), ret=(1.0,),
+    )
+    mat = sparse.csr_matrix(
+        np.asarray([[0.0, 7.0], [3.0, 0.0]], dtype=np.float64)
+    )
+    base = np.asarray([[900.0, 1200.0], [930.0, 1260.0]], dtype=np.float64)
+    source = PurposeOd(
+        matrix=mat.toarray(),
+        purpose_matrices=(mat,),
+        period_out=(1.0,),
+        period_ret=(1.0,),
+        shares=(1.0,),
+        purposes=(purpose,),
+        purpose_base_times=(base,),
+        commute_base_time=np.asarray([[600.0, 800.0], [630.0, 840.0]], dtype=np.float64),
+    )
+    path = tmp_path / "purpose-od.json"
+    costs = np.zeros((2, 2), dtype=np.float64)
+    write_takt_purposes(source, costs, path)
+    loaded = load_takt_purposes(path)
+    assert np.array_equal(loaded.layers[0].base_time, base.astype("<f4"))
+    assert np.array_equal(
+        loaded.commute_base_time, source.commute_base_time.astype("<f4")
+    )
+
+
 def test_takt_purposes_base_time_roundtrip(tmp_path) -> None:
     from od.demand.takt import load_takt_purposes, write_takt_purposes_bundle
     from od.model import TaktPurposeLayer, TaktPurposes
