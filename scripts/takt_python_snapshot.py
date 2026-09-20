@@ -125,6 +125,7 @@ def main() -> int:
             "capitalCostM": float(result.capital_cost_eur / 1_000_000.0),
             "revenueDay": js_round(result.raw_revenue_day),
             "opexDay": js_round(result.raw_opex_day),
+            "transitS": float(result.raw_transit_s),
             "modeSplit": {
                 "transit": raw_assigned / mode_den,
                 "car": raw_car / mode_den,
