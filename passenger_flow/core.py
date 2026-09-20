@@ -68,6 +68,43 @@ class Reporter(Protocol):
     def line(self, text: str) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedPassengerFlow:
+    """Подготовленный статический контекст для повторных расчётов OD.
+
+    Включает последовательности маршрутов, KD-tree остановок и привязку зон.
+    Объект привязан к конкретному экземпляру ``Zones`` и радиусу поиска.
+    """
+    zones: Zones
+    stop_search_radius_m: float
+    route_sequences: tuple[dict[str, Any], ...]
+    zone_nearest: dict[int, list[tuple[int, int, int, float]]]
+
+
+def prepare_passenger_flow(
+    routes: list[RouteLike],
+    zones: Zones,
+    *,
+    stop_search_radius_m: float = 1500.0,
+) -> PreparedPassengerFlow:
+    """Предвычисляет неизменяемую часть пассажиропотока для повторных OD-запусков."""
+    if stop_search_radius_m <= 0.0:
+        raise PassengerFlowError("stop_search_radius_m должен быть положительным")
+    route_sequences = _build_route_stop_sequence(routes)
+    if route_sequences:
+        stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
+        zone_nearest = _bind_zones_to_stops(
+            zones, stop_coords, stop_tree, flat_map, stop_search_radius_m
+        )
+    else:
+        zone_nearest = {zi: [] for zi in range(len(zones))}
+    return PreparedPassengerFlow(
+        zones=zones,
+        stop_search_radius_m=float(stop_search_radius_m),
+        route_sequences=tuple(route_sequences),
+        zone_nearest=zone_nearest,
+    )
+
 # ===== Валидация входных параметров =====
 
 
@@ -692,6 +729,7 @@ def run_passenger_flow(
     include_reliability: bool = True,
     msa_max_iterations: int | None = _DEFAULT_MSA_MAX_ITERATIONS,
     msa_gap: float = _DEFAULT_MSA_GAP,
+    prepared: PreparedPassengerFlow | None = None,
 ) -> FlowResult:
     """Выполняет расчёт пассажиропотока на маршрутах и остановках.
 
@@ -767,6 +805,9 @@ def run_passenger_flow(
         Относительный разрыв нагрузок маршрутов для остановки MSA (в Takt 1%).
     reporter : Reporter | None
         Объект Reporter (метод ``line``) для логирования.
+    prepared : PreparedPassengerFlow | None
+        Предвычисленная сеть/индекс для повторных расчётов с теми же ``zones``
+        и радиусом поиска. Позволяет не перестраивать маршруты и KD-tree.
 
     Returns
     -------
@@ -816,8 +857,33 @@ def run_passenger_flow(
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
     )
 
-    # 1. Подготовка данных маршрутов
-    route_sequences = _build_route_stop_sequence(routes)
+    # 1–2. Подготовка данных маршрутов и индекс остановок.
+    if prepared is not None:
+        if prepared.zones is not zones:
+            raise PassengerFlowError(
+                "prepared был создан для другого экземпляра Zones"
+            )
+        if not np.isclose(
+            prepared.stop_search_radius_m,
+            float(stop_search_radius_m),
+            rtol=0.0,
+            atol=1e-9,
+        ):
+            raise PassengerFlowError(
+                "prepared требует тот же stop_search_radius_m"
+            )
+        route_sequences = list(prepared.route_sequences)
+        zone_nearest = prepared.zone_nearest
+    else:
+        route_sequences = _build_route_stop_sequence(routes)
+        if route_sequences:
+            stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
+            zone_nearest = _bind_zones_to_stops(
+                zones, stop_coords, stop_tree, flat_map, stop_search_radius_m
+            )
+        else:
+            zone_nearest = {zi: [] for zi in range(len(zones))}
+
     if not route_sequences:
         line("  Маршруты с остановками не найдены")
         return FlowResult(
@@ -827,12 +893,6 @@ def run_passenger_flow(
             assigned_trips=0.0,
             routes_served=0,
         )
-
-    # 2. Индекс остановок (KD-tree) и привязка зон
-    stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
-    zone_nearest = _bind_zones_to_stops(
-        zones, stop_coords, stop_tree, flat_map, stop_search_radius_m
-    )
 
     # 3. OD-пары (sparse или dense)
     total_trips = float(od_matrix.sum())
