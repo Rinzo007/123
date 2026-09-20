@@ -581,7 +581,7 @@ def _build_line_kpis(
             seq, spec, period_seq_stop_totals, headway_min, headway_by_route
         )
         fleet = int(period_fleet)
-        capacity = float(seq.get("capacity", spec.capacity))
+        capacity = float(seq.get("capacity") or spec.capacity)
         occupancy_factor = capacity / max(float(spec.capacity), 1.0)
         opex_day = (variable_opex_day + fleet * float(spec.veh_cost_day)) * occupancy_factor
         share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
