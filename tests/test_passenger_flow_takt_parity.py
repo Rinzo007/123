@@ -392,7 +392,9 @@ def test_takt_purposes_base_time_roundtrip(tmp_path) -> None:
 def test_prepared_flow_api_accepts_reusable_static_context(monkeypatch) -> None:
     import passenger_flow.core as core
 
-    zones = types.SimpleNamespace(
+    from od.model import Zones
+
+    zones = Zones(
         xy=np.asarray([[4.0, 52.0], [4.002, 52.002]], dtype=float),
         ids=np.asarray([1, 2], dtype=np.int64),
         polygons=(None, None),
