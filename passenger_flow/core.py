@@ -390,6 +390,42 @@ def _validate_flow_inputs(
 # ===== Индекс остановок и привязка зон =====
 
 
+def _validate_route_sequences(route_sequences: Sequence[Mapping[str, Any]]) -> None:
+    """Проверяет подготовленный route graph до запуска OD assignment."""
+    for seq_i, seq in enumerate(route_sequences):
+        stops = seq.get("stops")
+        if not isinstance(stops, list) or not stops:
+            raise PassengerFlowError(f"route sequence {seq_i} не содержит остановок")
+        for stop_i, stop in enumerate(stops):
+            try:
+                lat = float(stop["lat"])
+                lon = float(stop["lon"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: остановка {stop_i} имеет некорректные координаты"
+                ) from exc
+            if not math.isfinite(lat) or not math.isfinite(lon) or abs(lat) > 90.0 or abs(lon) > 180.0:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: остановка {stop_i} имеет некорректные координаты"
+                )
+        cum = seq.get("cum_t_s")
+        if cum is not None:
+            try:
+                values = [float(v) for v in cum]
+            except (TypeError, ValueError) as exc:
+                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s имеет некорректный формат") from exc
+            if len(values) != len(stops) or not all(math.isfinite(v) for v in values):
+                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s имеет некорректное значение")
+            if any(values[i + 1] < values[i] for i in range(len(values) - 1)):
+                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s должен быть неубывающим")
+        cycle = seq.get("cycle_run_s")
+        if cycle is not None:
+            cycle_value = float(cycle)
+            if not math.isfinite(cycle_value) or cycle_value < 0.0:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: cycle_run_s должен быть конечным и неотрицательным"
+                )
+
 def _build_stop_index(
     route_sequences: list[dict[str, Any]],
 ) -> tuple[np.ndarray, cKDTree, list[tuple[int, int, int]]]:
@@ -974,6 +1010,8 @@ def run_passenger_flow(
             )
         else:
             zone_nearest = {zi: [] for zi in range(len(zones))}
+
+    _validate_route_sequences(route_sequences)
 
     if not route_sequences:
         line("  Маршруты с остановками не найдены")
