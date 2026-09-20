@@ -49,6 +49,7 @@ from passenger_flow.network.geometry import haversine_meters
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
+    _ride_edge_time_min,
     _route_ride_time_min,
     build_journeys,
     _build_route_stop_sequence,
@@ -324,6 +325,22 @@ def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
     )
     assert journeys
     assert journeys[0].legs == ((0, 2, 0),)
+
+def test_routing_edge_includes_directional_crowding_feedback() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    base = _ride_edge_time_min(
+        seq, 0, 2, stop_time_min=2.0, crowd_state=None
+    )
+    crowded = _ride_edge_time_min(
+        seq, 0, 2,
+        stop_time_min=2.0,
+        crowd_state={
+            "seg_forward": {(0, 0): 1.5, (0, 1): 1.5},
+            "seg_reverse": {(0, 0): 0.5, (0, 1): 0.5},
+            "stop_extra": {(0, 1): 10.0},
+        },
+    )
+    assert crowded > base
 
 def test_same_stop_transfer_is_reachable_in_state_graph() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
