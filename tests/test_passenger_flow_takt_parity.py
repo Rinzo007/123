@@ -483,6 +483,28 @@ def test_explicit_takt_row_drives_segment_capital_cost() -> None:
     got = _sequence_capital_cost_eur(seq, spec, 1.0)
     assert math.isclose(got, distance_km * 18_000_000.0, rel_tol=1e-12, abs_tol=1e-8)
 
+def test_shared_physical_section_is_not_charged_twice() -> None:
+    seq_a = _synthetic_sequence([1, 2, 3])
+    seq_b = _synthetic_sequence([1, 2, 3])
+    seq_a["route_id"] = 801
+    seq_b["route_id"] = 802
+    for seq in (seq_a, seq_b):
+        seq["route_type_key"] = "tram"
+        seq["row"] = "reserved"
+        seq["row_explicit"] = True
+        seq["seg_cost_mul"] = [1.0, 1.0]
+    results = _build_line_kpis(
+        [seq_a, seq_b],
+        {801: 100.0, 802: 100.0},
+        10.0,
+        0.0,
+        200.0,
+        None,
+    )
+    assert len(results) == 2
+    assert results[0].capital_cost_eur > 0.0
+    assert math.isclose(results[1].capital_cost_eur, 0.0, abs_tol=1e-8)
+
 def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["route_id"] = 8
