@@ -250,8 +250,19 @@ def write_takt_purposes(
                 for i in range(retained.shape[0])
             ]
         layers.append(layer_payload)
+    commute_base = getattr(purpose_od, "commute_base_time", None)
+    if commute_base is not None:
+        commute = np.asarray(commute_base, dtype="<f4")
+        if commute.ndim != 2:
+            raise OdMatrixError("commute_base_time должен иметь форму [period,n]")
+        commute_payload = [
+            base64.b64encode(commute[i].tobytes()).decode("ascii")
+            for i in range(commute.shape[0])
+        ]
+    else:
+        commute_payload = []
     Path(path).write_text(
-        json.dumps({"v": 2, "layers": layers, "commuteBaseT": []}),
+        json.dumps({"v": 2, "layers": layers, "commuteBaseT": commute_payload}),
         encoding="utf-8",
     )
 
