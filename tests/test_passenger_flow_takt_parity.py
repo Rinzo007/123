@@ -24,7 +24,7 @@ except ImportError:
 
 import numpy as np
 
-from passenger_flow.algorithm.kpis import _build_line_kpis
+from passenger_flow.algorithm.kpis import _build_line_kpis, _shared_capacity_min_headways
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
@@ -364,6 +364,21 @@ def test_segment_crowding_uses_directional_feedback() -> None:
     assert state["seg_reverse"][(0, 0)] > 1.0
     assert state["stop_extra"][(0, 0)] > 0.0
 
+
+def test_shared_track_residual_capacity_changes_min_headway() -> None:
+    seq_a = _synthetic_sequence([1, 2, 3])
+    seq_b = _synthetic_sequence([1, 2, 3])
+    seq_a["route_id"] = 101
+    seq_b["route_id"] = 102
+    seq_a["route_type_key"] = "tram"
+    seq_b["route_type_key"] = "tram"
+    got = _shared_capacity_min_headways(
+        [seq_a, seq_b],
+        default_headway_min=2.0,
+        headway_by_route={101: 2.0, 102: 6.0},
+    )
+    assert math.isclose(got[101], 2.0, rel_tol=1e-12, abs_tol=1e-12)
+    assert math.isclose(got[102], 6.0, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_line_opex_includes_daily_vehicle_cost() -> None:
     seq = _synthetic_sequence([1, 2, 3])
