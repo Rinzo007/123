@@ -110,7 +110,23 @@ const lines = [{
   bothWays: false,
 }];
 
-const geoms = [null];
+const geoms = [{
+  stops: [
+    [0.0000, 52.3700],
+    [0.0050, 52.3700],
+  ],
+  cum: [0, 340],
+  cumT: [0, 68],
+  segLen: [340],
+  segCostMul: [1],
+}];
+const baseTimeS = [
+  [300, 300],
+  [300, 300],
+  [300, 300],
+  [300, 300],
+  [300, 300],
+];
 const fare = { base: 0.6, perKm: 0.12 };
 
 async function main() {
@@ -118,7 +134,7 @@ async function main() {
     city,
     lines,
     geoms,
-    null,
+    baseTimeS,
     [],
     false,
     undefined,
