@@ -47,6 +47,7 @@ from .base.models import (
     VehicleSpec,
     vehicle_spec_for_route_type,
 )
+from .base.takt import _TAKT_PERIOD_HOURS
 from .network.geometry import _find_nearest_stops, haversine_meters
 from .network.routes import _build_route_stop_sequence
 from .report.assembly import assemble_flow_result
@@ -455,6 +456,7 @@ class _AssignContext:
     mode_choice: ModeChoiceConfig | None
     zones: Zones
     no_car_shares: np.ndarray | None
+    base_time_s: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
     wait_calc: str
@@ -473,6 +475,7 @@ class _AssignContext:
             "mode": self.mode_choice,
             "zones": self.zones,
             "no_car_shares": self.no_car_shares,
+            "base_time_s": self.base_time_s,
             "seq_headway_min": self.seq_headway_min,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
@@ -484,6 +487,7 @@ class _AssignContext:
         out_factor: float,
         ret_factor: float,
         wait_extra: Mapping[int, float] | None,
+        period_index: int,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -494,6 +498,7 @@ class _AssignContext:
             out_factor=out_factor,
             ret_factor=ret_factor,
             wait_extra=wait_extra,
+            period_index=period_index,
             **self._common_kwargs(),
         )
 
@@ -506,6 +511,8 @@ class _AssignContext:
         reliability_extra: Mapping[int, float] | None,
         max_iterations: int,
         gap_tol: float,
+        period_index: int,
+        period_hours: float,
     ) -> tuple[dict[str, Any], int, float]:
         return _run_msa_period(
             self.od_rows,
@@ -519,6 +526,8 @@ class _AssignContext:
             reliability_extra=reliability_extra,
             max_iterations=max_iterations,
             gap_tol=gap_tol,
+            period_index=period_index,
+            period_hours=period_hours,
             **self._common_kwargs(),
         )
 
@@ -530,6 +539,8 @@ def _run_period(
     ctx: _AssignContext,
     period: Period | None,
     *,
+    period_index: int,
+    period_hours: float,
     wait_crowding_per_100_min: float,
     reliability_extra: Mapping[int, float] | None,
     msa_max_iterations: int | None,
@@ -553,6 +564,8 @@ def _run_period(
             reliability_extra=reliability_extra,
             max_iterations=msa_max_iterations,
             gap_tol=msa_gap,
+            period_index=period_index,
+            period_hours=period_hours,
         )
         line(
             f"  MSA {period.key if period else 'общий'}: "
@@ -565,6 +578,7 @@ def _run_period(
             out_factor=out_factor,
             ret_factor=ret_factor,
             wait_extra=reliability_extra,
+            period_index=period_index,
         )
         wait_extra = _build_wait_extra(
             ctx.route_sequences,
@@ -579,6 +593,7 @@ def _run_period(
         out_factor=out_factor,
         ret_factor=ret_factor,
         wait_extra=wait_extra,
+        period_index=period_index,
     )
 
 
