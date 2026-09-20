@@ -173,15 +173,15 @@ def _takt_msa_gap(
         keys = set(a) | set(b)
         return sum(abs(float(b.get(key, 0.0)) - float(a.get(key, 0.0))) for key in keys)
 
+    # Takt Os/$s compares only segment and stop loads. Route totals are
+    # not part of K/tt in the bundle and must not affect the MSA stopping test.
     numerator = (
-        step(previous_route, current_route)
-        + step(previous_seg_forward, current_seg_forward)
+        step(previous_seg_forward, current_seg_forward)
         + step(previous_seg_reverse, current_seg_reverse)
         + step(previous_stop, current_stop)
     )
     denominator = max(
-        sum(float(v) for v in current_route.values())
-        + sum(float(v) for v in current_seg_forward.values())
+        sum(float(v) for v in current_seg_forward.values())
         + sum(float(v) for v in current_seg_reverse.values())
         + sum(float(v) for v in current_stop.values()),
         1.0,
