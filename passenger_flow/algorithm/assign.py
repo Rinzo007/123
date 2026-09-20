@@ -89,6 +89,7 @@ class _OdTotals:
     rest_trips: float = 0.0
     fare_revenue: float = 0.0
     period_total: float = 0.0
+    last_transit_s: float = 0.0
     route_totals: dict[int, float] = field(
         default_factory=lambda: defaultdict(float)
     )
@@ -131,6 +132,7 @@ class _OdTotals:
             "seg_forward_totals": self.seg_forward_totals,
             "seg_reverse_totals": self.seg_reverse_totals,
             "seq_stop_totals": self.seq_stop_totals,
+            "last_transit_s": self.last_transit_s,
         }
 
 
@@ -694,29 +696,31 @@ def _assign_od(
         )
 
         if mode is not None:
+            transit_cost_s = float(
+                _takt_route_choice(
+                    travel_times * 60.0,
+                    np.asarray(
+                        [
+                            _takt_first_leg_r_r_seconds(
+                                journey,
+                                route_sequences,
+                                period_index=period_index,
+                                seq_headway_min=seq_headway_min,
+                                crowd_state=crowd_state,
+                            )
+                            for journey in journeys
+                        ],
+                        dtype=np.float64,
+                    ),
+                )[1]
+            )
+            totals.last_transit_s = transit_cost_s
             transit_trips = _split_transit_trips(
                 totals,
                 mode=mode,
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
-                transit_s=float(
-                    _takt_route_choice(
-                        travel_times * 60.0,
-                        np.asarray(
-                            [
-                                _takt_first_leg_r_r_seconds(
-                                    journey,
-                                    route_sequences,
-                                    period_index=period_index,
-                                    seq_headway_min=seq_headway_min,
-                                    crowd_state=crowd_state,
-                                )
-                                for journey in journeys
-                            ],
-                            dtype=np.float64,
-                        ),
-                    )[1]
-                ),
+                transit_s=transit_cost_s,
                 base_time_s=road_time_s,
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
