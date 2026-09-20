@@ -121,6 +121,9 @@ class _OdTotals:
             "stop_totals": self.stop_totals,
             "route_stop_totals": self.route_stop_totals,
             "seg_totals": self.seg_totals,
+            "seg_forward_totals": self.seg_forward_totals,
+            "seg_reverse_totals": self.seg_reverse_totals,
+            "seq_stop_totals": self.seq_stop_totals,
         }
 
 
