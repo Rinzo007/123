@@ -18,7 +18,7 @@ from ..models import RouteLike
 from ..base.models import vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_ALTS,
-    _TAKT_FLEET,
+    TAKT_FLEET,
     _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
     _TAKT_WALK_BASE_S,
