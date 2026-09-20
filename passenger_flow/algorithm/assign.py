@@ -464,22 +464,42 @@ def _accumulate_transit_journeys(
     route_sequences: list[dict[str, Any]],
     period_index: int = 0,
     seq_headway_min: Mapping[int, float] | None = None,
+    seq_jitter_s: Mapping[int, float] | None = None,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
+    stop_time_min: float = 0.0,
+    transfer_radius_m: float = 800.0,
 ) -> None:
-    """Частотный сплит Takt co()/Rr() и накопление загрузок."""
-    probs = _takt_co_route_probs(
-        journeys, route_sequences, period_index=period_index,
-        seq_headway_min=seq_headway_min, crowd_state=crowd_state,
+    """Journey share plus JS-style co() branching independently per leg."""
+    journey_probs = _takt_co_route_probs(
+        journeys, route_sequences,
+        period_index=period_index,
+        seq_headway_min=seq_headway_min,
+        crowd_state=crowd_state,
     )
     totals.assigned_trips += transit_trips
-    for ci, journey in enumerate(journeys):
-        route_trips = transit_trips * probs[ci]
-        if route_trips <= 0.0:
+    transfer_index = transfer_index or {}
+    for ji, journey in enumerate(journeys):
+        journey_trips = transit_trips * journey_probs[ji]
+        if journey_trips <= 0.0:
             continue
-        _accumulate_journey(
-            totals, route_sequences, journey.legs, route_trips=route_trips
-        )\n
-
+        for leg_index in range(len(journey.legs)):
+            candidates, leg_probs = _takt_leg_choice_probs(
+                journey, leg_index, route_sequences,
+                period_index=period_index,
+                seq_headway_min=seq_headway_min,
+                seq_jitter_s=seq_jitter_s,
+                crowd_state=crowd_state,
+                transfer_index=transfer_index,
+                stop_time_min=stop_time_min,
+                transfer_radius_m=transfer_radius_m,
+            )
+            for ci, leg in enumerate(candidates):
+                leg_trips = journey_trips * float(leg_probs[ci])
+                if leg_trips > 0.0:
+                    _accumulate_journey(
+                        totals, route_sequences, (leg,), route_trips=leg_trips
+                    )
 # ===== Главная точка входа =====
 
 
@@ -632,6 +652,10 @@ def _assign_od(
             period_index=period_index,
             seq_headway_min=seq_headway_min,
             crowd_state=crowd_state,
+            seq_jitter_s=seq_jitter_s,
+            transfer_index=transfer_index,
+            stop_time_min=stop_time_min,
+            transfer_radius_m=transfer_radius_m,
         )
 
     return totals.as_dict()
