@@ -110,11 +110,16 @@ def _build_line_kpis(
         max_nt = 0.0
         if seg_totals is not None:
             stops = seq["stops"]
-            seg_count = len(stops) if seq.get("closed") else max(0, len(stops) - 1)
+            seg_count = (
+                len(stops)
+                if seq.get("closed")
+                else max(0, len(stops) - 1)
+            )
             seg_km = [
                 haversine_meters(
                     stops[i]["lat"], stops[i]["lon"],
-                    stops[(i + 1) % len(stops)]["lat"], stops[(i + 1) % len(stops)]["lon"],
+                    stops[(i + 1) % len(stops)]["lat"],
+                    stops[(i + 1) % len(stops)]["lon"],
                 ) / 1000.0
                 for i in range(seg_count)
             ]
