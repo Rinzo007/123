@@ -271,6 +271,7 @@ def _synthetic_sequence(ids: list[int]) -> dict:
             for i, stop_id in enumerate(ids)
         ],
         "cum_t_s": [0.0, 60.0, 120.0],
+        "segment_time_s": (60.0, 60.0),
         "cycle_run_s": 120.0,
         "dwell_s": 0.0,
         "speed_kmh": 18.0,
