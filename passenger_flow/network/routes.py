@@ -76,7 +76,7 @@ def _cumulative_seconds(value: Any, count: int) -> tuple[list[float] | None, flo
 def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float | list[float]) -> list[float]:
     """Строит cumT fallback из геометрии и скорости ряда."""
     result = [0.0]
-    for a, b in zip(stops, stops[1:]):
+    for i, (a, b) in enumerate(zip(stops, stops[1:])):
         seg_speed = (
             float(speed_kmh[i]) if isinstance(speed_kmh, list) and i < len(speed_kmh)
             else float(speed_kmh) if not isinstance(speed_kmh, list)
