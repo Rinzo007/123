@@ -18,6 +18,67 @@ from ..base.takt import _takt_crowding_km_classes
 from ..network.geometry import haversine_meters
 
 
+def _infra_stop_key(stop: Mapping[str, Any]) -> str:
+    """Канонический ключ физической остановки для shared-track секций."""
+    if stop.get("id") is not None:
+        return f"id:{stop['id']}"
+    return f"xy:{float(stop['lat']):.6f},{float(stop['lon']):.6f}"
+
+
+def _shared_capacity_min_headways(
+    route_sequences: list[dict[str, Any]],
+    default_headway_min: float,
+    headway_by_route: Mapping[int, float] | None,
+) -> dict[int, float]:
+    """Минимальный интервал с учётом shared infrastructure, по модели Takt Ga.
+
+    Секция определяется физической парой соседних открытых остановок и типом
+    транспорта. Для каждой линии residual capacity равна `track_tph` секции
+    минус частота остальных линий, использующих ту же секцию.
+    """
+    section_lines: dict[tuple[str, str, str], set[int]] = {}
+    line_mode: dict[int, str] = {}
+    line_limit: dict[int, float] = {}
+    for seq in route_sequences:
+        rid = int(seq["route_id"])
+        mode = str(seq.get("route_type_key") or "").lower()
+        line_mode[rid] = mode
+        spec = vehicle_spec_for_route_type(mode)
+        line_limit[rid] = float(spec.track_tph)
+        stops = seq.get("stops") or []
+        n = len(stops)
+        if n < 2:
+            continue
+        seg_count = n if seq.get("closed") else n - 1
+        for i in range(seg_count):
+            a = stops[i]
+            b = stops[(i + 1) % n]
+            ka = _infra_stop_key(a)
+            kb = _infra_stop_key(b)
+            edge = tuple(sorted((ka, kb)))
+            key = (mode, edge[0], edge[1])
+            section_lines.setdefault(key, set()).add(rid)
+
+    min_headway: dict[int, float] = {rid: 60.0 / max(tph, 1e-9) for rid, tph in line_limit.items()}
+    line_headway = lambda rid: float(headway_by_route.get(rid, default_headway_min)) if headway_by_route is not None else float(default_headway_min)
+    for key, lines in section_lines.items():
+        if len(lines) < 2:
+            continue
+        mode = key[0]
+        limit = min(
+            float(vehicle_spec_for_route_type(mode).track_tph),
+            *(line_limit.get(rid, 0.0) for rid in lines),
+        )
+        for rid in lines:
+            own_tph = 60.0 / max(line_headway(rid), 1e-9)
+            others_tph = sum(
+                60.0 / max(line_headway(other), 1e-9)
+                for other in lines if other != rid
+            )
+            residual = limit - others_tph
+            min_headway[rid] = max(min_headway.get(rid, 0.0), 60.0 / residual) if residual > 0.01 else math.inf
+    return min_headway
+
 def _route_cycle(
     seq: dict[str, Any], spec: VehicleSpec
 ) -> tuple[float, float]:
@@ -82,6 +143,9 @@ def _build_line_kpis(
     """
     results: list[LineResult] = []
     seen: set[int] = set()
+    shared_min_headway = _shared_capacity_min_headways(
+        route_sequences, headway_min, headway_by_route
+    )
     for seq in route_sequences:
         rid = seq["route_id"]
         if rid in seen:
@@ -203,7 +267,7 @@ def _build_line_kpis(
                     / max(365.0 * max(float(capex_amort_years), 0.01), 1.0)
                 ),
                 crowding=max_nt,
-                min_headway=60.0 / max(spec.track_tph, 1e-6),
+                min_headway=shared_min_headway.get(rid, 60.0 / max(spec.track_tph, 1e-6)),
                 passenger_km=pkm,
                 crowded_passenger_km=crowded_km,
                 excess_passenger_km=excess_km,
