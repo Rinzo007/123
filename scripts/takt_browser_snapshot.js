@@ -72,39 +72,10 @@ sandbox.self = {
   postMessage() {},
 };
 
-const bundleStart = bundle.indexOf("async function Bs(");
-const odNeedle = "et.fareJ[at]=uo;";
-const odIndex = bundle.indexOf(odNeedle, bundleStart);
-if (odIndex < 0) throw new Error("Could not locate initialized Takt fare block");
-const odDebugNeedle = "for(;bt.length<fe;)bt.push";
-const odDebugIndex = bundle.indexOf(odDebugNeedle, odIndex);
-if (odDebugIndex < 0) throw new Error("Could not locate initialized Takt utility block");
-const debugNeedle = "const Xt=at*k+G;";
-const debugIndex = bundle.indexOf(debugNeedle, odIndex);
-if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
-const modeNeedle = "return{lines:cn,modeSplit:";
-const modeIndex = bundle.indexOf(modeNeedle, debugIndex);
-if (modeIndex < 0) throw new Error("Could not locate Takt final return");
-const odDebugCode = "\nif (H === 0 && at === 0) globalThis.__TAKT_debug_od = { distanceM: Ze, carBase: fo, carFixedS: Oe, fareEur: uo, noCarShare: be, eBikeU: Te, walkU: ln, carU0: ho(0), restU0: po(0), carYt0: yt[0], baseT0: z.baseT ? z.baseT[0][at] : null };\n";
-const routeDebugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug = {
-  ds: ds[0], Ge: Ge[0], rn: rn[0], ride: no[0], crowd: oo[0],
-  transferWait: ro[0], transfer: ao[0], co: co(bt[0].legs[0], 0, G),
-  btS: bt[0].s, Lr: Lr(bt[0].legs[0], 0), legs: bt[0].legs
-};\n`;
-const modeDebugCode = `\nglobalThis.__TAKT_debug_modes = {
-  transit: Ht.transit, car: Ht.car, walk: Ht.walk, rest: Ht.rest
-};\n`;
 const instrumented =
-  bundle.slice(0, odDebugIndex) +
-  odDebugCode +
-  bundle.slice(odDebugIndex, debugIndex) +
-  routeDebugCode +
-  bundle.slice(debugIndex, modeIndex) +
-  modeDebugCode +
-  bundle.slice(modeIndex, markerIndex) +
+  bundle.slice(0, markerIndex) +
   "\nglobalThis.__TAKT_Bs = Bs;\n" +
   bundle.slice(markerIndex);
-
 vm.runInNewContext(instrumented, sandbox, {
   filename: bundlePath,
   displayErrors: true,
@@ -172,9 +143,6 @@ async function main() {
 
   const line = result.lines?.[0];
   const snapshot = {
-    debug: sandbox.__TAKT_debug ?? null,
-    debugModes: sandbox.__TAKT_debug_modes ?? null,
-    debugOd: sandbox.__TAKT_debug_od ?? null,
     reference: {
       engine: "Takt web bundle",
       bundle: "bd956ff0a1875604740f.js",
@@ -213,7 +181,6 @@ async function main() {
       revenueDay: result.revenueDay,
       opexDay: result.opexDay,
       modeSplit: result.modeSplit,
-      equilibrium: result.equilibrium,
       line: line
         ? {
             id: line.id,
