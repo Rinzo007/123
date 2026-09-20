@@ -13,6 +13,7 @@ import numpy as np
 
 from passenger_flow import TAKT_PERIODS, run_passenger_flow
 import passenger_flow.algorithm.mode_choice as _mode_choice_debug
+import passenger_flow.algorithm.assign as _assign_debug
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ def main() -> int:
             "transitS": float(result.raw_transit_s),
             "transitSByPeriod": [float(v) for v in result.raw_transit_s_by_period],
             "modeChoiceDebug": list(_mode_choice_debug._TAKT_DEBUG_MODE_CALLS),
+            "rrDebug": dict(_assign_debug._TAKT_DEBUG_RR),
             "modeSplit": {
                 "transit": raw_assigned / mode_den,
                 "car": raw_car / mode_den,
