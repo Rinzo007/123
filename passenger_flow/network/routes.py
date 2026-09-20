@@ -366,7 +366,6 @@ def _ride_edge_time_min(
         return max(0.0, ride)
     seg_forward = crowd_state.get("seg_forward", {})
     seg_reverse = crowd_state.get("seg_reverse", {})
-    stop_extra = crowd_state.get("stop_extra", {})
     extra_s = 0.0
     selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
     prev_stop = orig_pos
@@ -375,10 +374,7 @@ def _ride_edge_time_min(
         load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
         if load > 0.0:
             extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
-        arrival_stop = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i % len(seq["stops"])
-        if arrival_stop != prev_stop:
-            extra_s += float(stop_extra.get((seq.get("_seq_idx", -1), arrival_stop), 0.0))
-        prev_stop = arrival_stop
+        prev_stop = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i % len(seq["stops"])
     return max(0.0, ride + extra_s / 60.0)
 
 def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
