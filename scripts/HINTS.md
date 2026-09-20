@@ -158,7 +158,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P2-C Infrastructure** | 🟢 | `Ga/Qa` периодные; `headways[0..4]` проходят в assignment/KPI; `La()` decoded-polyline reuse и source-`onTrack` resolution перенесены при наличии geometry. Остаток — fallback без source geometry. |
 | **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
 | **P2-E Crowding/reliability** | 🟢 | `Fr → unev → Rr` участвует в first-leg, а transfer-leg использует `hs×ti` без double-count. Остаток — per-leg alternative branching из JS `co()`. |
-| **P3 Differential** | 🟡 | Comparator и golden snapshot готовы; нужен реальный browser-exported JS snapshot против Python на одинаковом входе. |
+| **P3 Differential** | 🟡 | Comparator/golden готовы, SHA расчётного bundle теперь pinned; остаётся реальный browser-exported JS snapshot против Python на одинаковом входе. |
 | **P4 Performance** | 🟡 | Spatial transfer index и O(1) ride timing кэшированы; следующий шаг — профиль полного OD assignment и устранение повторных edge-cost расчётов без изменения результатов. |
 | **P5 Hardening** | 🟢 | Входные данные и route graph валидируются; остаётся CI/packaging/runtime verification. |
 | **P6 Release parity** | ⏳ | Зафиксировать golden city cases, versioned bundle provenance и release gate на differential parity. |
@@ -176,6 +176,11 @@ P5 CI + packaging + runtime verification
         ↓
 P6 release parity gate
 ```
+### P3 parity update — bundle provenance
+
+`takt_reference_snapshot.json` теперь хранит Git blob SHA расчётного bundle.
+Regression вычисляет SHA1 Git-blob непосредственно из `scripts/bd956ff0a1875604740f7.js` и требует точного совпадения.
+Это не заменяет browser snapshot, но исключает сравнение golden-значений с незапланированно изменившимся JS bundle.
 ## P0 — выравнивание `passenger_flow` с текущим Takt
 
 После аудита `scripts/bd956ff0a1875604740f.js` Python-слой `passenger_flow` получил первый пакет parity-правок:
