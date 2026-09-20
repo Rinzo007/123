@@ -38,6 +38,7 @@ __all__ = [
     "load_takt_purposes",
     "write_takt_demand",
     "write_takt_purposes",
+    "write_takt_purposes_bundle",
     "zone_weights_from_streets",
 ]
 
@@ -236,6 +237,51 @@ def write_takt_purposes(
         json.dumps({"v": 2, "layers": layers, "commuteBaseT": []}),
         encoding="utf-8",
     )
+
+
+def write_takt_purposes_bundle(
+    purposes: TaktPurposes,
+    path: Path,
+) -> None:
+    """Записывает ``TaktPurposes`` без потери ``baseT`` и ``commuteBaseT``.
+
+    Это зеркальная операция к ``load_takt_purposes``: бинарные потоки
+    перекодируются в base64 float32 с теми же размерами и порядком пар.
+    """
+    layers: list[dict[str, Any]] = []
+    for layer in purposes.layers:
+        pairs = np.asarray(layer.pairs, dtype="<f4")
+        if pairs.ndim != 2 or pairs.shape[1] != 4:
+            raise OdMatrixError(f"Слой {layer.key!r}: pairs должны иметь форму [n,4]")
+        payload: dict[str, Any] = {
+            "t": layer.key,
+            "n": int(pairs.shape[0]),
+            "out": [float(v) for v in layer.out],
+            "ret": [float(v) for v in layer.ret],
+            "od": base64.b64encode(pairs.tobytes()).decode("ascii"),
+        }
+        if layer.base_time is not None:
+            base = np.asarray(layer.base_time, dtype="<f4")
+            if base.ndim != 2 or base.shape[1] != pairs.shape[0]:
+                raise OdMatrixError(
+                    f"Слой {layer.key!r}: base_time должен иметь форму [period,n]"
+                )
+            payload["baseT"] = [
+                base64.b64encode(base[i].tobytes()).decode("ascii")
+                for i in range(base.shape[0])
+            ]
+        layers.append(payload)
+    commute_base = None
+    if purposes.commute_base_time is not None:
+        commute = np.asarray(purposes.commute_base_time, dtype="<f4")
+        if commute.ndim != 2:
+            raise OdMatrixError("commute_base_time должен иметь форму [period,n]")
+        commute_base = [
+            base64.b64encode(commute[i].tobytes()).decode("ascii")
+            for i in range(commute.shape[0])
+        ]
+    payload = {"v": 2, "layers": layers, "commuteBaseT": commute_base or []}
+    Path(path).write_text(json.dumps(payload), encoding="utf-8")
 
 
 def load_demand_streets(path: str | Path) -> list[tuple[tuple[tuple[float, float], ...], float]]:
