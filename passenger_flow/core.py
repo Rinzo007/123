@@ -5,7 +5,7 @@
 поездок и накопление агрегатов, после чего результат собирается
 в ``FlowResult`` (см. ``assembly``).
 
-Дополнительные опции (по мотивам Takt, playtakt.app):
+Дополнительные опции (по мотивам Takt, playtakt.app) включены по умолчанию:
 - ``ModeChoiceConfig`` — конкуренция «транзит / авто / пешком / eBike / rest»:
   стоимости приводятся к обобщённым минутам, денежные элементы — через VOT;
 - ``periods`` — разложение OD-матрицы по периодам суток (out/ret);
@@ -48,13 +48,18 @@ from .base.models import (
     VehicleSpec,
     vehicle_spec_for_route_type,
 )
-from .base.takt import _TAKT_PERIOD_HOURS
+from .base.takt import TAKT_PERIODS, _TAKT_PERIOD_HOURS
 from .network.geometry import _find_nearest_stops, haversine_meters
 from .network.routes import _build_route_stop_sequence
 from .report.assembly import assemble_flow_result
 
 _LOGIT_TEMP = 10.0
 _DEFAULT_STOP_TIME_MIN = 2.0
+_DEFAULT_HEADWAY_MIN = 10.0
+_DEFAULT_MAX_TRANSFERS = 3
+_DEFAULT_WAIT_CROWDING_PER_100_MIN = 0.1
+_DEFAULT_MSA_MAX_ITERATIONS = 20
+_DEFAULT_MSA_GAP = 0.01
 
 
 class Reporter(Protocol):
@@ -671,12 +676,12 @@ def run_passenger_flow(
     walk_to_stop_min: float = 0.0,
     transfer_penalty_min: float = 10.0,
     transfer_radius_m: float = 800.0,
-    max_transfers: int = 0,
+    max_transfers: int = _DEFAULT_MAX_TRANSFERS,
     transfer_penalty_calc: str = "takt",
-    headway_min: float | None = None,
-    wait_crowding_per_100_min: float = 0.0,
+    headway_min: float | None = _DEFAULT_HEADWAY_MIN,
+    wait_crowding_per_100_min: float = _DEFAULT_WAIT_CROWDING_PER_100_MIN,
     transfer_wait_min: float | None = None,
-    periods: Sequence[Period] = (),
+    periods: Sequence[Period] = TAKT_PERIODS,
     mode_choice: ModeChoiceConfig | None = None,
     vehicle_specs: Mapping[str, VehicleSpec] | None = None,
     headway_by_route: Mapping[int, float] | None = None,
@@ -684,9 +689,9 @@ def run_passenger_flow(
     capex_amort_years: float = 30.0,
     reporter: Any = None,
     wait_calc: str = "takt",
-    include_reliability: bool = False,
-    msa_max_iterations: int | None = None,
-    msa_gap: float = 0.01,
+    include_reliability: bool = True,
+    msa_max_iterations: int | None = _DEFAULT_MSA_MAX_ITERATIONS,
+    msa_gap: float = _DEFAULT_MSA_GAP,
 ) -> FlowResult:
     """Выполняет расчёт пассажиропотока на маршрутах и остановках.
 
@@ -711,7 +716,7 @@ def run_passenger_flow(
     stop_time_min : float
         Среднее время проезда между соседними остановками (мин).
     logit_temp : float
-        Температура логит-модели (чем больше, тем равномернее распределение).
+        Унаследованный параметр API; основная модель выбора режима использует иерархию Takt.
     stop_search_radius_m : float
         Окно поиска остановок у зоны (м); итоговый доступ к остановке
         ограничен радиусом типа маршрута (``access_m``: bus 500 / tram 600 /
@@ -732,19 +737,18 @@ def run_passenger_flow(
         ``An``/``Za`` движка Takt): остановка маршрута A заменяется на остановку
         маршрута B с тем же id или координатами в радиусе.
     max_transfers : int
-        Максимальное число пересадок; до 3 пересадок (4 ножки) в Takt-поиске
-        с ограничением числа альтернатив.
+        Максимальное число пересадок; по умолчанию 3 (до 4 ножек) с ограничением числа альтернатив.
     headway_min : float | None
-        Интервал движения (мин). При заданном интервале ожидание выбирается
-        по ``wait_calc``; режим ``takt`` использует функцию Po из движка Takt.
+        Интервал движения (мин), по умолчанию 10.0. При заданном интервале ожидание
+        выбирается по ``wait_calc``; режим ``takt`` использует функцию Po.
     wait_crowding_per_100_min : float
-        Совместимый параметр включения feedback перегрузки. При значении
-        > 0 рассчитывается сегментная и остановочная crowding-коррекция Takt.
+        Параметр feedback перегрузки; по умолчанию 0.1 мин на 100 условных пассажиров.
+        При значении > 0 рассчитывается сегментная и остановочная crowding-коррекция Takt.
     transfer_wait_min : float | None
         Ожидание на пересадочной посадке (мин); при None равно ``wait_time_min``.
     periods : Sequence[Period]
-        Периоды суток для разложения OD по направлениям (out/ret). При
-        пустой последовательности выполняется один невзвешенный проход.
+        Периоды суток для разложения OD по направлениям (out/ret). По умолчанию
+        используются пять периодов Takt; пустая последовательность явно отключает разбиение.
     mode_choice : ModeChoiceConfig | None
         Конкуренция «транзит / авто / пешком / eBike». При ``None`` используется
         ``ModeChoiceConfig()`` с дефолтами Takt; при переданном ``population``
@@ -754,14 +758,11 @@ def run_passenger_flow(
         или ``takt`` (``headway/2`` при headway <= 12 мин, иначе
         ``6 + 0.1 × headway``).
     include_reliability : bool
-        Добавлять к ожиданию штраф надёжности расписания по типу
-        подвижного состава (``max(20 с, hypot(jitter_s, 0.4 × headway_с))``,
-        по модели Takt). Требует заданного ``headway_min``.
+        Добавлять к ожиданию штраф надёжности расписания; по умолчанию True.
+        Используется ``max(20 с, hypot(jitter_s, 0.4 × headway_с))`` и требует headway.
     msa_max_iterations : int | None
-        Число итераций MSA (метод последовательных усреднений): нагрузка
-        каждой итерации смешивается с предыдущими шагом 1/итерация, остановка
-        по разрыву ``msa_gap``. Требует ``wait_crowding_per_100_min > 0``.
-        При None — стандартные один-два прохода (без MSA).
+        Число итераций MSA; по умолчанию 20. Нагрузка каждой итерации смешивается
+        с предыдущими шагом 1/итерация, остановка по разрыву ``msa_gap``.
     msa_gap : float
         Относительный разрыв нагрузок маршрутов для остановки MSA (в Takt 1%).
     reporter : Reporter | None
@@ -789,8 +790,8 @@ def run_passenger_flow(
                 "population должен содержать конечные неотрицательные значения"
             )
 
-    # Выбор режима «транзит / авто / пешком» включён по умолчанию (в движке
-    # Takt он выполняется всегда), дефолты ModeChoiceConfig = va/wa/ga/Pa.
+    # Выбор режима Takt всегда включён: транзит / авто / пешком / eBike / rest.
+    # При отсутствии конфигурации используются дефолты ModeChoiceConfig.
     if mode_choice is None:
         mode_choice = ModeChoiceConfig()
 
