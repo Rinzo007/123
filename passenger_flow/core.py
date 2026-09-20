@@ -429,6 +429,12 @@ def _merge_pass_aggregates(
             target[sname] = target.get(sname, 0.0) + sval
     for key, val in pass_agg.get("seg_totals", {}).items():
         accum["seg_totals"][key] += val
+    for key, val in pass_agg.get("seg_forward_totals", {}).items():
+        accum["seg_forward_totals"][key] += val
+    for key, val in pass_agg.get("seg_reverse_totals", {}).items():
+        accum["seg_reverse_totals"][key] += val
+    for key, val in pass_agg.get("seq_stop_totals", {}).items():
+        accum["seq_stop_totals"][key] += val
     accum["assigned_trips"] += pass_agg["assigned_trips"]
     accum["car_trips"] += pass_agg["car_trips"]
     accum["walk_trips"] += pass_agg["walk_trips"]
@@ -451,6 +457,9 @@ def _empty_accumulator() -> dict[str, Any]:
         "stop_totals": defaultdict(_empty_stop_entry),
         "route_stop_totals": defaultdict(dict),
         "seg_totals": defaultdict(float),
+        "seg_forward_totals": defaultdict(float),
+        "seg_reverse_totals": defaultdict(float),
+        "seq_stop_totals": defaultdict(float),
     }
 
 
@@ -913,6 +922,16 @@ def run_passenger_flow(
                 capex_factor=capex_factor,
                 capex_amort_years=capex_amort_years,
                 seg_totals=dict(accum["seg_totals"]) if accum["seg_totals"] else None,
+                seg_forward_totals=(
+                    dict(accum["seg_forward_totals"])
+                    if accum["seg_forward_totals"]
+                    else None
+                ),
+                seg_reverse_totals=(
+                    dict(accum["seg_reverse_totals"])
+                    if accum["seg_reverse_totals"]
+                    else None
+                ),
             )
         )
     result = assemble_flow_result(
