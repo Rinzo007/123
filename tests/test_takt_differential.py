@@ -25,3 +25,11 @@ def test_differential_allows_field_specific_tolerance() -> None:
     )
     assert len(differences) == 1
     assert differences[0].path == "$.strict"
+
+def test_differential_matches_array_descendants_with_dot_wildcard() -> None:
+    differences = compare_snapshots(
+        {"values": [1.0]},
+        {"values": [1.001]},
+        tolerance_rules={"$.values.*": [0.01, 0.0]},
+    )
+    assert differences == []
