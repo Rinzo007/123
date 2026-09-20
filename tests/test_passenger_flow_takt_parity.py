@@ -69,6 +69,16 @@ def test_core_additional_options_enabled_by_default() -> None:
     assert sig.parameters["msa_gap"].default == 0.01
 
 
+def test_od_uses_one_takt_model() -> None:
+    import inspect
+
+    import od
+    from od.builders import build_purpose_od
+
+    assert not hasattr(od, "build_gravity_od")
+    assert "engine" not in inspect.signature(build_purpose_od).parameters
+
+
 def test_takt_defaults_are_the_reference_defaults() -> None:
     mode = ModeChoiceConfig()
     assert math.isclose(mode.car_no_car_share, 0.35)
