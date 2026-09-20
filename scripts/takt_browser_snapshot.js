@@ -76,7 +76,7 @@ const bundleStart = bundle.indexOf("async function Bs(");
 const odNeedle = "et.fareJ[at]=uo;";
 const odIndex = bundle.indexOf(odNeedle, bundleStart);
 if (odIndex < 0) throw new Error("Could not locate initialized Takt fare block");
-const odDebugNeedle = "const _r=It[at],fe=_r&255";
+const odDebugNeedle = "for(;bt.length<fe;)bt.push";
 const odDebugIndex = bundle.indexOf(odDebugNeedle, odIndex);
 if (odDebugIndex < 0) throw new Error("Could not locate initialized Takt utility block");
 const debugNeedle = "const Xt=at*k+G;";
