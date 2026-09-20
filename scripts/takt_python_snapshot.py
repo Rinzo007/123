@@ -84,6 +84,7 @@ def main() -> int:
         od,
         zones,
         base_time_s=base_time_s,
+        car_base_time_s=np.ones((2, 2), dtype=np.float64),
         periods=TAKT_PERIODS,
         headway_min=10.0,
         headway_by_route={1: 10.0},
@@ -122,21 +123,49 @@ def main() -> int:
             "revenueDay": float(result.revenue_day),
             "opexDay": float(result.opex_day),
             "modeSplit": {
-                "transit": (
-                    float(result.assigned_trips / result.total_trips)
-                    if result.total_trips > 0 else 0.0
+                "transit": float(
+                    result.assigned_trips
+                    / max(
+                        result.assigned_trips
+                        + result.car_trips
+                        + result.walk_trips
+                        + result.two_wheel_trips
+                        + result.rest_trips,
+                        1e-12,
+                    )
                 ),
-                "car": (
-                    float(result.car_trips / result.total_trips)
-                    if result.total_trips > 0 else 0.0
+                "car": float(
+                    result.car_trips
+                    / max(
+                        result.assigned_trips
+                        + result.car_trips
+                        + result.walk_trips
+                        + result.two_wheel_trips
+                        + result.rest_trips,
+                        1e-12,
+                    )
                 ),
-                "walk": (
-                    float(result.walk_trips / result.total_trips)
-                    if result.total_trips > 0 else 0.0
+                "walk": float(
+                    (result.walk_trips + result.two_wheel_trips)
+                    / max(
+                        result.assigned_trips
+                        + result.car_trips
+                        + result.walk_trips
+                        + result.two_wheel_trips
+                        + result.rest_trips,
+                        1e-12,
+                    )
                 ),
-                "rest": (
-                    float(result.rest_trips / result.total_trips)
-                    if result.total_trips > 0 else 0.0
+                "rest": float(
+                    result.rest_trips
+                    / max(
+                        result.assigned_trips
+                        + result.car_trips
+                        + result.walk_trips
+                        + result.two_wheel_trips
+                        + result.rest_trips,
+                        1e-12,
+                    )
                 ),
             },
             "line": {
