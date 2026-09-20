@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from scipy import sparse
 
-from ..passenger_flow.models import Period, Purpose
+from passenger_flow.models import Period, Purpose
 
 __all__ = [
     "_KILOMETERS_PER_DEGREE",
