@@ -99,6 +99,8 @@ def _run_msa_period(
     gap_tol: float,
     seq_headway_min: Mapping[int, float] | None = None,
     seq_jitter_s: Mapping[int, float] | None = None,
+    no_car_shares: np.ndarray | None = None,
+    wait_calc: str = "takt",
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -136,6 +138,8 @@ def _run_msa_period(
             zones=zones,
             seq_headway_min=seq_headway_min,
             seq_jitter_s=seq_jitter_s,
+            no_car_shares=no_car_shares,
+            wait_calc=wait_calc,
         )
         raw = agg["route_totals"]
         alpha = 1.0 / iteration
