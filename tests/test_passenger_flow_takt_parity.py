@@ -127,8 +127,7 @@ def test_mode_choice_golden_value_and_sum() -> None:
         case["transit_s"],
         case["fare_eur"],
     )
-    assert np.allclose(got[:4], case["expected"], rtol=1e-10, atol=1e-12)
-    assert math.isclose(got[4], 0.0, abs_tol=1e-12)
+    assert np.allclose(got, case["expected"], rtol=1e-10, atol=1e-12)
     assert math.isclose(sum(got), 1.0, rel_tol=1e-12, abs_tol=1e-12)
 
 
