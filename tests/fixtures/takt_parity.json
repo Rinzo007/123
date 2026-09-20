@@ -1,0 +1,75 @@
+{
+  "wait": {
+    "headways_min": [
+      6,
+      12,
+      15
+    ],
+    "expected_seconds": [
+      180,
+      360,
+      450
+    ]
+  },
+  "fare": {
+    "dist_m": [
+      0,
+      10000,
+      30000
+    ],
+    "expected_eur": [
+      0.6,
+      1.8,
+      3
+    ]
+  },
+  "hold_probability": {
+    "wait_s": 60,
+    "halfwidth_s": 90,
+    "expected": 0.7566990873448255
+  },
+  "route_probabilities": {
+    "costs_s": [
+      600,
+      900
+    ],
+    "expected": [
+      0.6,
+      0.4
+    ]
+  },
+  "mode_choice": {
+    "od_meters": 5000,
+    "transit_s": 1200,
+    "fare_eur": 1.2,
+    "expected": [
+      0.4996622578036902,
+      0.4881921420934172,
+      0.00009963903418153353,
+      0.012045961068710887
+    ]
+  },
+  "no_car_density": {
+    "population": [
+      100,
+      1000,
+      10000
+    ],
+    "expected": [
+      0.10714658,
+      0.19481196,
+      0.28247734
+    ]
+  },
+  "route_timing": {
+    "cum_t_s": [
+      0,
+      120,
+      300
+    ],
+    "dwell_s": 20,
+    "from_pos": 0,
+    "to_pos": 2,
+    "expected_min": 5.333333333333333
+  }
+}
