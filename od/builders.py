@@ -14,9 +14,9 @@ from typing import Any
 import numpy as np
 from scipy import sparse
 
-from ..passenger_flow.base.takt import TAKT_PERIODS as _TAKT_PERIODS_SLOTS
-from ..passenger_flow.models import PURPOSE_DEFAULTS, Period, Purpose
-from ..passenger_flow.takt import (
+from passenger_flow.base.takt import TAKT_PERIODS as _TAKT_PERIODS_SLOTS
+from passenger_flow.models import PURPOSE_DEFAULTS, Period, Purpose
+from passenger_flow.takt import (
     _TAKT_M_PER_DEG_LAT,
     _TAKT_M_PER_DEG_LON_EQUATOR,
 )
