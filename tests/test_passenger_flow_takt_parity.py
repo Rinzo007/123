@@ -31,6 +31,7 @@ from passenger_flow.algorithm.kpis import (
     _build_line_kpis,
     _sequence_capital_cost_eur,
     _shared_capacity_min_headways,
+    _period_service_metrics,
 )
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
@@ -433,6 +434,38 @@ def test_multi_leg_search_reaches_four_legs() -> None:
 
 
 
+def test_route_sequence_preserves_per_period_headways() -> None:
+    from types import SimpleNamespace
+    stops = [
+        SimpleNamespace(id=1, name="A", latitude=52.0, longitude=4.0),
+        SimpleNamespace(id=2, name="B", latitude=52.01, longitude=4.01),
+    ]
+    direction = SimpleNamespace(name="D", stops=stops)
+    route = SimpleNamespace(
+        ok=True, route_id=510, name="bus 510", route_type="bus",
+        directions=[direction], headways=[5.0, 10.0, 20.0, 30.0, 40.0],
+    )
+    seq = _build_route_stop_sequence([route])[0]
+    assert seq["headways"] == (5.0, 10.0, 20.0, 30.0, 40.0)
+
+
+def test_period_fleet_uses_maximum_period_fleet() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["headways"] = (5.0, 10.0, 20.0, 30.0, 40.0)
+    metrics = _period_service_metrics(
+        seq, __import__("passenger_flow.base.models", fromlist=["VehicleSpec"]).VEHICLE_DEFAULTS["bus"],
+        tuple(({}, h) for h in (2.0, 3.0, 6.0, 4.0, 5.0)),
+        10.0, None,
+    )
+    assert metrics[0] == 3.0
+    expected_runs = 2.0 * (2*60/5 + 3*60/10 + 6*60/20 + 4*60/30 + 5*60/40)
+    one_way_km = sum(
+        haversine_meters(
+            seq["stops"][i]["lat"], seq["stops"][i]["lon"],
+            seq["stops"][i+1]["lat"], seq["stops"][i+1]["lon"],
+        ) / 1000.0 for i in range(2)
+    )
+    assert math.isclose(metrics[1], expected_runs * one_way_km, rel_tol=1e-12, abs_tol=1e-12)
 def test_route_sequence_preserves_row_specific_takt_speed() -> None:
     from types import SimpleNamespace
 
