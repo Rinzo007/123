@@ -764,17 +764,33 @@ def _enumerate_journeys(
     # использование уже пройденной линии, как старый transfer enumerator.
     heap: list[tuple[float, int, int, int, int, tuple[tuple[int,int,int], ...], frozenset[int]]] = []
     best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
+    first_wait_by_seq: dict[int, float] = {}
+    for seq_idx, _stop_idx, _orig_pos in origins:
+        if seq_idx in first_wait_by_seq:
+            continue
+        headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
+        first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
+
+    transfer_cache: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+        key = (seq_idx, pos)
+        cached = transfer_cache.get(key)
+        if cached is not None:
+            return cached
+        cached = tuple(
+            _transfer_targets(seq_idx, pos, route_stop_sequences, set(), transfer_radius_m)
+        )
+        transfer_cache[key] = cached
+        return cached
 
     for seq_idx, _stop_idx, orig_pos in origins:
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
-        headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
-        wait = _boarding_wait_min(headway, wait_time_min, wait_calc)
         key = (seq_idx, int(orig_pos), 0, int(orig_pos), frozenset((seq_idx,)))
-        state = (wait, seq_idx, int(orig_pos), 0, int(orig_pos), tuple(), frozenset((seq_idx,)))
+        state = (0.0, seq_idx, int(orig_pos), 0, int(orig_pos), tuple(), frozenset((seq_idx,)))
         prior = best.get(key)
-        if prior is None or wait < prior - 1e-12:
-            best[key] = wait
+        if prior is None:
+            best[key] = 0.0
             heapq.heappush(heap, state)
 
     journeys: list[_Journey] = []
@@ -797,7 +813,8 @@ def _enumerate_journeys(
             final_legs = legs + ((seq_idx, leg_start, d_pos),)
             if not final_legs:
                 continue
-            total = cost + ride + walk_to_stop_min
+            first_seq = final_legs[0][0]
+            total = cost + ride + walk_to_stop_min + first_wait_by_seq.get(first_seq, 0.0)
             signature = final_legs
             if signature not in seen_journeys:
                 seen_journeys.add(signature)
@@ -826,9 +843,9 @@ def _enumerate_journeys(
 
         # Transfer from the current stop. _transfer_targets also preserves
         # the Takt nearest-stop-per-target-line rule.
-        for seq_b, ta, tb in _transfer_targets(
-            seq_idx, pos, route_stop_sequences, set(used), transfer_radius_m
-        ):
+        for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
+            if seq_b in used:
+                continue
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _route_ride_time_min(seq, leg_start, ta_pos)
