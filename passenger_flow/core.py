@@ -53,7 +53,7 @@ from .base.models import (
 )
 from .base.takt import TAKT_PERIODS, _TAKT_PERIOD_HOURS
 from .network.geometry import _find_nearest_stops, haversine_meters
-from .network.routes import _build_route_stop_sequence
+from .network.routes import _build_route_stop_sequence, _build_transfer_edge_index
 from .report.assembly import assemble_flow_result
 
 _LOGIT_TEMP = 10.0
@@ -596,6 +596,7 @@ class _AssignContext:
     wait_calc: str
     vehicle_specs: Mapping[str, VehicleSpec] | None
     car_period_multipliers: tuple[float, ...]
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
 
     def _common_kwargs(self) -> dict[str, Any]:
         return {
@@ -615,6 +616,7 @@ class _AssignContext:
             "seq_headway_min": self.seq_headway_min,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
+            "transfer_index": self.transfer_index,
         }
 
     def assign(
@@ -642,7 +644,8 @@ class _AssignContext:
                 if period_index < len(self.car_period_multipliers)
                 else 1.0
             ),
-            **self._common_kwargs(),
+            transfer_index=self.transfer_index,
+            **{k: v for k, v in self._common_kwargs().items() if k != "transfer_index"},
         )
 
     def msa(
@@ -1003,6 +1006,7 @@ def run_passenger_flow(
         wait_calc=wait_calc,
         vehicle_specs=vehicle_specs,
         car_period_multipliers=car_period_multipliers,
+        transfer_index=_build_transfer_edge_index(route_sequences, transfer_radius_m),
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
