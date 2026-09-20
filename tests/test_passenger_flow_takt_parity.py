@@ -216,6 +216,10 @@ def test_mode_choice_golden_value_and_sum() -> None:
     assert math.isclose(sum(got), 1.0, rel_tol=1e-12, abs_tol=1e-12)
 
 
+def test_route_sequence_caches_segment_movement_times() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    assert seq["segment_time_s"] == (60.0, 60.0)
+
 def test_explicit_cumt_drives_direct_journey_time() -> None:
     case = FIXTURE["route_timing"]
     sequence = {
