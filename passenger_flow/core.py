@@ -400,6 +400,7 @@ def _validate_flow_inputs(
     periods: Sequence[Period],
     mode_choice: ModeChoiceConfig,
     base_time_s: np.ndarray | None,
+    car_base_time_s: np.ndarray | None,
     od_sparse: Any,
     stop_search_radius_m: float,
     stop_time_min: float,
@@ -424,6 +425,11 @@ def _validate_flow_inputs(
         base_time_s,
         n_zones,
         len(periods) if periods else 1,
+        int(np.count_nonzero(matrix > 0.0)),
+    )
+    _validate_car_base_time(
+        car_base_time_s,
+        n_zones,
         int(np.count_nonzero(matrix > 0.0)),
     )
     _validate_sparse_od(od_sparse, n_zones)
@@ -733,6 +739,7 @@ class _AssignContext:
     zones: Zones
     no_car_shares: np.ndarray | None
     base_time_s: np.ndarray | None
+    car_base_time_s: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
     seq_headway_periods: tuple[Mapping[int, float] | None, ...]
@@ -763,6 +770,7 @@ class _AssignContext:
             "zones": self.zones,
             "no_car_shares": self.no_car_shares,
             "base_time_s": self.base_time_s,
+            "car_base_time_s": self.car_base_time_s,
             "seq_headway_min": headway,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
@@ -916,6 +924,7 @@ def run_passenger_flow(
     *,
     population: np.ndarray | None = None,
     base_time_s: np.ndarray | None = None,
+    car_base_time_s: np.ndarray | None = None,
     od_sparse: Any = None,
     stop_time_min: float = _DEFAULT_STOP_TIME_MIN,
     logit_temp: float = _LOGIT_TEMP,
@@ -1066,6 +1075,7 @@ def run_passenger_flow(
         periods=periods,
         mode_choice=mode_choice,
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
+        car_base_time_s=None if car_base_time_s is None else np.asarray(car_base_time_s, dtype=np.float64),
         od_sparse=od_sparse,
         stop_search_radius_m=stop_search_radius_m,
         stop_time_min=stop_time_min,
@@ -1162,6 +1172,7 @@ def run_passenger_flow(
         zones=zones,
         no_car_shares=_takt_no_car_shares(mode_choice, population_arr),
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
+        car_base_time_s=None if car_base_time_s is None else np.asarray(car_base_time_s, dtype=np.float64),
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
         seq_headway_periods=tuple(
