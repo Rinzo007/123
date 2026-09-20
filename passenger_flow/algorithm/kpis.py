@@ -21,22 +21,36 @@ from ..network.geometry import haversine_meters
 def _route_cycle(
     seq: dict[str, Any], spec: VehicleSpec
 ) -> tuple[float, float]:
-    """Оборот маршрута: (длина туда+обратно, км; время оборота, мин).
-
-    Время: движение со скоростью спецификации + ``dwell_s`` на остановку
-    + ``turnback_s`` на каждой конечной.
-    """
+    """Оборот Takt: (полный оборот км, полный оборот мин)."""
     stops = seq["stops"]
-    meters = 0.0
+    closed = bool(seq.get("closed"))
+    one_way_km = 0.0
     for i in range(len(stops) - 1):
-        meters += haversine_meters(
-            stops[i]["lat"], stops[i]["lon"], stops[i + 1]["lat"], stops[i + 1]["lon"]
-        )
-    run_s = meters / max(spec.speed_kmh / 3.6, 0.01)
-    dwell = len(stops) * spec.dwell_s
-    cycle_min = 2.0 * (run_s + dwell + 2.0 * spec.turnback_s) / 60.0
-    cycle_km = 2.0 * meters / 1000.0
-    return cycle_km, cycle_min
+        one_way_km += haversine_meters(
+            stops[i]["lat"], stops[i]["lon"],
+            stops[i + 1]["lat"], stops[i + 1]["lon"],
+        ) / 1000.0
+    if closed and len(stops) >= 2:
+        one_way_km += haversine_meters(
+            stops[-1]["lat"], stops[-1]["lon"],
+            stops[0]["lat"], stops[0]["lon"],
+        ) / 1000.0
+
+    cum = seq.get("cum_t_s") or []
+    run_s = (
+        float(cum[-1])
+        if cum
+        else one_way_km * 1000.0 / max(spec.speed_kmh / 3.6, 0.01)
+    )
+    open_count = int(sum(bool(v) for v in seq.get("open", [True] * len(stops))))
+    j_s = run_s + open_count * spec.dwell_s
+    if closed:
+        cycle_s = j_s + 300.0
+        cycle_km = one_way_km
+    else:
+        cycle_s = 2.0 * j_s + 600.0
+        cycle_km = 2.0 * one_way_km
+    return cycle_km, cycle_s / 60.0
 
 def _build_line_kpis(
     route_sequences: list[dict[str, Any]],
@@ -80,8 +94,12 @@ def _build_line_kpis(
         runs_day = 1440.0 / max(float(hv), 1e-6)
         cycle_km, cycle_min = _route_cycle(seq, spec)
         fleet = math.ceil(cycle_min / max(float(hv), 1e-6))
+        if seq.get("closed") and seq.get("both_ways"):
+            fleet *= 2
         share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
         capacity = spec.capacity
+        one_way_km = cycle_km if seq.get("closed") else cycle_km / 2.0
+        capital_cost_eur = one_way_km * float(spec.capex_eur_per_km) * capex_factor
 
         # Пассажиро-километры и классы: по сегментам направления при наличии
         # seg_totals (Takt: segP → passengerKm/классы по nt сегмента).
@@ -90,13 +108,13 @@ def _build_line_kpis(
         max_nt = 0.0
         if seg_totals is not None:
             stops = seq["stops"]
+            seg_count = len(stops) if seq.get("closed") else max(0, len(stops) - 1)
             seg_km = [
                 haversine_meters(
                     stops[i]["lat"], stops[i]["lon"],
-                    stops[i + 1]["lat"], stops[i + 1]["lon"],
-                )
-                / 1000.0
-                for i in range(len(stops) - 1)
+                    stops[(i + 1) % len(stops)]["lat"], stops[(i + 1) % len(stops)]["lon"],
+                ) / 1000.0
+                for i in range(seg_count)
             ]
             for seg_i, km in enumerate(seg_km):
                 seg_pax = float(seg_totals.get((seq.get("_seq_idx", -1), seg_i), 0.0))
@@ -139,13 +157,14 @@ def _build_line_kpis(
                 cycle_min=cycle_min,
                 fleet=fleet,
                 veh_km_day=cycle_km * runs_day,
-                opex_day=cycle_km * runs_day * spec.opex_per_veh_km,
+                opex_day=(
+                    cycle_km * runs_day * spec.opex_per_veh_km
+                    + fleet * spec.veh_cost_day
+                ),
                 revenue_day=revenue_day * share,
+                capital_cost_eur=capital_cost_eur,
                 capex_day=(
-                    cycle_km
-                    / 2.0
-                    * spec.capex_eur_per_km
-                    * capex_factor
+                    capital_cost_eur
                     / max(365.0 * max(float(capex_amort_years), 0.01), 1.0)
                 ),
                 crowding=max_nt,
