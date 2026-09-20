@@ -197,6 +197,7 @@ def _run_msa_period(
     base_time_s: np.ndarray | None = None,
     period_index: int = 0,
     car_period_multiplier: float = 1.0,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -242,6 +243,7 @@ def _run_msa_period(
             base_time_s=base_time_s,
             period_index=period_index,
             crowd_state=crowd_state,
+            transfer_index=transfer_index,
             car_period_multiplier=car_period_multiplier,
         )
         raw = agg["route_totals"]
