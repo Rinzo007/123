@@ -265,8 +265,10 @@ def _journey_crowd_extra(
     wait_extra: Mapping[int, float] | None = None,
     period_index: int = 0,
     seq_jitter_s: Mapping[int, float] | None = None,
+    include_first_leg_wait: bool = True,
+    include_wait_extra: bool = True,
 ) -> np.ndarray:
-    """Дополнительное ожидание по Takt Fr→unev→Rr, без double-count hs."""
+    """Additional Takt crowd/reliability feedback in minutes."""
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
     seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
     unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
@@ -282,9 +284,10 @@ def _journey_crowd_extra(
             loads = seg_forward if forward else seg_reverse
             lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
             if leg_no == 0:
-                wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
-                unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
-                extra_s += wait_s * (unev * lf - 1.0)
+                if include_first_leg_wait:
+                    wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
+                    unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
+                    extra_s += wait_s * (unev * lf - 1.0)
             else:
                 prev_seq, _prev_a, prev_b = journey.legs[leg_no - 1]
                 prev_stop = route_sequences[prev_seq]["stops"][prev_b]
@@ -300,8 +303,9 @@ def _journey_crowd_extra(
                     seq_jitter_s=seq_jitter_s or {},
                 )
                 extra_s += float(transfer_wait_min) * 60.0 * (lf - 1.0)
-        for seq_idx, _a, _b in journey.legs:
-            extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
+        if include_wait_extra:
+            for seq_idx, _a, _b in journey.legs:
+                extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
         result[jidx] = max(0.0, extra_s / 60.0)
     return result
 
