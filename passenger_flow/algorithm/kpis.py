@@ -490,6 +490,7 @@ def _build_line_kpis(
     )
     station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals, vehicle_specs)
     shared_capital_sections: set[tuple[str, str, str]] = set()
+    geometry_reuse_edges = _geometry_reuse_edges(route_sequences)
     for seq in route_sequences:
         rid = seq["route_id"]
         if rid in seen:
@@ -512,7 +513,12 @@ def _build_line_kpis(
         opex_day = (variable_opex_day + fleet * float(spec.veh_cost_day)) * occupancy_factor
         share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
         capital_cost_eur = _sequence_capital_cost_eur(
-            seq, spec, capex_factor, shared_capital_sections, atomic_sections
+            seq,
+            spec,
+            capex_factor,
+            shared_capital_sections,
+            atomic_sections,
+            geometry_reuse_edges,
         )
         # Пассажиро-километры и классы: по сегментам направления при наличии
         # seg_totals (Takt: segP → passengerKm/классы по nt сегмента).
