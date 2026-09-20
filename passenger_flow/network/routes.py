@@ -305,6 +305,7 @@ def _build_route_stop_sequence(
         spec = vehicle_spec_for_route_type(route.route_type)
         access_m = float(spec.access_m)
         route_type_key = str(route.route_type).strip().lower()
+        route_capacity = _optional_value(route, ("capacity",))
         route_type_label = type_label(route.route_type)
         fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
         explicit_route_row = _optional_value(route, ("row", "track_row"))
@@ -429,6 +430,13 @@ def _build_route_stop_sequence(
                     "route_type_key": route_type_key,
                     "headways": headways,
                     "access_m": access_m,
+                    "capacity": (
+                        float(route_capacity)
+                        if route_capacity is not None
+                        and math.isfinite(float(route_capacity))
+                        and float(route_capacity) > 0.0
+                        else None
+                    ),
                     "row": route_row,
                     "row_explicit": explicit_route_row is not None,
                     "rows": _optional_value(direction, ("rows", "track_rows")) if _optional_value(direction, ("rows", "track_rows")) is not None else route_rows,
