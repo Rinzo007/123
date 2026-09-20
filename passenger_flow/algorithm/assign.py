@@ -193,6 +193,7 @@ def _apply_car_only_modes(
     no_car_share: float | None = None,
     rest_s: float | None = None,
     car_period_multiplier: float = 1.0,
+    car_base_time_s: float | None = None,
 ) -> None:
     """Fallback без транзитного пути: авто, пешком и (возможно) eBike.
 
@@ -209,7 +210,7 @@ def _apply_car_only_modes(
         0.0,
         rest_s=rest_s,
         no_car_share=no_car_share,
-        road_time_s=rest_s,
+        road_time_s=car_base_time_s,
         car_period_multiplier=car_period_multiplier,
     )
     totals.car_trips += trips * car_s
@@ -228,6 +229,7 @@ def _split_transit_trips(
     base_time_s: float | None,
     no_car_share: float | None = None,
     car_period_multiplier: float = 1.0,
+    car_base_time_s: float | None = None,
 ) -> float:
     """Считает mode shares по Takt и возвращает число транзитных поездок.
 
@@ -245,7 +247,7 @@ def _split_transit_trips(
         fare_eur,
         rest_s=base_time_s,
         no_car_share=no_car_share,
-        road_time_s=base_time_s,
+        road_time_s=car_base_time_s,
         car_period_multiplier=car_period_multiplier,
     )
     totals.car_trips += trips * car_s
@@ -255,6 +257,22 @@ def _split_transit_trips(
     transit_trips = trips * transit_share
     totals.fare_revenue += transit_trips * fare_eur
     return transit_trips
+
+
+def _car_base_time_for_pair(
+    car_base_time_s: np.ndarray | None,
+    pair_index: int,
+    zi: int,
+    zj: int,
+) -> float | None:
+    """Resolve Takt OD fourth-field car base time."""
+    if car_base_time_s is None:
+        return None
+    if car_base_time_s.ndim == 1:
+        value = float(car_base_time_s[pair_index])
+    else:
+        value = float(car_base_time_s[zi, zj])
+    return value if np.isfinite(value) and value >= 0.0 else None
 
 
 def _journey_crowd_extra(
@@ -578,6 +596,7 @@ def _assign_od(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     car_period_multiplier: float = 1.0,
+    car_base_time_s: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -599,6 +618,7 @@ def _assign_od(
             continue
         totals.period_total += trips
         road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
+        car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
 
         origin_stops = _line_access_stops(
             zone_nearest.get(zi, []), route_sequences
@@ -619,6 +639,7 @@ def _assign_od(
                 ),
                 rest_s=road_time_s,
                 car_period_multiplier=car_period_multiplier,
+                car_base_time_s=car_base_time_pair_s,
             )
             continue
 
@@ -701,6 +722,7 @@ def _assign_od(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
                 car_period_multiplier=car_period_multiplier,
+                car_base_time_s=car_base_time_pair_s,
             )
         else:
             transit_trips = trips
