@@ -282,13 +282,13 @@ def _journey_crowd_extra(
                     float(seg_forward.get((seq_idx, first_seg), 0.0)),
                     float(seg_reverse.get((seq_idx, first_seg), 0.0)),
                 )
-                    if lf > 1.0:
-                        base_wait_s = _takt_po_seconds(
-                            float(seq_headway_min[seq_idx])
-                        )
-                        extra_s += base_wait_s * (
-                            _takt_crowding_wait_mult(lf) - 1.0
-                        )
+                if lf > 1.0:
+                    base_wait_s = _takt_po_seconds(
+                        float(seq_headway_min[seq_idx])
+                    )
+                    extra_s += base_wait_s * (
+                        _takt_crowding_wait_mult(lf) - 1.0
+                    )
         result[jidx] = extra_s / 60.0
     return result
 
