@@ -246,6 +246,7 @@ def _journey_crowd_extra(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     seq_headway_min: Mapping[int, float] | None,
     wait_extra: Mapping[int, float] | None = None,
+    period_index: int = 0,
 ) -> np.ndarray:
     """Дополнительное время ожидания по Takt Fr→unev→Rr."""
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
@@ -264,7 +265,7 @@ def _journey_crowd_extra(
             lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
             wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
             if leg_no == 0:
-                unev = max(1.0, float(unreliability.get((seq_idx, 0), 1.0)))
+                unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
                 extra_s += wait_s * (unev * lf - 1.0)
             else:
                 extra_s += wait_s * (lf - 1.0)
@@ -525,6 +526,7 @@ def _assign_od(
             crowd_state,
             seq_headway_min,
             wait_extra=wait_extra,
+            period_index=period_index,
         )
 
         if mode is not None:
