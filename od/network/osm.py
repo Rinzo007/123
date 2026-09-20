@@ -8,12 +8,16 @@ Overpass/Overture способы приводятся к единому форм
 from __future__ import annotations
 
 import itertools
+import os
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import networkx as nx
 import numpy as np
+from scipy import sparse
+from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 from ...cache import JsonCache
@@ -26,6 +30,7 @@ from ..model import (
 )
 
 __all__ = [
+    "OD_ROADS_CACHE_ENTRY_BYTES",
     "build_road_graph",
     "euclidean_costs",
     "fetch_road_ways",
@@ -60,6 +65,10 @@ _ROAD_SPEED_KMH = {
 _OD_ROAD_CLASSES: frozenset[str] = frozenset(_ROAD_SPEED_KMH)
 _FALLBACK_SPEED_KMH = 30.0
 _OD_CACHE_KIND = "od_roads"
+
+# Кэш дорог города — набор way-геометрий; у крупных городов он не влезает
+# в общий лимит записи JsonCache (8 МБ), поэтому для kind задан свой потолок.
+OD_ROADS_CACHE_ENTRY_BYTES = 512 * 1024 * 1024
 
 # Округление узлов графа: ~0.1 м по широте. Позволяет склеивать координаты
 # пересечений, различающиеся лишь хвостом float, не сливая соседние полосы.
@@ -98,16 +107,6 @@ def ways_from_overpass(data: Any) -> list[dict[str, Any]]:
     return ways
 
 
-class _ClassFallback:
-    """Возвращает класс дороги из gdf-строки Overture с fallback на default."""
-
-    def __init__(self, default: str) -> None:
-        self._default = default
-
-    def get(self, class_value: Any) -> str:
-        return str(class_value) if class_value else self._default
-
-
 def ways_from_overture(gdf: Any) -> list[dict[str, Any]]:
     """Преобразует GeoDataFrame Overture (segment) в формат ``{highway, coords}``.
 
@@ -118,34 +117,38 @@ def ways_from_overture(gdf: Any) -> list[dict[str, Any]]:
     """
     if gdf is None or len(gdf) == 0:
         return []
-    fallback = _ClassFallback("road")
     class_col = "class" if "class" in gdf.columns else None
     ways: list[dict[str, Any]] = []
-    for _, row in gdf.iterrows():
-        geometry = row.geometry
-        if geometry is None or geometry.is_empty:
+    # Прямой обход геометрий без iterrows: для больших городов (десятки тысяч
+    # сегментов) разница в десятки раз. Координаты вынимаются за раз через
+    # numpy, соседние дубли отбрасываются векторно.
+    geometry = gdf.geometry
+    for i, geom in enumerate(geometry):
+        if geom is None or geom.is_empty:
             continue
-        class_value = None
+        cls = "road"
         if class_col is not None:
-            class_value = row.get(class_col, fallback)
-        cls = fallback.get(class_value)
-        if geometry.geom_type == "LineString":
-            parts = [geometry]
-        elif geometry.geom_type == "MultiLineString":
-            parts = list(geometry.geoms)
+            value = gdf[class_col].iat[i]
+            cls = str(value) if value else "road"
+        if geom.geom_type == "LineString":
+            parts: tuple[Any, ...] = (geom,)
+        elif geom.geom_type == "MultiLineString":
+            parts = list(geom.geoms)
         else:
             continue
         for part in parts:
-            coords: list[tuple[float, float]] = [
-                (float(c[0]), float(c[1])) for c in part.coords
-            ]
-            merged: list[tuple[float, float]] = []
-            for coord in coords:
-                if not merged or merged[-1] != coord:
-                    merged.append(coord)
-            if len(merged) < 2:
+            arr = np.array(list(part.coords), dtype=np.float64)
+            if arr.ndim != 2 or arr.shape[1] != 2 or len(arr) < 2:
                 continue
-            ways.append({"highway": cls, "coords": tuple(merged)})
+            keep = np.concatenate(
+                ([True], np.any(arr[1:] != arr[:-1], axis=1))
+            )
+            deduped = arr[keep]
+            if len(deduped) < 2:
+                continue
+            ways.append(
+                {"highway": cls, "coords": tuple(map(tuple, deduped))}
+            )
     return ways
 
 
@@ -179,8 +182,88 @@ def _snapped_centroids(zones: Zones, graph: nx.Graph) -> list[Coordinate]:
     return [nodes[int(index)] for index in nearest]
 
 
+# Батчами, чтобы расстояние (батч × V) не раздувало память на граф города.
+_DIJKSTRA_BATCH_CELLS = 8_000_000
+# Параллельные батчи Дейкстры (процессы) включаются только на больших
+# задачах: спавн процессов на Windows дорог, мелким графам он не нужен.
+_DIJKSTRA_PARALLEL_MIN_SOURCES = 400
+
+
+def _dijkstra_workers(n_spans: int) -> int:
+    """Число процессов для батчей Дейкстры (1 — последовательно).
+
+    Переменная окружения ``WIKIROUTES_OD_DIJKSTRA_WORKERS``: 0/пусто — авто
+    (по числу батчей и CPU), 1 — принудительно последовательно, N — не
+    более N процессов (аварийный выход и экономия памяти).
+    """
+    try:
+        forced = int(os.environ.get("WIKIROUTES_OD_DIJKSTRA_WORKERS", "0") or 0)
+    except ValueError:
+        forced = 0
+    if forced == 1:
+        return 1
+    if forced > 1:
+        return min(n_spans, forced)
+    return min(n_spans, os.cpu_count() or 1)
+
+
+def _contract_degree_two(
+    neighbours: dict[Any, dict[Any, float]], protected: set[Any]
+) -> None:
+    """Стягивает цепочки узлов степени 2, суммируя время рёбер (in-place).
+
+    Узлы из ``protected`` (привязки зон) не трогаются. Кратчайшие времена
+    между оставшимися узлами не меняются: contraction точна для Дейкстры.
+    """
+    from collections import deque
+
+    queue = deque(
+        node
+        for node, nbrs in neighbours.items()
+        if len(nbrs) == 2 and node not in protected
+    )
+    queued = set(queue)
+    while queue:
+        node = queue.popleft()
+        queued.discard(node)
+        nbrs = neighbours.get(node)
+        if nbrs is None or len(nbrs) != 2 or node in protected:
+            continue
+        (left, left_w), (right, right_w) = list(nbrs.items())
+        if left == node or right == node:
+            # Петля: стягивание некорректно — оставляем узел как есть
+            # (на кратчайшие пути петли не влияют).
+            continue
+        merged = left_w + right_w
+        neighbours[left].pop(node, None)
+        neighbours[right].pop(node, None)
+        if right not in neighbours[left] or merged < neighbours[left][right]:
+            neighbours[left][right] = merged
+            neighbours[right][left] = merged
+        del neighbours[node]
+        for other in (left, right):
+            if (
+                len(neighbours[other]) == 2
+                and other not in protected
+                and other not in queued
+            ):
+                queue.append(other)
+                queued.add(other)
+
+
+def _dijkstra_worker(payload: tuple[Any, np.ndarray]) -> np.ndarray:
+    """Один батч Дейкстры в отдельном процессе (picklable для spawn)."""
+    adj, indices = payload
+    return np.asarray(dijkstra(adj, directed=False, indices=indices))
+
+
 def zone_network_costs(zones: Zones, graph: nx.Graph) -> np.ndarray:
-    """Матрица кратчайшего времени по сети между зонами (минуты)."""
+    """Матрица кратчайшего времени по сети между зонами (минуты).
+
+    Кратчайшие пути считаются одним векторизованным Дейкстрой scipy по всем
+    уникальным узлам привязки (батчами, чтобы матрица расстояний не росла),
+    а не по одному чистому Python-Дейкстре networkx на узел.
+    """
     nodes = list(graph.nodes)
     if not nodes:
         raise OdMatrixError("Дорожный граф пуст")
@@ -188,19 +271,69 @@ def zone_network_costs(zones: Zones, graph: nx.Graph) -> np.ndarray:
     n = len(zones)
     cost = np.full((n, n), np.inf, dtype=np.float32)
     np.fill_diagonal(cost, 0.0)
-    # Зоны с одинаковой привязкой к узлу сети считают один общий Dijkstra.
-    grouped: dict[Coordinate, list[int]] = {}
-    for i, source in enumerate(snapped):
-        grouped.setdefault(source, []).append(i)
-    for source, indices in grouped.items():
-        lengths = nx.single_source_dijkstra_path_length(graph, source, weight="time")
-        for i in indices:
-            for j, target in enumerate(snapped):
-                if i == j:
-                    continue
-                value = lengths.get(target)
-                if value is not None:
-                    cost[i, j] = float(value)
+
+    neighbours: dict[Any, dict[Any, float]] = {node: {} for node in nodes}
+    for u, v, time_w in graph.edges(data="time"):
+        try:
+            weight = float(time_w)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(weight):
+            continue
+        known = neighbours[u].get(v)
+        if known is None or weight < known:
+            neighbours[u][v] = weight
+            neighbours[v][u] = weight
+    # Стягиваем промежуточные точки ways (степень 2): граф меньше —
+    # Дейкстра быстрее, времена между привязками зон те же.
+    _contract_degree_two(neighbours, set(snapped))
+    small_nodes = [node for node in nodes if node in neighbours]
+    index = {node: i for i, node in enumerate(small_nodes)}
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+    for node, nbrs in neighbours.items():
+        iu = index[node]
+        for other, weight in nbrs.items():
+            rows.append(iu)
+            cols.append(index[other])
+            vals.append(weight)
+    adj = sparse.coo_matrix(
+        (vals, (rows, cols)),
+        shape=(len(small_nodes), len(small_nodes)),
+        dtype=np.float64,
+    ).tocsr()
+
+    snap_idx = np.fromiter((index[node] for node in snapped), dtype=np.intp, count=n)
+    sources, inverse = np.unique(snap_idx, return_inverse=True)
+    groups: dict[int, list[int]] = {}
+    for i, pos in enumerate(inverse):
+        groups.setdefault(int(pos), []).append(i)
+    batch = max(1, _DIJKSTRA_BATCH_CELLS // max(len(small_nodes), 1))
+    spans = [
+        (start, min(start + batch, len(sources)))
+        for start in range(0, len(sources), batch)
+    ]
+    if len(sources) >= _DIJKSTRA_PARALLEL_MIN_SOURCES:
+        workers = _dijkstra_workers(len(spans))
+    else:
+        workers = 1
+    if workers > 1 and len(spans) > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            dists = list(
+                pool.map(
+                    _dijkstra_worker,
+                    [(adj, sources[start:stop]) for start, stop in spans],
+                )
+            )
+    else:
+        dists = [
+            np.asarray(dijkstra(adj, directed=False, indices=sources[start:stop]))
+            for start, stop in spans
+        ]
+    for (start, _), dist in zip(spans, dists):
+        for local in range(dist.shape[0]):
+            cost[groups[start + local], :] = dist[local, snap_idx]
     return cost
 
 

@@ -24,12 +24,16 @@ from ..cache import JsonCache
 from .builders import (
     build_gravity_od,
     build_purpose_od,
+    build_takt_demand_with_purposes,
     periods_from_purpose_blend,
 )
 from .demand import (
     _write_demand_street_geojson,
     load_demand_streets,
     load_takt_demand,
+    load_takt_purposes,
+    write_takt_demand,
+    write_takt_purposes,
     zone_weights_from_streets,
 )
 from .model import OdMatrixError, OdResult, Zones, _as_sparse
@@ -57,7 +61,57 @@ __all__ = [
 
 _OD_GENERATED_KIND = "od_generated"
 # Версия формата кэша: при изменении структуры/формул пересчёт заново.
-_OD_CACHE_SCHEMA_VERSION = 3
+_OD_CACHE_SCHEMA_VERSION = 4
+# Плотный фрейм матрицы пишется целиком, пока клеток не больше порога;
+# для больших сеток сохраняются только ненулевые пары (od_pairs — внешний
+# формат с id зон; matrix_pairs — внутренний формат кэша с позициями).
+_OD_DENSE_FRAME_CELLS = 3_000_000
+
+# Колонки пары-форматов: позиционный (внутренний кэш) и по id зон (внешний).
+_PAIRS_POS_COLUMNS = ("oi", "di", "trips")
+_PAIRS_ID_COLUMNS = ("orig_zone", "dest_zone", "trips")
+
+
+def _dense_frame_wanted(zones: Zones) -> bool:
+    """Достаточно ли мала сетка, чтобы писать плотную матрицу целиком."""
+    return len(zones) ** 2 <= _OD_DENSE_FRAME_CELLS
+
+
+def _pairs_frame(
+    matrix: np.ndarray,
+    ids: Sequence[int | float | str],
+    *,
+    positions: bool = False,
+) -> Any:
+    """DataFrame ненулевых OD-пар без диагонали.
+
+    ``positions=False``: колонки ``orig_zone/dest_zone/trips`` с
+    идентификаторами зон (внешний формат ``od_pairs.parquet``).
+    ``positions=True``: колонки ``oi/di/trips`` с целочисленными позициями
+    зон 0..N-1 (внутренний формат кэша ``matrix_pairs.parquet`` —
+    реконструкция матрицы без строкового маппинга).
+    """
+    import pandas as pd
+
+    rows, cols = np.nonzero(matrix > 0)
+    keep = rows != cols
+    rows, cols = rows[keep], cols[keep]
+    if positions:
+        return pd.DataFrame(
+            {
+                _PAIRS_POS_COLUMNS[0]: rows.astype(np.int64),
+                _PAIRS_POS_COLUMNS[1]: cols.astype(np.int64),
+                _PAIRS_POS_COLUMNS[2]: matrix[rows, cols],
+            }
+        )
+    ids_arr = np.asarray(list(ids), dtype=np.int64)
+    return pd.DataFrame(
+        {
+            _PAIRS_ID_COLUMNS[0]: ids_arr[rows],
+            _PAIRS_ID_COLUMNS[1]: ids_arr[cols],
+            _PAIRS_ID_COLUMNS[2]: matrix[rows, cols],
+        }
+    )
 
 
 def _write_frame(frame: Any, path: Path) -> Path:
@@ -135,17 +189,7 @@ def save_od_outputs(
         written.append(
             _write_frame(frames, out / f"{city}_od_matrix.parquet")
         )
-    rows, cols = np.nonzero(matrix > 0)
-    ids_arr = np.asarray(ids, dtype=np.int64)
-    pairs = pd.DataFrame(
-        {
-            "orig_zone": ids_arr[rows],
-            "dest_zone": ids_arr[cols],
-            "trips": matrix[rows, cols],
-        }
-    )
-    pairs = pairs[pairs["orig_zone"] != pairs["dest_zone"]]
-    pairs = pairs.sort_values("trips", ascending=False)
+    pairs = _pairs_frame(matrix, ids)
     written.append(_write_frame(pairs, out / f"{city}_od_pairs.parquet"))
     if purpose_trips is not None:
         keys = list(purpose_keys or ())
@@ -200,23 +244,11 @@ def assign_road_loads(
     total_trips = 0.0
     unassigned_trips = 0.0
     for source, indices in grouped.items():
-        _, paths = nx.single_source_dijkstra(graph, source, weight="time")
-        for i in indices:
-            marker_rows = np.nonzero(matrix[i])[0] if matrix.shape[0] else ()
-            for j in marker_rows:
-                if i == j:
-                    continue
-                trips = float(matrix[i, j])
-                if trips <= 0.0:
-                    continue
-                total_trips += trips
-                nodes = paths.get(snapped[j])
-                if not nodes:
-                    unassigned_trips += trips
-                    continue
-                for a, b in itertools.pairwise(nodes):
-                    edge = (a, b) if a < b else (b, a)
-                    loaded[edge] = loaded.get(edge, 0.0) + trips
+        source_total, source_unassigned = _assign_source_flow(
+            graph, source, indices, matrix, snapped, loaded
+        )
+        total_trips += source_total
+        unassigned_trips += source_unassigned
     if reporter is not None and unassigned_trips > 0.0:
         share = unassigned_trips / max(total_trips, 1e-9) * 100.0
         reporter.line(
@@ -224,6 +256,40 @@ def assign_road_loads(
             f"({share:.1f}%) — проверьте связность дорожной сети"
         )
     return loaded
+
+
+def _assign_source_flow(
+    graph: nx.Graph,
+    source: Any,
+    indices: Sequence[int],
+    matrix: np.ndarray,
+    snapped: Sequence[Any],
+    loaded: dict[tuple[Any, Any], float],
+) -> tuple[float, float]:
+    """Направляет поездки всех зон, привязанных к ``source``.
+
+    Возвращает ``(поездок назначено, поездок без пути)`` для узла-источника.
+    """
+    _, paths = nx.single_source_dijkstra(graph, source, weight="time")
+    total_trips = 0.0
+    unassigned_trips = 0.0
+    for i in indices:
+        marker_rows = np.flatnonzero(matrix[i] > 0) if matrix.shape[0] else ()
+        for j in marker_rows:
+            if i == j:
+                continue
+            trips = float(matrix[i, j])
+            if trips <= 0.0:
+                continue
+            total_trips += trips
+            nodes = paths.get(snapped[j])
+            if not nodes:
+                unassigned_trips += trips
+                continue
+            for a, b in itertools.pairwise(nodes):
+                edge = (a, b) if a < b else (b, a)
+                loaded[edge] = loaded.get(edge, 0.0) + trips
+    return total_trips, unassigned_trips
 
 
 def save_road_load_outputs(
@@ -269,6 +335,44 @@ def save_road_load_outputs(
     return written
 
 
+def _is_pairs_frame(frame: Any) -> bool:
+    """Файл OD-пар (строковый или позиционный формат) вместо плотной матрицы."""
+    columns = set(getattr(frame, "columns", ()))
+    return (
+        set(_PAIRS_ID_COLUMNS).issubset(columns)
+        or set(_PAIRS_POS_COLUMNS).issubset(columns)
+    )
+
+
+def _read_matrix_frame(
+    matrix_path: Path,
+    ids_list: Sequence[str],
+    reporter: Any,
+) -> Any:
+    """Читает матрицу из файла или восстанавливает из пар.
+
+    Плотный формат выравнивается по ``ids_list`` (переиндексация). Если
+    файла нет или он в формате пар, матрица собирается через
+    ``_frame_from_pairs``; при этом выводится соответствующее сообщение.
+    """
+    import pandas as pd
+
+    if matrix_path.exists():
+        probe = _read_frame(matrix_path)
+        if _is_pairs_frame(probe):
+            # Файл пар: плотной матрицы нет — восстанавливаем из пар.
+            return _frame_from_pairs(matrix_path, ids_list)
+        probe.columns = [str(c) for c in probe.columns]
+        if not isinstance(probe.index, pd.RangeIndex) or len(probe) != len(ids_list):
+            probe.index = [str(v) for v in probe.index]
+            probe = probe.reindex(index=ids_list, columns=ids_list)
+        return probe
+    line = getattr(reporter, "line", None)
+    if line:
+        line("  Плотная матрица не найдена: восстанавливаю из OD-пар")
+    return _frame_from_pairs(matrix_path, ids_list)
+
+
 def load_od_from_files(
     matrix_path: str | Path,
     zones_path: str | Path,
@@ -286,8 +390,6 @@ def load_od_from_files(
     Геометрия зон перепроецируется в EPSG:4326, матрица выравнивается по
     порядку ``zone_id`` из файла зон.
     """
-    import pandas as pd
-
     line = getattr(reporter, "line", None)
     if line:
         line(f"  Загрузка OD из файлов: {matrix_path}, {zones_path}")
@@ -295,21 +397,7 @@ def load_od_from_files(
     ids = zones.ids
     ids_list = [str(int(v)) for v in ids]  # parquet может хранить id как строки
     matrix_path = Path(matrix_path)
-    if matrix_path.exists():
-        probe = _read_frame(matrix_path)
-        if {"orig_zone", "dest_zone", "trips"}.issubset(probe.columns):
-            # Файл пар: плотной матрицы нет — восстанавливаем из пар.
-            mdf = _frame_from_pairs(matrix_path, ids_list)
-        else:
-            mdf = probe
-            mdf.columns = [str(c) for c in mdf.columns]
-            if not isinstance(mdf.index, pd.RangeIndex) or len(mdf) != len(ids):
-                mdf.index = [str(v) for v in mdf.index]
-                mdf = mdf.reindex(index=ids_list, columns=ids_list)
-    else:
-        if line:
-            line("  Плотная матрица не найдена: восстанавливаю из OD-пар")
-        mdf = _frame_from_pairs(matrix_path, ids_list)
+    mdf = _read_matrix_frame(matrix_path, ids_list, reporter)
     matrix = mdf.to_numpy(dtype=np.float64)
     if matrix.shape != (len(ids), len(ids)):
         raise OdMatrixError(
@@ -340,13 +428,30 @@ def load_od_from_files(
 def _frame_from_pairs(
     pairs_path: str | Path, ids: Sequence[str]
 ) -> Any:
-    """Собирает квадратную матрицу по зонам из OD-пар (без плотного parquet)."""
+    """Собирает квадратную матрицу по зонам из OD-пар (без плотного parquet).
+
+    Позиционный формат (``oi/di/trips``) собирается прямой индексацией;
+    строковый (``orig_zone/dest_zone/trips``) — через сводную таблицу.
+    """
     import pandas as pd
 
     df = _read_frame(pairs_path)
-    if not {"orig_zone", "dest_zone", "trips"}.issubset(df.columns):
+    n = len(ids)
+    if set(_PAIRS_POS_COLUMNS).issubset(df.columns):
+        try:
+            oi = np.asarray(df[_PAIRS_POS_COLUMNS[0]].to_numpy(), dtype=np.int64)
+            di = np.asarray(df[_PAIRS_POS_COLUMNS[1]].to_numpy(), dtype=np.int64)
+            vals = np.asarray(df[_PAIRS_POS_COLUMNS[2]].to_numpy(), dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise OdMatrixError(f"{pairs_path}: битые колонки oi/di/trips") from exc
+        ok = (oi >= 0) & (oi < n) & (di >= 0) & (di < n) & np.isfinite(vals)
+        mat = np.zeros((n, n), dtype=np.float64)
+        np.add.at(mat, (oi[ok], di[ok]), vals[ok])
+        return pd.DataFrame(mat, index=list(ids), columns=list(ids))
+    if not set(_PAIRS_ID_COLUMNS).issubset(df.columns):
         raise OdMatrixError(
-            f"{pairs_path}: ожидаются колонки orig_zone/dest_zone/trips"
+            f"{pairs_path}: ожидаются колонки orig_zone/dest_zone/trips "
+            "или oi/di/trips"
         )
     frame = pd.DataFrame(0.0, index=ids, columns=ids, dtype=float)
     keep = df["orig_zone"].astype(str).isin(ids) & df["dest_zone"].astype(str).isin(ids)
@@ -434,15 +539,27 @@ def _save_generated_od(
             zdf["district"] = list(district_names)
         _write_frame(zdf, tmp / "zones.parquet")
         ids = zones.ids.tolist()
-        _write_frame(
-            pd.DataFrame(matrix, index=ids, columns=ids),
-            tmp / "matrix.parquet",
-        )
-        np.save(tmp / "costs.npy", costs)
+        if matrix.size > _OD_DENSE_FRAME_CELLS:
+            _write_frame(
+                _pairs_frame(matrix, ids, positions=True),
+                tmp / "matrix_pairs.parquet",
+            )
+            matrix_format = "pairs"
+        else:
+            _write_frame(
+                pd.DataFrame(matrix, index=ids, columns=ids),
+                tmp / "matrix.parquet",
+            )
+            matrix_format = "dense"
+        if not euclidean:
+            # Евклидовы времена дёшево пересчитываются из зон при чтении —
+            # плотный costs.npy (сотни МБ на больших сетках) не храним.
+            np.save(tmp / "costs.npy", costs)
         meta: dict[str, Any] = {
             "road_ways": int(road_ways),
             "euclidean": bool(euclidean),
             "schema_version": _OD_CACHE_SCHEMA_VERSION,
+            "matrix_format": matrix_format,
         }
         if purpose_meta:
             meta["purposes"] = purpose_meta
@@ -460,6 +577,68 @@ def _save_generated_od(
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _cache_any(cache_dir: Path, *names: str) -> Path | None:
+    """Первый существующий файл из списка имён внутри ``cache_dir``."""
+    for name in names:
+        path = cache_dir / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _load_cached_matrix(
+    cache_dir: Path, ids_list: Sequence[str], meta: dict[str, Any]
+) -> np.ndarray | None:
+    """Матрица из кэша (плотная или пары); None при отсутствии файла."""
+    if meta.get("matrix_format", "dense") == "pairs":
+        pairs_path = _cache_any(cache_dir, "matrix_pairs.parquet", "matrix_pairs.csv")
+        if pairs_path is None:
+            return None
+        return _frame_from_pairs(pairs_path, ids_list).to_numpy(dtype=np.float64)
+    matrix_path = _cache_any(cache_dir, "matrix.parquet", "matrix.csv")
+    if matrix_path is None:
+        return None
+    mdf = _read_frame(matrix_path)
+    mdf.index = [str(v) for v in mdf.index]
+    mdf.columns = [str(c) for c in mdf.columns]
+    mdf = mdf.reindex(index=ids_list, columns=ids_list)
+    return mdf.to_numpy(dtype=np.float64)
+
+
+def _load_cached_costs(
+    cache_dir: Path, meta: dict[str, Any], zones: Zones
+) -> np.ndarray | None:
+    """Времена из ``costs.npy`` или пересчёт по евклиду; None при промахе."""
+    costs_path = _cache_any(cache_dir, "costs.npy")
+    if costs_path is not None:
+        return np.load(costs_path, allow_pickle=False)
+    if not meta.get("euclidean"):
+        return None
+    # costs.npy не хранится для евклидова пути — пересчёт из зон.
+    return euclidean_costs(zones)
+
+
+def _load_purposes_from_meta(meta: dict[str, Any]) -> tuple[Any, ...]:
+    """Разбирает секцию ``purposes`` из meta; при отсутствии — пустые кортежи."""
+    purpose_meta = meta.get("purposes")
+    if not (
+        isinstance(purpose_meta, dict)
+        and purpose_meta.get("out")
+        and purpose_meta.get("ret")
+    ):
+        return (), (), ()
+    periods = periods_from_purpose_blend(purpose_meta["out"], purpose_meta["ret"])
+    trips = tuple(float(v) for v in purpose_meta.get("totals", ()))
+    keys = tuple(str(v) for v in purpose_meta.get("keys", ()))
+    return periods, trips, keys
+
+
+def _load_districts_from_meta(meta: dict[str, Any], zones: Zones) -> tuple[str, ...]:
+    """Названия районов из meta, если их число совпадает с числом зон."""
+    names = tuple(str(v) for v in meta.get("districts", ()))
+    return names if len(names) == len(zones) else ()
+
+
 def _load_generated_od(
     cache_dir: Path,
     *,
@@ -472,32 +651,22 @@ def _load_generated_od(
     """
     line = getattr(reporter, "line", None)
 
-    def _any(*names: str) -> Path | None:
-        for name in names:
-            path = cache_dir / name
-            if path.is_file():
-                return path
-        return None
-
-    matrix_path = _any("matrix.parquet", "matrix.csv")
-    zones_path = _any("zones.parquet", "zones.csv")
-    costs_path = _any("costs.npy")
-    meta_path = _any("meta.json")
-    if not all((matrix_path, zones_path, costs_path, meta_path)):
+    zones_path = _cache_any(cache_dir, "zones.parquet", "zones.csv")
+    meta_path = _cache_any(cache_dir, "meta.json")
+    if not (zones_path and meta_path):
         return None
     try:
         zones, production, _attraction = load_zones_from_file(
             zones_path, reporter=None
         )
-        ids = zones.ids
-        ids_list = [str(int(v)) for v in ids]
-        mdf = _read_frame(matrix_path)
-        mdf.index = [str(v) for v in mdf.index]
-        mdf.columns = [str(c) for c in mdf.columns]
-        mdf = mdf.reindex(index=ids_list, columns=ids_list)
-        matrix = mdf.to_numpy(dtype=np.float64)
-        costs = np.load(costs_path, allow_pickle=False)
+        ids_list = [str(int(v)) for v in zones.ids]
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        matrix = _load_cached_matrix(cache_dir, ids_list, meta)
+        if matrix is None:
+            return None
+        costs = _load_cached_costs(cache_dir, meta, zones)
+        if costs is None:
+            return None
         if meta.get("schema_version") != _OD_CACHE_SCHEMA_VERSION:
             if line:
                 line(
@@ -505,21 +674,8 @@ def _load_generated_od(
                     "пересчёт..."
                 )
             return None
-        purpose_periods: tuple[Any, ...] = ()
-        purpose_trips: tuple[float, ...] = ()
-        purpose_keys: tuple[str, ...] = ()
-        purpose_meta = meta.get("purposes")
-        if isinstance(purpose_meta, dict) and purpose_meta.get("out") and purpose_meta.get("ret"):
-            purpose_periods = periods_from_purpose_blend(
-                purpose_meta["out"], purpose_meta["ret"]
-            )
-            purpose_trips = tuple(float(v) for v in purpose_meta.get("totals", ()))
-            purpose_keys = tuple(str(v) for v in purpose_meta.get("keys", ()))
-        district_names: tuple[str, ...] = tuple(
-            str(v) for v in meta.get("districts", ())
-        )
-        if len(district_names) != len(zones):
-            district_names = ()
+        purpose_periods, purpose_trips, purpose_keys = _load_purposes_from_meta(meta)
+        district_names = _load_districts_from_meta(meta, zones)
     except Exception as exc:  # noqa: BLE001 — повреждённый кэш не критичен
         if line:
             line(f"  Кэш OD повреждён, пересчёт: {exc}")
@@ -561,7 +717,7 @@ def _prepare_generation(
     else:
         if boundary is None:
             raise OdMatrixError(
-                "Нет границы города и не задан --od-zones-file: "
+                "Нет границы города и не задан od_zones_file: "
                 "не из чего строить зоны OD-матрицы"
             )
         zones = build_zones(boundary, size_m=config.od_zone_size_m)
@@ -579,7 +735,266 @@ def _prepare_generation(
     return zones, production, attraction, weights, geo_boundary
 
 
-def run_od_stage(
+def _assign_districts_if_requested(
+    config: Any, zones: Zones
+) -> tuple[str, ...]:
+    """Названия районов для зон, если задан ``od_districts_file``; иначе ``()``."""
+    districts_file = getattr(config, "od_districts_file", None)
+    if not districts_file:
+        return ()
+    return assign_district_names(zones, load_districts(districts_file))
+
+
+def _apply_street_weights(
+    zones: Zones,
+    config: Any,
+    out_dir: str | Path | None,
+    city_slug: str,
+    reporter: Any,
+) -> np.ndarray | None:
+    """Пересчитывает веса зон по рёбрам спроса; None, если файл не задан."""
+    weights_file = getattr(config, "od_weights_file", None)
+    if not weights_file:
+        return None
+    street_edges = load_demand_streets(weights_file)
+    production = zone_weights_from_streets(zones, street_edges)
+    if out_dir is not None:
+        _write_demand_street_geojson(
+            zones,
+            street_edges,
+            Path(out_dir) / f"{city_slug}_od_street_demand.geojson",
+        )
+    reporter.line(
+        f"  Веса зон: по рёбрам спроса {Path(weights_file).name} "
+        f"({len(street_edges):,} рёбер)"
+    )
+    return production
+
+
+def _compute_costs(
+    zones: Zones,
+    geo_boundary: Any,
+    session: Any,
+    cache: JsonCache,
+    city_slug: str,
+    config: Any,
+    reporter: Any,
+) -> tuple[np.ndarray, bool, list | None]:
+    """Считает времена между зонами.
+
+    Возвращает ``(costs, euclidean, ways)``: при недоступной дорожной сети
+    ``euclidean=True``, ``ways=None`` и времена по прямой.
+    """
+    ways = fetch_road_ways(
+        geo_boundary, session, cache, cache_key=city_slug, config=config
+    )
+    if ways is None:
+        reporter.line("  Дорожная сеть недоступна — время по прямой")
+        return euclidean_costs(zones), True, None
+    return zone_network_costs(zones, build_road_graph(ways)), False, ways
+
+
+def _compute_purpose_matrix(
+    production: np.ndarray,
+    zones: Zones,
+    config: Any,
+    reporter: Any,
+) -> tuple[np.ndarray, tuple[Any, ...], list[float], list[str], dict[str, Any], Any]:
+    """Строит OD по целям поездок и метаданные для кэша/отчёта.
+
+    Возвращает ``(matrix, purpose_periods, purpose_trips, purpose_keys,
+    purpose_meta, purpose_od)``.
+    """
+    purpose_od = build_purpose_od(
+        production,
+        zones,
+        engine=getattr(config, "od_purpose_engine", "takt"),
+    )
+    matrix = purpose_od.matrix
+    purpose_periods = periods_from_purpose_blend(
+        purpose_od.period_out, purpose_od.period_ret
+    )
+    purpose_trips = [float(m.sum()) for m in purpose_od.purpose_matrices]
+    purpose_keys = [p.key for p in purpose_od.purposes]
+    purpose_meta = {
+        "out": list(purpose_od.period_out),
+        "ret": list(purpose_od.period_ret),
+        "totals": purpose_trips,
+        "keys": purpose_keys,
+    }
+    reporter.line(
+        "  Цели поездок: од по тяготению по целям "
+        + ", ".join(f"{k}={v:,.0f}" for k, v in zip(purpose_keys, purpose_trips))
+    )
+    return matrix, purpose_periods, purpose_trips, purpose_keys, purpose_meta, purpose_od
+
+
+def _try_cached_od(
+    cache_dir: Path | None,
+    cache: JsonCache,
+    reporter: Any,
+    *,
+    city_slug: str,
+    out_dir: str | Path | None,
+    production: np.ndarray,
+    attraction: np.ndarray,
+    districts_file: str | None,
+) -> OdResult | None:
+    """Загружает и публикует OD из кэша; None, если кэш пуст/недоступен."""
+    if cache_dir is None or not getattr(cache, "read_enabled", True):
+        return None
+    cached = _load_generated_od(cache_dir, reporter=reporter)
+    if cached is None:
+        return None
+    save_od_outputs(
+        cached.zones,
+        cached.matrix,
+        city=city_slug,
+        out_dir=out_dir,
+        production=production,
+        attraction=attraction,
+        purpose_trips=cached.purpose_trips or None,
+        purpose_keys=cached.purpose_keys or None,
+        district_names=(cached.district_names or None) if districts_file else None,
+        write_matrix_frame=_dense_frame_wanted(cached.zones),
+    )
+    n_pairs = int((cached.matrix > 0).sum())
+    reporter.line(
+        f"  Зон: {len(cached.zones)}, поездок: "
+        f"{float(cached.matrix.sum()):,.0f}, OD-пар: {n_pairs:,} (из кэша)"
+    )
+    return cached
+
+
+def _export_takt_json(
+    zones: Zones,
+    matrix: np.ndarray,
+    *,
+    costs: np.ndarray,
+    production: np.ndarray,
+    attraction: np.ndarray,
+    purpose_od: Any | None,
+    city: str,
+    out_dir: str | Path | None,
+    passenger_flow: bool,
+) -> list[Path]:
+    """Экспортирует OD-результат в JSON-форматы пакета Takt.
+
+    Выполняется только для полного пассажиропотока (``--passenger-flow``):
+    ``{city}_od_demand.json`` — полный спрос (вся матрица), а при
+    расчёте по целям ещё ``{city}_od_purposes.bin.json`` — слои целей
+    (сумма слоёв равна полному спросу). Файлы автономны: при обратном
+    чтении через ``od_demand_file``/``od_purposes_file`` передаётся один
+    из них, иначе поездки посчитаются дважды.
+    """
+    if not passenger_flow or out_dir is None:
+        return []
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    demand_path = out / f"{city}_od_demand.json"
+    write_takt_demand(
+        zones,
+        matrix,
+        production=production,
+        attraction=attraction,
+        costs=costs,
+        path=demand_path,
+    )
+    written = [demand_path]
+    if purpose_od is not None:
+        purposes_path = out / f"{city}_od_purposes.bin.json"
+        write_takt_purposes(purpose_od, costs, purposes_path)
+        written.append(purposes_path)
+    return written
+
+
+def _run_external_matrix(config: Any, reporter: Any) -> OdResult:
+    """Загружает готовую матрицу внешней модели (``od_matrix_file``)."""
+    zones_file = getattr(config, "od_zones_file", None)
+    if not zones_file:
+        raise OdMatrixError(
+            "Задана готовая матрица od_matrix_file, но не задан "
+            "od_zones_file: зоны нужны для выравнивания матрицы"
+        )
+    return load_od_from_files(config.od_matrix_file, zones_file, reporter=reporter)
+
+
+def _apply_takt_purposes(
+    demand: Any,
+    purposes_file: str | Path,
+    reporter: Any,
+) -> tuple[np.ndarray, tuple[Any, ...], list[float], list[str]]:
+    """Разбивает спрос Takt по целям из файла ``od_purposes_file``."""
+    purposes = load_takt_purposes(purposes_file)
+    matrix, period_out, period_ret, keys, layer_trips = (
+        build_takt_demand_with_purposes(demand, purposes)
+    )
+    purpose_periods = periods_from_purpose_blend(period_out, period_ret)
+    purpose_trips = list(layer_trips)
+    purpose_keys = list(keys)
+    saved = ", ".join(f"{k}={v:,.0f}" for k, v in zip(purpose_keys, purpose_trips))
+    reporter.line(
+        f"  Цели Takt: {len(purposes.layers)} слоёв из "
+        f"{Path(purposes_file).name}; полная матрица "
+        f"{float(matrix.sum()):,.0f} поездок ({saved})"
+    )
+    return matrix, purpose_periods, purpose_trips, purpose_keys
+
+
+def _run_takt_demand(
+    config: Any,
+    reporter: Any,
+    *,
+    city_slug: str,
+    out_dir: str | Path | None,
+) -> OdResult:
+    """Строит OD из готового спроса Takt (``od_demand_file``)."""
+    demand = load_takt_demand(config.od_demand_file)
+    district_names = _assign_districts_if_requested(config, demand.zones)
+    total_trips = float(demand.matrix.sum())
+    n_pairs = int((demand.matrix > 0).sum())
+    reporter.line(
+        f"  Спрос Takt: зон {len(demand.zones):,}, поездок "
+        f"{total_trips:,.0f}, OD-пар {n_pairs:,} "
+        f"({Path(config.od_demand_file).name})"
+    )
+    purpose_periods: tuple[Any, ...] = ()
+    purpose_trips: list[float] | None = None
+    purpose_keys: list[str] | None = None
+    matrix = demand.matrix
+    purposes_file = getattr(config, "od_purposes_file", None)
+    if purposes_file:
+        matrix, purpose_periods, purpose_trips, purpose_keys = _apply_takt_purposes(
+            demand, purposes_file, reporter
+        )
+    save_od_outputs(
+        demand.zones,
+        matrix,
+        city=city_slug,
+        out_dir=out_dir,
+        production=demand.production,
+        attraction=demand.production,
+        purpose_trips=purpose_trips or None,
+        purpose_keys=purpose_keys or None,
+        district_names=district_names or None,
+        write_matrix_frame=_dense_frame_wanted(demand.zones),
+    )
+    return OdResult(
+        zones=demand.zones,
+        matrix=matrix,
+        costs=euclidean_costs(demand.zones),
+        weights=demand.production,
+        road_ways=0,
+        euclidean=True,
+        sparse_matrix=_as_sparse(matrix),
+        purpose_periods=purpose_periods,
+        purpose_trips=tuple(purpose_trips) if purpose_trips else (),
+        purpose_keys=tuple(purpose_keys) if purpose_keys else (),
+        district_names=district_names,
+    )
+
+
+def _run_generated_od(
     *,
     boundary: Any,
     config: Any,
@@ -587,81 +1002,19 @@ def run_od_stage(
     cache: JsonCache,
     city_slug: str,
     reporter: Any,
-    out_dir: str | Path | None = None,
-) -> OdResult | None:
-    """Выполняет стадию OD-матрицы; None, если стадия отключена."""
-    if not config.od_matrix:
-        return None
-    reporter.line("\n[OD] Матрица корреспонденций...")
-    external_matrix = getattr(config, "od_matrix_file", None)
-    if external_matrix:
-        zones_file = getattr(config, "od_zones_file", None)
-        if not zones_file:
-            raise OdMatrixError(
-                "Задана готовая матрица --od-matrix-file, но не задан "
-                "--od-zones-file: зоны нужны для выравнивания матрицы"
-            )
-        return load_od_from_files(
-            external_matrix,
-            zones_file,
-            reporter=reporter,
-        )
-    demand_file = getattr(config, "od_demand_file", None)
-    if demand_file:
-        demand = load_takt_demand(demand_file)
-        district_names: tuple[str, ...] = ()
-        districts_file = getattr(config, "od_districts_file", None)
-        if districts_file:
-            district_names = assign_district_names(
-                demand.zones, load_districts(districts_file)
-            )
-        total_trips = float(demand.matrix.sum())
-        n_pairs = int((demand.matrix > 0).sum())
-        reporter.line(
-            f"  Спрос Takt: зон {len(demand.zones):,}, поездок "
-            f"{total_trips:,.0f}, OD-пар {n_pairs:,} ({Path(demand_file).name})"
-        )
-        save_od_outputs(
-            demand.zones,
-            demand.matrix,
-            city=city_slug,
-            out_dir=out_dir,
-            production=demand.production,
-            attraction=demand.production,
-            district_names=district_names or None,
-        )
-        return OdResult(
-            zones=demand.zones,
-            matrix=demand.matrix,
-            costs=euclidean_costs(demand.zones),
-            weights=demand.production,
-            road_ways=0,
-            euclidean=True,
-            sparse_matrix=_as_sparse(demand.matrix),
-            district_names=district_names,
-        )
+    out_dir: str | Path | None,
+) -> OdResult:
+    """Строит OD на лету: зоны, веса, кэш, сеть, матрица, экспорт."""
     zones, production, attraction, weights, geo_boundary = _prepare_generation(
         boundary, config, reporter
     )
-    weights_file = getattr(config, "od_weights_file", None)
-    if weights_file:
-        street_edges = load_demand_streets(weights_file)
-        production = zone_weights_from_streets(zones, street_edges)
-        attraction = production.copy()
-        weights = production
-        if out_dir is not None:
-            _write_demand_street_geojson(
-                zones, street_edges, Path(out_dir) / f"{city_slug}_od_street_demand.geojson"
-            )
-        reporter.line(
-            f"  Веса зон: по рёбрам спроса {Path(weights_file).name} "
-            f"({len(street_edges):,} рёбер)"
-        )
-    district_names: tuple[str, ...] = ()
+    override = _apply_street_weights(zones, config, out_dir, city_slug, reporter)
+    if override is not None:
+        production = override
+        attraction = override.copy()
+        weights = override
     districts_file = getattr(config, "od_districts_file", None)
-    if districts_file:
-        places = load_districts(districts_file)
-        district_names = assign_district_names(zones, places)
+    district_names = _assign_districts_if_requested(config, zones)
     cache_dir = _od_generated_cache_dir(
         cache,
         city_slug=city_slug,
@@ -669,61 +1022,35 @@ def run_od_stage(
         config=config,
         zones_file=getattr(config, "od_zones_file", None),
     )
-    if cache_dir is not None and getattr(cache, "read_enabled", True):
-        cached = _load_generated_od(cache_dir, reporter=reporter)
-        if cached is not None:
-            save_od_outputs(
-                cached.zones,
-                cached.matrix,
-                city=city_slug,
-                out_dir=out_dir,
-                production=production,
-                attraction=attraction,
-                purpose_trips=cached.purpose_trips or None,
-                purpose_keys=cached.purpose_keys or None,
-                district_names=(cached.district_names or None)
-                if districts_file
-                else None,
-            )
-            n_pairs = int((cached.matrix > 0).sum())
-            reporter.line(
-                f"  Зон: {len(cached.zones)}, поездок: {float(cached.matrix.sum()):,.0f}, "
-                f"OD-пар: {n_pairs:,} (из кэша)"
-            )
-            return cached
-    ways = fetch_road_ways(geo_boundary, session, cache, cache_key=city_slug, config=config)
-    euclidean = ways is None
-    if euclidean:
-        reporter.line("  Дорожная сеть недоступна — время по прямой")
-        costs = euclidean_costs(zones)
-    else:
-        costs = zone_network_costs(zones, build_road_graph(ways))
+    cached = _try_cached_od(
+        cache_dir,
+        cache,
+        reporter,
+        city_slug=city_slug,
+        out_dir=out_dir,
+        production=production,
+        attraction=attraction,
+        districts_file=districts_file,
+    )
+    if cached is not None:
+        return cached
+    costs, euclidean, ways = _compute_costs(
+        zones, geo_boundary, session, cache, city_slug, config, reporter
+    )
     purpose_meta: dict[str, Any] | None = None
     purpose_periods: tuple[Any, ...] = ()
     purpose_trips: list[float] | None = None
     purpose_keys: list[str] | None = None
+    purpose_od: Any | None = None
     if getattr(config, "od_purposes", False):
-        purpose_od = build_purpose_od(
-            production,
-            zones,
-            engine=getattr(config, "od_purpose_engine", "takt"),
-        )
-        matrix = purpose_od.matrix
-        purpose_periods = periods_from_purpose_blend(
-            purpose_od.period_out, purpose_od.period_ret
-        )
-        purpose_trips = [float(m.sum()) for m in purpose_od.purpose_matrices]
-        purpose_keys = [p.key for p in purpose_od.purposes]
-        purpose_meta = {
-            "out": list(purpose_od.period_out),
-            "ret": list(purpose_od.period_ret),
-            "totals": purpose_trips,
-            "keys": purpose_keys,
-        }
-        reporter.line(
-            "  Цели поездок: од по тяготению по целям "
-            + ", ".join(f"{k}={v:,.0f}" for k, v in zip(purpose_keys, purpose_trips))
-        )
+        (
+            matrix,
+            purpose_periods,
+            purpose_trips,
+            purpose_keys,
+            purpose_meta,
+            purpose_od,
+        ) = _compute_purpose_matrix(production, zones, config, reporter)
     else:
         matrix = build_gravity_od(
             production,
@@ -754,16 +1081,28 @@ def run_od_stage(
         purpose_trips=purpose_trips,
         purpose_keys=purpose_keys,
         district_names=district_names if districts_file else None,
+        write_matrix_frame=_dense_frame_wanted(zones),
     )
+    takt_json = _export_takt_json(
+        zones,
+        matrix,
+        costs=costs,
+        production=production,
+        attraction=attraction,
+        purpose_od=purpose_od if getattr(config, "od_purposes", False) else None,
+        city=city_slug,
+        out_dir=out_dir,
+        passenger_flow=bool(getattr(config, "passenger_flow", False)),
+    )
+    if takt_json:
+        reporter.line("  JSON Takt: " + ", ".join(p.name for p in takt_json))
     total = max(float(matrix.sum()), 1.0)
-    ordered = np.sort(matrix, axis=None)
-    compact = ordered[ordered > 0]
+    n_pairs = int((matrix > 0).sum())
     avg_time = (
         float((matrix * np.where(np.isfinite(costs), costs, 0.0)).sum() / total)
-        if compact.size > 1
+        if n_pairs > 1
         else 0.0
     )
-    n_pairs = int((matrix > 0).sum())
     reporter.line(
         f"  Зон: {len(zones)}, поездок: {float(matrix.sum()):,.0f}, "
         f"OD-пар: {n_pairs:,}, среднее время: {avg_time:.1f} мин "
@@ -778,4 +1117,40 @@ def run_od_stage(
         sparse_matrix=_as_sparse(matrix),
         purpose_periods=purpose_periods,
         district_names=district_names if districts_file else (),
+    )
+
+
+def run_od_stage(
+    *,
+    boundary: Any,
+    config: Any,
+    session: Any,
+    cache: JsonCache,
+    city_slug: str,
+    reporter: Any,
+    out_dir: str | Path | None = None,
+) -> OdResult | None:
+    """Выполняет стадию OD-матрицы; None, если стадия отключена.
+
+    Диспетчеризует по источнику спроса: готовая матрица внешней модели
+    (``od_matrix_file``), готовый спрос Takt (``od_demand_file``) или
+    расчёт на лету (границы зон/дороги/тяготение).
+    """
+    if not config.od_matrix:
+        return None
+    reporter.line("\n[OD] Матрица корреспонденций...")
+    if getattr(config, "od_matrix_file", None):
+        return _run_external_matrix(config, reporter)
+    if getattr(config, "od_demand_file", None):
+        return _run_takt_demand(
+            config, reporter, city_slug=city_slug, out_dir=out_dir
+        )
+    return _run_generated_od(
+        boundary=boundary,
+        config=config,
+        session=session,
+        cache=cache,
+        city_slug=city_slug,
+        reporter=reporter,
+        out_dir=out_dir,
     )

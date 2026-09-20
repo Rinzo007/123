@@ -10,20 +10,30 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from scipy import sparse
 
+from ..passenger_flow.base.takt import TAKT_PERIODS as _TAKT_PERIODS_SLOTS
 from ..passenger_flow.models import PURPOSE_DEFAULTS, Period, Purpose
 from ..passenger_flow.takt import (
     _TAKT_M_PER_DEG_LAT,
     _TAKT_M_PER_DEG_LON_EQUATOR,
 )
-from .model import OdMatrixError, PurposeOd, Zones, _round_half_up
+from .model import (
+    OdMatrixError,
+    PurposeOd,
+    TaktDemand,
+    TaktPurposes,
+    Zones,
+    _round_half_up,
+)
 
 __all__ = [
     "build_gravity_od",
     "build_purpose_od",
+    "build_takt_demand_with_purposes",
     "build_takt_od",
     "periods_from_purpose_blend",
 ]
@@ -34,6 +44,10 @@ _SPARSE_GRAVITY_CELLS = 3_000_000
 _GRAVITY_KERNEL_EPS = 1e-4
 _FURNESS_MAX_ITER = 300
 _FURNESS_TOL = 1e-5
+# Плотный Фёрнесс (SIMD-numpy) включается, когда ядро почти сплошное и влезает
+# в память: CSR-итерации с переупаковкой ненулевых на ~N² клетках заметно дороже.
+_FURNESS_DENSE_MAX_CELLS = 32_000_000
+_FURNESS_DENSE_MIN_FRACTION = 0.25
 
 _TAKT_OD_GRID_LON_DEG = 0.01
 _TAKT_OD_GRID_LAT_RATIO = 0.62
@@ -87,9 +101,23 @@ def _furness_sparse(
     *,
     max_iter: int = _FURNESS_MAX_ITER,
     tol: float = _FURNESS_TOL,
-) -> np.ndarray:
+) -> sparse.csr_matrix:
     """Разреженный Фёрнесс: только для больших матриц (строки без контакта
-    остаются нулевыми, дорогостоящая плотная арифметика не выполняется)."""
+    остаются нулевыми, дорогостоящая плотная арифметика не выполняется).
+
+    Возвращает CSR — плотное представление строит вызывающая сторона
+    на границе публичного API, не внутри итераций.
+    """
+    max_cells = matrix.shape[0] * matrix.shape[1]
+    if max_cells <= _FURNESS_DENSE_MAX_CELLS and matrix.nnz >= _FURNESS_DENSE_MIN_FRACTION * max_cells:
+        balanced = _furness(
+            matrix.toarray(),
+            origins,
+            attractions,
+            max_iter=max_iter,
+            tol=tol,
+        )
+        return sparse.csr_matrix(balanced, dtype=np.float64)
     balanced = matrix.astype(np.float64)
     for _ in range(max_iter):
         rows = np.asarray(balanced.sum(axis=1)).ravel()
@@ -109,7 +137,7 @@ def _furness_sparse(
         )
         if error < tol:
             break
-    return balanced.toarray()
+    return balanced.tocsr()
 
 
 def build_gravity_od(
@@ -146,10 +174,10 @@ def build_gravity_od(
     if decay_minutes <= 0.0:
         raise OdMatrixError("decay_minutes должен быть положительным")
     beta = 1.0 / decay_minutes
+    if np.asarray(cost).size > _SPARSE_GRAVITY_CELLS:
+        seed = _sparse_gravity_seed(production, attraction, beta, np.asarray(cost))
+        return _furness_sparse(seed, production, attraction).toarray()
     impedance = np.where(np.isfinite(cost), cost, 1e6)
-    if impedance.size > _SPARSE_GRAVITY_CELLS:
-        seed = _sparse_gravity_seed(production, attraction, beta, impedance)
-        return _furness_sparse(seed, production, attraction)
     kernel = np.exp(-beta * impedance)
     np.fill_diagonal(kernel, 0.0)
     kernel[~np.isfinite(cost)] = 0.0
@@ -167,16 +195,23 @@ def _sparse_gravity_seed(
 
     Значения ниже ``_GRAVITY_KERNEL_EPS`` (порог ``t > ln(1/eps)/beta``)
     отбрасываются; диагональ обнуляется, не-конечные стоимости дают 0.
+    Живые ячейки отбираются маской, плотный ``np.exp`` на всю матрицу
+    не строится.
     """
-    kernel = np.exp(-beta * impedance)
-    kernel[kernel < _GRAVITY_KERNEL_EPS] = 0.0
-    np.fill_diagonal(kernel, 0.0)
-    kernel[~np.isfinite(impedance)] = 0.0
-    seed = (
-        sparse.diags(production) @ sparse.csr_matrix(kernel) @ sparse.diags(attraction)
+    cutoff = -math.log(_GRAVITY_KERNEL_EPS) / beta
+    keep = np.isfinite(impedance) & (impedance <= cutoff)
+    np.fill_diagonal(keep, False)
+    rows, cols = np.nonzero(keep)
+    if rows.size == 0:
+        return sparse.csr_matrix(keep.shape, dtype=np.float64)
+    vals = (
+        production[rows]
+        * attraction[cols]
+        * np.exp(-beta * impedance[rows, cols].astype(np.float64))
     )
+    seed = sparse.csr_matrix((vals, (rows, cols)), shape=keep.shape, dtype=np.float64)
     seed.eliminate_zeros()
-    return seed.tocsr()
+    return seed
 
 
 def periods_from_purpose_blend(
@@ -271,46 +306,60 @@ def build_takt_od(
             cell[4] = pts[idx, 1]
 
     groups = list(cells.values())
+    g_e = np.fromiter((float(g[0]) for g in groups), dtype=np.float64, count=len(groups))
+    g_best = np.fromiter(
+        (int(g[1]) for g in groups), dtype=np.int64, count=len(groups)
+    )
+    g_lon = np.fromiter(
+        (float(g[3]) for g in groups), dtype=np.float64, count=len(groups)
+    )
+    g_lat = np.fromiter(
+        (float(g[4]) for g in groups), dtype=np.float64, count=len(groups)
+    )
     out: list[list[int]] = []
     for origin in range(len(pts)):
         if pts[origin, 2] < _TAKT_OD_POP_CUTOFF:
             continue
         total_trips = pts[origin, 2] * float(trips_per_res)
-        bands: list[list[tuple[int, float, float]]] = [[] for _ in range(n_bands)]
-        band_e = [0.0] * n_bands
-        total_e = 0.0
-        for cell_e, best, _, rep_lon, rep_lat in groups:
-            if best == origin:
-                continue
-            dist = math.hypot(
-                (rep_lon - pts[origin, 0]) * longitude_m_per_degree,
-                (rep_lat - pts[origin, 1]) * latitude_m_per_degree,
-            )
-            if dist > h or dist < _TAKT_OD_MIN_DIST_M:
-                continue
-            e = cell_e * math.exp(-dist / d0_m)
-            if not e > 0.0:
-                continue
-            band = np.searchsorted(p, dist, side="right") - 1
-            bands[band].append((best, e, dist))
-            band_e[band] += e
-            total_e += e
-        if total_e <= 0.0:
+        dist = np.hypot(
+            (g_lon - pts[origin, 0]) * longitude_m_per_degree,
+            (g_lat - pts[origin, 1]) * latitude_m_per_degree,
+        )
+        alive = (dist >= _TAKT_OD_MIN_DIST_M) & (dist <= h) & (g_best != origin)
+        if not np.any(alive):
             continue
-        for band in range(n_bands):
-            if band_e[band] <= 0.0:
+        ev = g_e[alive] * np.exp(-dist[alive] / d0_m)
+        if not np.any(ev > 0.0):
+            continue
+        dv = dist[alive]
+        bv = g_best[alive]
+        band = np.searchsorted(p, dv, side="right") - 1
+        total_e = float(ev.sum())
+        for b in range(n_bands):
+            sel = band == b
+            if not np.any(sel):
                 continue
-            ranked = sorted(bands[band], key=lambda item: item[1], reverse=True)[:w]
-            ranked_e = sum(item[1] for item in ranked)
-            trips = total_trips * band_e[band] / total_e
+            s_ev = ev[sel]
+            s_dv = dv[sel]
+            s_bv = bv[sel]
+            band_e = float(s_ev.sum())
+            if band_e <= 0.0:
+                continue
+            order = np.argsort(-s_ev, kind="stable")[:w]
+            ranked_e = float(s_ev[order].sum())
+            trips = total_trips * band_e / total_e
             carry = 0.0
-            for dest, e, dist in ranked:
-                value = trips * e / ranked_e + carry
+            for pos in order:
+                dest = int(s_bv[pos])
+                e_k = float(s_ev[pos])
+                dist_k = float(s_dv[pos])
+                value = trips * e_k / ranked_e + carry
                 n_trips = _round_half_up(value)
                 carry = value - n_trips
                 if n_trips > 0:
                     time_s = _round_half_up(
-                        dist * _TAKT_OD_CIRCUITY / _TAKT_OD_SPEED_MPS + _TAKT_OD_BASE_SECONDS
+                        dist_k * _TAKT_OD_CIRCUITY / _TAKT_OD_SPEED_MPS
+                        + _TAKT_OD_BASE_SECONDS
                     )
                     out.append([origin, dest, n_trips, time_s])
     if not out:
@@ -336,6 +385,11 @@ def build_purpose_od(
     ``(1 + d/d0)^(-k)`` с балансировкой Фёрнесс. Матрицы целей
     суммируются; профили периодов суток взвешиваются долями поездок
     каждой цели.
+
+    Слои ``purpose_matrices`` для движка Takt — разреженные CSR (пары
+    (origin, dest) из разных дистанционных диапазонов суммируются, а не
+    перезаписываются); для движка gravity — плотные. Суммарная ``matrix``
+    всегда плотная.
     """
     if engine not in ("gravity", "takt"):
         raise OdMatrixError(f"Неизвестный движок OD по целям: {engine!r}")
@@ -344,8 +398,13 @@ def build_purpose_od(
         raise OdMatrixError("production не совпадает с числом зон")
     if prod.sum() <= 0.0:
         raise OdMatrixError("Сумма весов зон равна нулю")
-    dist_km = _centroid_dist_km(zones)
-    matrices: list[np.ndarray] = []
+    dist_km: np.ndarray | None = None
+    points: np.ndarray | None = None
+    if engine == "gravity":
+        dist_km = _centroid_dist_km(zones)
+    else:
+        points = np.column_stack((zones.xy, prod))
+    matrices: list[Any] = []
     totals: list[float] = []
     used: list[Purpose] = []
     for purpose in purposes:
@@ -353,7 +412,6 @@ def build_purpose_od(
         if prod_p.sum() <= 0.0:
             continue
         if engine == "takt":
-            points = np.column_stack((zones.xy, prod))
             pairs = build_takt_od(
                 points,
                 prod,
@@ -361,9 +419,17 @@ def build_purpose_od(
                 d0_m=float(purpose.d0_m),
                 k=purpose.k,
             )
-            matrix_p = np.zeros((len(zones), len(zones)), dtype=np.float64)
+            n = len(zones)
             if len(pairs):
-                matrix_p[pairs[:, 0], pairs[:, 1]] = pairs[:, 2]
+                matrix_p = sparse.coo_matrix(
+                    (
+                        pairs[:, 2].astype(np.float64),
+                        (pairs[:, 0], pairs[:, 1]),
+                    ),
+                    shape=(n, n),
+                ).tocsr()
+            else:
+                matrix_p = sparse.csr_matrix((n, n), dtype=np.float64)
         else:
             d0_km = max(float(purpose.d0_m) / 1000.0, 1e-3)
             kernel = (1.0 + dist_km / d0_km) ** (-int(purpose.k))
@@ -375,7 +441,9 @@ def build_purpose_od(
         totals.append(float(matrix_p.sum()))
     if not matrices:
         raise OdMatrixError("Ни одна цель не дала поездок")
-    matrix = np.sum(matrices, axis=0)
+    matrix = np.zeros((len(zones), len(zones)), dtype=np.float64)
+    for mat in matrices:
+        matrix += mat.toarray() if sparse.issparse(mat) else mat
     total = max(float(matrix.sum()), 1.0)
     shares = tuple(t / total for t in totals)
     common_len = max(len(p.out) for p in used)
@@ -393,4 +461,68 @@ def build_purpose_od(
         period_ret=tuple(float(v) for v in ret_weights),
         shares=shares,
         purposes=tuple(used),
+    )
+
+
+def build_takt_demand_with_purposes(
+    demand: TaktDemand,
+    purposes: TaktPurposes,
+) -> tuple[np.ndarray, tuple[float, ...], tuple[float, ...], tuple[str, ...], tuple[float, ...]]:
+    """Собирает матрицу как движок Takt: спрос + слои целей.
+
+    Движок строит ``m = [{od: спрос, out/ret: глобальные периоды}, ...слои
+    целей]``; поездки слоёв складываются, а профили периодов суток
+    взвешиваются долями поездок слоёв (глобальные периоды для спроса, свои
+    ``out``/``ret`` для каждой цели). Возвращает
+    ``(matrix, period_out, period_ret, keys, layer_trips)``.
+    """
+    n = len(demand.zones)
+    matrix = demand.matrix.copy()
+    demand_trips = float(matrix.sum())
+    keys: list[str] = []
+    layer_trips: list[float] = []
+    layers_tbl: list[tuple[tuple[float, ...], tuple[float, ...]] | None] = []
+    if demand_trips > 0.0:
+        keys.append("demand")
+        layer_trips.append(demand_trips)
+        layers_tbl.append(
+            (tuple(p.out for p in _TAKT_PERIODS_SLOTS),
+             tuple(p.ret for p in _TAKT_PERIODS_SLOTS))
+        )
+    for layer in purposes.layers:
+        pairs = layer.pairs
+        if pairs.shape[0] == 0:
+            continue
+        trips = float(pairs[:, 2].sum())
+        if trips <= 0.0:
+            continue
+        if pairs[:, :2].min() < 0 or pairs[:, :2].max() >= n:
+            raise OdMatrixError(
+                f"Файл целей Takt: индекс точки вне диапазона слоя {layer.key!r}"
+            )
+        np.add.at(
+            matrix,
+            (pairs[:, 0].astype(int), pairs[:, 1].astype(int)),
+            pairs[:, 2],
+        )
+        keys.append(layer.key)
+        layer_trips.append(trips)
+        layers_tbl.append((layer.out, layer.ret))
+    total_trips = max(float(sum(layer_trips)), 1.0)
+    out_weights = np.zeros(len(_TAKT_PERIODS_SLOTS), dtype=np.float64)
+    ret_weights = np.zeros(len(_TAKT_PERIODS_SLOTS), dtype=np.float64)
+    for trips, tbl in zip(layer_trips, layers_tbl):
+        share = trips / total_trips
+        if not tbl:
+            continue
+        period_out, period_ret = tbl
+        for i in range(min(len(period_out), len(out_weights))):
+            out_weights[i] += float(period_out[i]) * share
+            ret_weights[i] += float(period_ret[i]) * share
+    return (
+        matrix,
+        tuple(float(v) for v in out_weights),
+        tuple(float(v) for v in ret_weights),
+        tuple(keys),
+        tuple(layer_trips),
     )

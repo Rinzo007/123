@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .osm import (
     _FALLBACK_SPEED_KMH,
+    OD_ROADS_CACHE_ENTRY_BYTES,
     _snapped_centroids,
     build_road_graph,
     euclidean_costs,
@@ -18,6 +19,7 @@ from .osm import (
 )
 
 __all__ = [
+    "OD_ROADS_CACHE_ENTRY_BYTES",
     "_FALLBACK_SPEED_KMH",
     "_snapped_centroids",
     "build_road_graph",

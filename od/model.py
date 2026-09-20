@@ -22,6 +22,8 @@ __all__ = [
     "OdResult",
     "PurposeOd",
     "TaktDemand",
+    "TaktPurposeLayer",
+    "TaktPurposes",
     "Zones",
     "_as_sparse",
     "_cosscale",
@@ -73,12 +75,13 @@ class PurposeOd:
     """Итог генерации OD по целям поездок (Takt-подобное тяготение).
 
     ``matrix`` — суммарная матрица, ``purpose_matrices`` — по целям в том же
-    порядке, что ``purposes``; ``period_out``/``period_ret`` — взвешенные по
+    порядке, что ``purposes`` (CSR для движка Takt, плотные для gravity);
+    ``period_out``/``period_ret`` — взвешенные по
     долям поездок профили периодов суток; ``shares`` — доля каждой цели.
     """
 
     matrix: np.ndarray
-    purpose_matrices: tuple[np.ndarray, ...]
+    purpose_matrices: tuple[np.ndarray | sparse.csr_matrix, ...]
     period_out: tuple[float, ...]
     period_ret: tuple[float, ...]
     shares: tuple[float, ...]
@@ -102,6 +105,40 @@ class TaktDemand:
     matrix: np.ndarray
     production: np.ndarray
     points: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class TaktPurposeLayer:
+    """Слой целей поездок из ``purposes.bin.json``.
+
+    ``key`` — код цели (edu/health/shop/air/night); ``out``/``ret`` — профили
+    периодов суток (доли, сумма 1.0); ``pairs`` — массив
+    ``[origin, dest, trips, seconds]``; ``base_time`` — базовое время поездки
+    по периодам (``[период, пара]``), NaN при отсутствии.
+    """
+
+    key: str
+    out: tuple[float, ...]
+    ret: tuple[float, ...]
+    pairs: np.ndarray
+    base_time: np.ndarray | None
+
+
+@dataclass(frozen=True, slots=True)
+class TaktPurposes:
+    """Набор слоёв целей из ``purposes.bin.json``.
+
+    ``layers`` — слои в порядке файла; ``commute_base_time`` — базовое время
+    поездки на работу по периодам (опционально). ``n_periods`` — число
+    периодов суток, общее для всех слоёв.
+    """
+
+    layers: tuple[TaktPurposeLayer, ...]
+    commute_base_time: np.ndarray | None = None
+
+    @property
+    def n_periods(self) -> int:
+        return len(self.layers[0].out) if self.layers else 0
 
 
 def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:

@@ -1,12 +1,14 @@
 """Спрос OD: готовые данные Takt и веса зон по рёбрам спроса.
 
-Чтение ``demand.json`` (точки + OD-пары) и ``demand-streets.json``
+Чтение ``demand.json`` (точки + OD-пары), ``purposes.bin.json`` (слои целей
+поездок с профилями периодов суток) и ``demand-streets.json``
 (FeatureCollection рёбер спроса), раскладка весов рёбер по зонам
 пропорционально длине попавших в зону участков.
 """
 
 from __future__ import annotations
 
+import base64
 import itertools
 import json
 import math
@@ -15,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy import sparse
 from scipy.spatial import cKDTree
 from shapely.geometry import box
 
@@ -22,6 +25,8 @@ from ..model import (
     _KILOMETERS_PER_DEGREE,
     OdMatrixError,
     TaktDemand,
+    TaktPurposeLayer,
+    TaktPurposes,
     Zones,
     _cosscale,
     haversine_km,
@@ -30,6 +35,9 @@ from ..model import (
 __all__ = [
     "load_demand_streets",
     "load_takt_demand",
+    "load_takt_purposes",
+    "write_takt_demand",
+    "write_takt_purposes",
     "zone_weights_from_streets",
 ]
 
@@ -83,6 +91,151 @@ def load_takt_demand(path: str | Path) -> TaktDemand:
     matrix = np.zeros((n, n), dtype=np.float64)
     np.add.at(matrix, (pairs[:, 0], pairs[:, 1]), pairs[:, 2])
     return TaktDemand(zones=zones, matrix=matrix, production=production, points=points)
+
+
+def load_takt_purposes(path: str | Path) -> TaktPurposes:
+    """Читает ``purposes.bin.json`` из пакета Takt (слои целей поездок).
+
+    Структура файла: ``{"v": 2, "layers": [...], "commuteBaseT": [...]}``,
+    где каждый слой содержит ``t`` (код цели), ``n`` (число пар), ``out``/
+    ``ret`` (профили периодов суток) и закодированные base64 float32-потоки:
+    ``od`` — ``[origin, dest, trips, seconds]``, ``baseT`` — одномерные
+    времена поездки для каждого периода. Возвращает ``TaktPurposes`` со
+    слоями (индексы пар оставляются как в файле).
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or "layers" not in data:
+        raise OdMatrixError(f"Файл целей Takt не содержит layers: {path}")
+
+    def _f32(b64: Any, expect: int | None, what: str) -> np.ndarray:
+        if not isinstance(b64, str):
+            raise OdMatrixError(f"Файл целей Takt: {what} не строка base64: {path}")
+        try:
+            arr = np.frombuffer(base64.b64decode(b64), dtype="<f4")
+        except Exception as exc:
+            raise OdMatrixError(f"Файл целей Takt: не удалось декодировать {what}: {path}") from exc
+        if expect is not None and arr.size != expect:
+            raise OdMatrixError(
+                f"Файл целей Takt: {what} содержит {arr.size} значений, "
+                f"ожидалось {expect}: {path}"
+            )
+        return arr.copy()
+
+    layers: list[TaktPurposeLayer] = []
+    for item in data["layers"]:
+        if not isinstance(item, dict):
+            raise OdMatrixError(f"Файл целей Takt: слой не объект: {path}")
+        t = str(item.get("t", ""))
+        n = int(item.get("n", 0))
+        out = tuple(float(v) for v in item.get("out", ()))
+        ret = tuple(float(v) for v in item.get("ret", ()))
+        pairs = _f32(item.get("od"), n * 4, f"od слоя {t!r}").reshape(-1, 4)
+        base_t = item.get("baseT")
+        base_time = None
+        if isinstance(base_t, list):
+            base_time = np.stack(
+                [_f32(p, n, f"baseT[{i}] слоя {t!r}") for i, p in enumerate(base_t)]
+            )
+        layers.append(
+            TaktPurposeLayer(key=t, out=out, ret=ret, pairs=pairs, base_time=base_time)
+        )
+    commute = data.get("commuteBaseT")
+    commute_base_time = None
+    if isinstance(commute, list) and commute:
+        decoded = [_f32(p, None, f"commuteBaseT[{i}]") for i, p in enumerate(commute)]
+        if len({arr.size for arr in decoded}) == 1:
+            commute_base_time = np.stack(decoded)
+    return TaktPurposes(layers=tuple(layers), commute_base_time=commute_base_time)
+
+
+def write_takt_demand(
+    zones: Zones,
+    matrix: np.ndarray,
+    *,
+    production: np.ndarray,
+    attraction: np.ndarray,
+    costs: np.ndarray,
+    path: Path,
+) -> None:
+    """Пишет ``demand.json`` (полный спрос) в формате пакета Takt.
+
+    Структура ``{"pts": [[lon, lat, pop, jobs], ...], "od": ...}``:
+    ``pts`` — центроиды зон с производством (население) и притяжением
+    (рабочие места), ``od`` — пары ненулевых поездок полной матрицы
+    ``[fromPt, toPt, trips, travelTimeS]`` с индексами точек (нулевые)
+    и временем поездки в секундах. Автономен: содержит полный спрос.
+    """
+    xy = np.asarray(zones.xy, dtype=np.float64)
+    pts = np.column_stack(
+        (
+            xy[:, 0],
+            xy[:, 1],
+            np.asarray(production, dtype=np.float64),
+            np.asarray(attraction, dtype=np.float64),
+        )
+    )
+    rows, cols = np.nonzero(matrix > 0)
+    keep = rows != cols
+    rows, cols = rows[keep], cols[keep]
+    finite = np.where(np.isfinite(costs[rows, cols]), costs[rows, cols], 0.0)
+    time = (np.rint(finite * 60.0)).astype(np.int64)
+    od = np.column_stack(
+        (rows, cols, np.rint(matrix[rows, cols]).astype(np.int64), time)
+    )
+    payload = {"pts": pts.tolist(), "od": od.tolist()}
+    try:
+        import orjson
+
+        raw = orjson.dumps(payload)
+    except ImportError:
+        raw = json.dumps(payload).encode("utf-8")
+    Path(path).write_bytes(raw)
+
+
+def write_takt_purposes(
+    purpose_od: Any,
+    costs: np.ndarray,
+    path: Path,
+) -> None:
+    """Пишет ``purposes.bin.json`` (слои целей) в формате пакета Takt.
+
+    Каждый слой — цель из ``purpose_od``: ``t`` (код цели), ``n`` (число
+    пар), ``out``/``ret`` (профили периодов суток) и закодированные base64
+    float32-потоки ``od`` — ``[origin, dest, trips, seconds]``. Сумма слоёв
+    равна полной матрице (автономен).
+    """
+    layers: list[dict[str, Any]] = []
+    for purpose, mat in zip(purpose_od.purposes, purpose_od.purpose_matrices):
+        if sparse.issparse(mat):
+            mat = mat.tocsr()
+            mat.sum_duplicates()
+            rows, cols = mat.nonzero()
+            vals = np.asarray(mat.data, dtype=np.float64)
+        else:
+            rows, cols = np.nonzero(mat > 0)
+            vals = np.asarray(mat[rows, cols], dtype=np.float64).ravel()
+        keep = rows != cols
+        rows, cols, vals = rows[keep], cols[keep], vals[keep]
+        if not rows.size:
+            continue
+        time = (np.rint(costs[rows, cols] * 60.0)).astype(np.int64)
+        pairs = np.column_stack(
+            (rows, cols, np.rint(vals).astype(np.int64), time)
+        )
+        encoded = base64.b64encode(pairs.astype("<f4").tobytes()).decode("ascii")
+        layers.append(
+            {
+                "t": purpose.key,
+                "n": int(pairs.shape[0]),
+                "out": [float(v) for v in purpose.out],
+                "ret": [float(v) for v in purpose.ret],
+                "od": encoded,
+            }
+        )
+    Path(path).write_text(
+        json.dumps({"v": 2, "layers": layers, "commuteBaseT": []}),
+        encoding="utf-8",
+    )
 
 
 def load_demand_streets(path: str | Path) -> list[tuple[tuple[tuple[float, float], ...], float]]:
