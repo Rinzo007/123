@@ -197,19 +197,29 @@ def build_purpose_od(
     zones: Zones,
     *,
     purposes: Sequence[Purpose] = PURPOSE_DEFAULTS,
+    attraction: np.ndarray | None = None,
 ) -> PurposeOd:
     """OD по целям поездок единым Takt-алгоритмом.
 
     Для каждой цели используется ``build_takt_od`` с сеткой аттракторов,
     экспоненциальным затуханием и целочисленным распределением без Фёрнесса.
     Матрицы целей суммируются; профили периодов суток взвешиваются по долям
-    поездок целей.
+    поездок целей. ``production`` задаёт отправления, а ``attraction`` —
+    притяжение направлений; при отсутствии ``attraction`` используется ``production``.
     """
     prod = np.asarray(production, dtype=np.float64)
     if prod.shape != (len(zones),):
         raise OdMatrixError("production не совпадает с числом зон")
     if prod.sum() <= 0.0:
         raise OdMatrixError("Сумма весов зон равна нулю")
+    if attraction is None:
+        attract = prod.copy()
+    else:
+        attract = np.asarray(attraction, dtype=np.float64)
+        if attract.shape != prod.shape or not np.isfinite(attract).all() or np.any(attract < 0.0):
+            raise OdMatrixError("attraction должен иметь ту же форму, быть конечным и неотрицательным")
+        if attract.sum() <= 0.0:
+            raise OdMatrixError("Сумма attraction равна нулю")
     points = np.column_stack((zones.xy, prod))
 
     matrices: list[Any] = []
@@ -222,7 +232,7 @@ def build_purpose_od(
             continue
         pairs = build_takt_od(
             points,
-            prod,
+            attract,
             trips_per_res=float(purpose.trips_per_res),
             d0_m=float(purpose.d0_m),
             k=purpose.k,
