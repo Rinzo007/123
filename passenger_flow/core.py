@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -157,6 +158,15 @@ def prepare_passenger_flow(
 # ===== Валидация входных параметров =====
 
 
+def _finite_number(name: str, value: float, *, nonnegative: bool = False, positive: bool = False) -> None:
+    value = float(value)
+    if not math.isfinite(value):
+        raise PassengerFlowError(f"{name} должен быть конечным числом")
+    if positive and value <= 0.0:
+        raise PassengerFlowError(f"{name} должен быть положительным")
+    if nonnegative and value < 0.0:
+        raise PassengerFlowError(f"{name} не может быть отрицательным")
+
 def _validate_od_matrix(matrix: np.ndarray, n_zones: int) -> None:
     if matrix.shape != (n_zones, n_zones):
         raise PassengerFlowError(
@@ -171,35 +181,31 @@ def _validate_od_matrix(matrix: np.ndarray, n_zones: int) -> None:
 def _validate_transfer_args(
     max_transfers: int, transfer_radius_m: float
 ) -> None:
+    if not isinstance(max_transfers, int):
+        raise PassengerFlowError("max_transfers должен быть целым числом")
     if max_transfers < 0:
         raise PassengerFlowError("max_transfers не может быть отрицательным")
     if max_transfers > 3:
         raise PassengerFlowError(
             "Поддерживается не более трёх пересадок (до 4 ножек)"
         )
-    if max_transfers > 0 and transfer_radius_m <= 0.0:
-        raise PassengerFlowError("transfer_radius_m должен быть положительным")
+    _finite_number("transfer_radius_m", transfer_radius_m, positive=True)
 
 
 def _validate_headway_args(
     headway_min: float | None,
     headway_by_route: Mapping[int, float] | None,
 ) -> None:
-    if headway_min is not None and headway_min <= 0:
-        raise PassengerFlowError("headway_min должен быть положительным")
-    if headway_by_route is not None and any(
-        v <= 0 for v in headway_by_route.values()
-    ):
-        raise PassengerFlowError(
-            "headway_by_route должен содержать положительные значения"
-        )
+    if headway_min is not None:
+        _finite_number("headway_min", headway_min, positive=True)
+    if headway_by_route is not None:
+        for rid, value in headway_by_route.items():
+            _finite_number(f"headway_by_route[{rid}]", value, positive=True)
 
 
 def _validate_capex_args(capex_factor: float, capex_amort_years: float) -> None:
-    if capex_factor < 0:
-        raise PassengerFlowError("capex_factor не может быть отрицательным")
-    if capex_amort_years <= 0:
-        raise PassengerFlowError("capex_amort_years должен быть положительным")
+    _finite_number("capex_factor", capex_factor, nonnegative=True)
+    _finite_number("capex_amort_years", capex_amort_years, positive=True)
 
 
 def _validate_waiting_args(
@@ -208,12 +214,9 @@ def _validate_waiting_args(
     transfer_penalty_calc: str,
     wait_calc: str,
 ) -> None:
-    if wait_crowding_per_100_min < 0:
-        raise PassengerFlowError(
-            "wait_crowding_per_100_min не может быть отрицательным"
-        )
-    if transfer_wait_min is not None and transfer_wait_min < 0:
-        raise PassengerFlowError("transfer_wait_min не может быть отрицательным")
+    _finite_number("wait_crowding_per_100_min", wait_crowding_per_100_min, nonnegative=True)
+    if transfer_wait_min is not None:
+        _finite_number("transfer_wait_min", transfer_wait_min, nonnegative=True)
     if transfer_penalty_calc not in ("fixed", "takt"):
         raise PassengerFlowError(
             "transfer_penalty_calc должен быть 'fixed' или 'takt'"
@@ -236,14 +239,17 @@ def _validate_msa_args(
     wait_crowding_per_100_min: float,
     msa_gap: float,
 ) -> None:
-    if msa_max_iterations is not None and msa_max_iterations < 1:
-        raise PassengerFlowError("msa_max_iterations должен быть положительным")
+    if msa_max_iterations is not None:
+        if not isinstance(msa_max_iterations, int) or msa_max_iterations < 1:
+            raise PassengerFlowError("msa_max_iterations должен быть положительным целым числом")
     if msa_max_iterations is not None and wait_crowding_per_100_min <= 0.0:
         raise PassengerFlowError(
             "MSA-присваивание требует wait_crowding_per_100_min > 0"
         )
-    if msa_max_iterations is not None and not 0.0 < msa_gap <= 1.0:
-        raise PassengerFlowError("msa_gap должен быть в диапазоне (0, 1]")
+    if msa_max_iterations is not None:
+        _finite_number("msa_gap", msa_gap)
+        if not 0.0 < float(msa_gap) <= 1.0:
+            raise PassengerFlowError("msa_gap должен быть в диапазоне (0, 1]")
 
 
 def _validate_periods(periods: Sequence[Period]) -> None:
