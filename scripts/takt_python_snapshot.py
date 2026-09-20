@@ -93,7 +93,7 @@ def main() -> int:
         periods=TAKT_PERIODS,
         headway_min=10.0,
         headway_by_route={1: 10.0},
-        msa_max_iterations=6,
+        msa_max_iterations=2,
         include_reliability=True,
     )
     line = result.line_results[0] if result.line_results else None
