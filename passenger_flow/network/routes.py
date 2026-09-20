@@ -909,6 +909,13 @@ def _dedupe_journeys(
         seen.add(journey[1])
     return selected
 
+def _journey_stop_parts(item: tuple[Any, ...]) -> tuple[int, int, int, float, bool]:
+    """Unpack access stop tuple; legacy 3-tuples remain supported."""
+    if len(item) < 3:
+        raise ValueError("journey stop tuple must contain seq, stop and position")
+    distance_m = float(item[3]) if len(item) >= 4 else 0.0
+    return int(item[0]), int(item[1]), int(item[2]), distance_m, len(item) >= 4
+
 def _enumerate_journeys(
     origins: list[tuple[int, int, int]],
     destinations: list[tuple[int, int, int]],
@@ -944,11 +951,15 @@ def _enumerate_journeys(
 
     destination_by_seq: dict[int, set[int]] = {}
     egress_by_stop: dict[tuple[int, int], float] = {}
-    for seq_idx, _stop_idx, pos, dist_m in destinations:
-        destination_by_seq.setdefault(seq_idx, set()).add(int(pos))
-        egress_by_stop[(seq_idx, int(pos))] = min(
-            egress_by_stop.get((seq_idx, int(pos)), math.inf), float(dist_m)
-        )
+    destination_has_distance = False
+    for item in destinations:
+        seq_idx, _stop_idx, pos, dist_m, has_distance = _journey_stop_parts(item)
+        destination_by_seq.setdefault(seq_idx, set()).add(pos)
+        destination_has_distance = destination_has_distance or has_distance
+        if has_distance:
+            egress_by_stop[(seq_idx, pos)] = min(
+                egress_by_stop.get((seq_idx, pos), math.inf), dist_m
+            )
 
     # (cost, seq_idx, pos, transfers, leg_start, legs, used)
     # used не влияет на стоимость, но предотвращает циклическое повторное
@@ -957,10 +968,14 @@ def _enumerate_journeys(
     best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
     first_wait_by_seq: dict[int, float] = {}
     access_by_stop: dict[tuple[int, int], float] = {}
-    for seq_idx, _stop_idx, pos, dist_m in origins:
-        access_by_stop[(seq_idx, int(pos))] = min(
-            access_by_stop.get((seq_idx, int(pos)), math.inf), float(dist_m)
-        )
+    origin_has_distance = False
+    for item in origins:
+        seq_idx, _stop_idx, pos, dist_m, has_distance = _journey_stop_parts(item)
+        origin_has_distance = origin_has_distance or has_distance
+        if has_distance:
+            access_by_stop[(seq_idx, pos)] = min(
+                access_by_stop.get((seq_idx, pos), math.inf), dist_m
+            )
         if seq_idx in first_wait_by_seq:
             continue
         headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
@@ -970,7 +985,8 @@ def _enumerate_journeys(
     def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
 
-    for seq_idx, _stop_idx, orig_pos, _dist_m in origins:
+    for item in origins:
+        seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
         key = (seq_idx, int(orig_pos), 0, int(orig_pos), frozenset((seq_idx,)))
@@ -1003,22 +1019,20 @@ def _enumerate_journeys(
             if not final_legs:
                 continue
             first_seq = final_legs[0][0]
-            access_dist = access_by_stop.get(
-                (first_seq, int(final_legs[0][1])), 0.0
-            )
-            egress_dist = egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
-            access_min = _takt_ri_access_min(
-                access_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
-            )
-            egress_min = _takt_ri_access_min(
-                egress_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
-            )
-            total = (
-                cost + ride + access_min + egress_min
-                + _takt_ri_anchor_min()
-                + first_wait_by_seq.get(first_seq, 0.0)
-                + walk_to_stop_min
-            )
+            use_takt_access = origin_has_distance and destination_has_distance
+            if use_takt_access:
+                access_dist = access_by_stop.get((first_seq, int(final_legs[0][1])), 0.0)
+                egress_dist = egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
+                access_min = _takt_ri_access_min(
+                    access_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
+                )
+                egress_min = _takt_ri_access_min(
+                    egress_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
+                )
+                fixed_access_min = _takt_ri_anchor_min() + access_min + egress_min
+            else:
+                fixed_access_min = walk_to_stop_min
+            total = cost + ride + fixed_access_min + first_wait_by_seq.get(first_seq, 0.0)
             signature = final_legs
             if signature not in seen_journeys:
                 seen_journeys.add(signature)
