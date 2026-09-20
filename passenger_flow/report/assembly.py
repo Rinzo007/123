@@ -226,6 +226,8 @@ def _round_period_flow(p: PeriodFlow) -> PeriodFlow:
         assigned_trips=round_half_up(p.assigned_trips, 1),
         car_trips=round_half_up(p.car_trips, 1),
         walk_trips=round_half_up(p.walk_trips, 1),
+        two_wheel_trips=round_half_up(p.two_wheel_trips, 1),
+        rest_trips=round_half_up(p.rest_trips, 1),
     )
 
 
@@ -247,6 +249,7 @@ def assemble_flow_result(
     car_trips: float = 0.0,
     walk_trips: float = 0.0,
     two_wheel_trips: float = 0.0,
+    rest_trips: float = 0.0,
     period_flows: tuple[PeriodFlow, ...] = (),
     line_results: tuple[LineResult, ...] = (),
 ) -> FlowResult:
@@ -272,6 +275,7 @@ def assemble_flow_result(
         car_trips=round_half_up(car_trips, 1),
         walk_trips=round_half_up(walk_trips, 1),
         two_wheel_trips=round_half_up(two_wheel_trips, 1),
+        rest_trips=round_half_up(rest_trips, 1),
         period_flows=tuple(_round_period_flow(p) for p in period_flows),
         line_results=rounded_line_results,
         revenue_day=round_half_up(
