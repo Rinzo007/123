@@ -4,6 +4,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .defaults import (
+    TAKT_CAR_CIRCUITY,
+    TAKT_CAR_COST_PER_KM_EUR,
+    TAKT_CAR_PARKING_S,
+    TAKT_CAR_PARK_EUR,
+    TAKT_CAR_SPEED_KMH,
+    TAKT_FARE_BASE_EUR,
+    TAKT_FARE_CAP_EUR,
+    TAKT_FARE_PER_KM_EUR,
+    TAKT_NO_CAR_FACTOR,
+    TAKT_NO_CAR_SHARE,
+    TAKT_RIDER_BIAS_S,
+    TAKT_TWO_WHEEL_CIRCUITY,
+    TAKT_TWO_WHEEL_FIXED_S,
+    TAKT_TWO_WHEEL_PER_KM_EUR,
+    TAKT_TWO_WHEEL_REACH_M,
+    TAKT_TWO_WHEEL_SHARE,
+    TAKT_TWO_WHEEL_SPEED_MPS,
+    TAKT_VOT_S_PER_EUR,
+    TAKT_WALK_CIRCUITY,
+    TAKT_WALK_SPEED_MPS,
+)
 
 class PassengerFlowError(RuntimeError):
     """Ошибка расчёта пассажиропотока."""
@@ -276,33 +298,33 @@ class ModeChoiceConfig:
     """
 
     # Takt noCar: доля населения без авто до поправки Aa.
-    car_no_car_share: float = 0.35
-    car_no_car_factor: float = 0.78
-    car_parking_min: float = 4.0
-    car_cost_per_km_eur: float = 0.25
-    car_parking_eur: float = 1.5
-    car_circuity: float = 1.3
-    car_speed_kmh: float = 25.0
+    car_no_car_share: float = TAKT_NO_CAR_SHARE
+    car_no_car_factor: float = TAKT_NO_CAR_FACTOR
+    car_parking_min: float = TAKT_CAR_PARKING_S / 60.0
+    car_cost_per_km_eur: float = TAKT_CAR_COST_PER_KM_EUR
+    car_parking_eur: float = TAKT_CAR_PARK_EUR
+    car_circuity: float = TAKT_CAR_CIRCUITY
+    car_speed_kmh: float = TAKT_CAR_SPEED_KMH
     # Пешком: Takt использует Ze × 1.25 и скорость 1.33 м/с.
-    walk_speed_mps: float = 1.33
-    walk_circuity: float = 1.25
+    walk_speed_mps: float = TAKT_WALK_SPEED_MPS
+    walk_circuity: float = TAKT_WALK_CIRCUITY
     # Ценность времени и тариф: fare = max(base, min_fare, base + per_km×км),
     # при fare_cap_eur > 0 результат ограничивается сверху.
-    vot_per_eur_s: float = 360.0
-    fare_base_eur: float = 0.6
-    fare_per_km_eur: float = 0.12
-    fare_cap_eur: float = 3.0
+    vot_per_eur_s: float = TAKT_VOT_S_PER_EUR
+    fare_base_eur: float = TAKT_FARE_BASE_EUR
+    fare_per_km_eur: float = TAKT_FARE_PER_KM_EUR
+    fare_cap_eur: float = TAKT_FARE_CAP_EUR
     min_fare_eur: float = 0.0
     # Электровелосипед: активен только при two_wheel_share > 0 и для
     # расстояний не дальше two_wheel_reach_m (по мотивам Takt).
-    two_wheel_share: float = 0.3
-    two_wheel_speed_mps: float = 4.2
-    two_wheel_reach_m: float = 7000.0
-    two_wheel_per_km_eur: float = 0.03
-    two_wheel_fixed_s: float = 240.0
-    two_wheel_circuity: float = 1.5
+    two_wheel_share: float = TAKT_TWO_WHEEL_SHARE
+    two_wheel_speed_mps: float = TAKT_TWO_WHEEL_SPEED_MPS
+    two_wheel_reach_m: float = TAKT_TWO_WHEEL_REACH_M
+    two_wheel_per_km_eur: float = TAKT_TWO_WHEEL_PER_KM_EUR
+    two_wheel_fixed_s: float = TAKT_TWO_WHEEL_FIXED_S
+    two_wheel_circuity: float = TAKT_TWO_WHEEL_CIRCUITY
     # Постоянная поправка стоимости транзита Wo в секундах.
-    rider_bias_s: float = 0.0
+    rider_bias_s: float = TAKT_RIDER_BIAS_S
 
 
 @dataclass(frozen=True, slots=True)
