@@ -18,6 +18,7 @@ from ..base.takt import (
     _TAKT_ALTS,
     _TAKT_ALT_DETOUR_FACTOR,
     _TAKT_ALT_DETOUR_FIXED_S,
+    _TAKT_FLEET,
     _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
     _TAKT_WALK_SPEED_MPS,
@@ -207,6 +208,16 @@ def _build_route_stop_sequence(
         access_m = float(spec.access_m)
         route_type_key = str(route.route_type).strip().lower()
         route_type_label = type_label(route.route_type)
+        fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
+        route_row = _optional_value(route, ("row", "track_row"))
+        default_row = fleet_defaults.get("default_row")
+        if route_row is None:
+            route_row = default_row
+        row_data = fleet_defaults.get("rows", {})
+        if isinstance(row_data, Mapping) and route_row in row_data:
+            row_speed_kmh = float(row_data[route_row].get("kmh", spec.speed_kmh))
+        else:
+            row_speed_kmh = float(spec.speed_kmh)
         closed = bool(_optional_value(route, ("closed",)))
         both_ways = bool(_optional_value(route, ("bothWays", "both_ways")))
         phase = _optional_value(route, ("phase",))
@@ -269,7 +280,7 @@ def _build_route_stop_sequence(
                         stops[-1]["lat"], stops[-1]["lon"],
                         stops[0]["lat"], stops[0]["lon"],
                     )
-                    / max(float(spec.speed_kmh) / 3.6, 0.01)
+                    / max(row_speed_kmh / 3.6, 0.01)
                 )
             sequences.append(
                 {
