@@ -260,12 +260,6 @@ def build_purpose_od(
             base_times.append(
                 np.zeros((len(_TAKT_PERIODS_SLOTS), 0), dtype=np.float64)
             )
-    else:
-        d0_km = max(float(purpose.d0_m) / 1000.0, 1e-3)
-        kernel = (1.0 + dist_km / d0_km) ** (-int(purpose.k))
-        np.fill_diagonal(kernel, 0.0)
-        seed = np.outer(prod_p, prod_p) * kernel
-        matrix_p = _furness(seed, prod_p, prod_p)
         matrices.append(matrix_p)
         used.append(purpose)
         totals.append(float(matrix_p.sum()))
