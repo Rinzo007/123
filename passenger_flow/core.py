@@ -330,12 +330,22 @@ def _validate_base_time(
     base_time_s: np.ndarray | None,
     n_zones: int,
     n_periods: int,
+    n_pairs: int,
 ) -> None:
-    """Проверяет baseT: NxN либо [period, N, N]."""
+    """Проверяет baseT: NxN, [period,N,N] или Takt [period,pair]."""
     if base_time_s is None:
         return
     if base_time_s.ndim == 2:
-        if base_time_s.shape != (n_zones, n_zones):
+        is_pair_profile = (
+            base_time_s.shape[0] >= n_periods
+            and base_time_s.shape[0] != base_time_s.shape[1]
+        )
+        if is_pair_profile:
+            if base_time_s.shape[1] != n_pairs:
+                raise PassengerFlowError(
+                    "base_time_s имеет неверный размер [period,pair]"
+                )
+        elif base_time_s.shape != (n_zones, n_zones):
             raise PassengerFlowError("base_time_s имеет неверный размер NxN")
     elif base_time_s.ndim == 3:
         if base_time_s.shape[1:] != (n_zones, n_zones):
@@ -343,7 +353,7 @@ def _validate_base_time(
         if base_time_s.shape[0] < n_periods:
             raise PassengerFlowError("base_time_s содержит меньше периодов, чем periods")
     else:
-        raise PassengerFlowError("base_time_s должен быть NxN или [period,N,N]")
+        raise PassengerFlowError("base_time_s должен быть NxN, [period,N,N] или [period,pair]")
     if np.isinf(base_time_s).any() or np.any(
         np.isfinite(base_time_s) & (base_time_s < 0.0)
     ):
@@ -391,7 +401,7 @@ def _validate_flow_inputs(
     _finite_number("walk_to_stop_min", walk_to_stop_min, nonnegative=True)
     _finite_number("transfer_penalty_min", transfer_penalty_min, nonnegative=True)
     _finite_number("logit_temp", logit_temp, positive=True)
-    _validate_base_time(base_time_s, n_zones, len(periods) if periods else 1)
+    _validate_base_time(\n        base_time_s,\n        n_zones,\n        len(periods) if periods else 1,\n        int(np.count_nonzero(matrix > 0.0)),\n    )
     _validate_sparse_od(od_sparse, n_zones)
     _validate_transfer_args(max_transfers, transfer_radius_m)
     _validate_headway_args(headway_min, headway_by_route)
