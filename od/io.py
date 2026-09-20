@@ -22,7 +22,6 @@ from shapely.geometry import mapping as shapely_mapping
 
 from ..cache import JsonCache
 from .builders import (
-    build_gravity_od,
     build_purpose_od,
     build_takt_demand_with_purposes,
     periods_from_purpose_blend,
@@ -805,11 +804,7 @@ def _compute_purpose_matrix(
     Возвращает ``(matrix, purpose_periods, purpose_trips, purpose_keys,
     purpose_meta, purpose_od)``.
     """
-    purpose_od = build_purpose_od(
-        production,
-        zones,
-        engine=getattr(config, "od_purpose_engine", "takt"),
-    )
+    purpose_od = build_purpose_od(production, zones)
     matrix = purpose_od.matrix
     purpose_periods = periods_from_purpose_blend(
         purpose_od.period_out, purpose_od.period_ret
@@ -1052,12 +1047,10 @@ def _run_generated_od(
             purpose_od,
         ) = _compute_purpose_matrix(production, zones, config, reporter)
     else:
-        matrix = build_gravity_od(
-            production,
-            costs,
-            attraction=attraction,
-            decay_minutes=getattr(config, "od_decay_minutes", None),
-        )
+        # Единый OD-движок: Takt. Без разложения по целям
+        # используется та же модель с профилями PURPOSE_DEFAULTS.
+        purpose_od = build_purpose_od(production, zones)
+        matrix = purpose_od.matrix
     if cache_dir is not None and getattr(cache, "write_enabled", True):
         _save_generated_od(
             cache_dir,
