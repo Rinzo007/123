@@ -8,11 +8,14 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from od import Zones
+if TYPE_CHECKING:
+    from od.model import Zones
+else:
+    Zones = Any
 from ..base.models import ModeChoiceConfig
 from ..base.takt import (
     _takt_crowding_wait_mult,
