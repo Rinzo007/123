@@ -210,21 +210,15 @@ def _takt_walk_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
     return od_meters * mode.walk_circuity / mode.walk_speed_mps
 
 
-def _takt_mode_shares(
+def _takt_mode_shares_with_rest(
     mode: ModeChoiceConfig,
     od_meters: float,
     transit_s: float | None,
     fare_eur: float,
+    rest_s: float | None = None,
     no_car_share: float | None = None,
-) -> tuple[float, float, float, float]:
-    """Доли (transit, car, walk, ebike) по иерархии Takt ``po()``.
-
-    ``be`` — доля населения без авто (``car_no_car_share``): (1−be) выбирает
-    из полного набора ``Us = wo+Jt+js+Te``, be — из набора без авто
-    ``Hr = Us−Jt``. Полезности ``exp(-cost_s / ks)``, где ``ks`` = VOT (с/€).
-    ``fare_eur`` добавляется к стоимости транзита в секундах (fare×VOT).
-    ``transit_s=None`` — транзит недоступен (нет маршрута).
-    """
+) -> tuple[float, float, float, float, float]:
+    """Доли (transit, car, walk, ebike, rest) с альтернативой ``baseT``."""
     ks = mode.vot_per_eur_s
     be = (
         min(0.95, max(0.03, mode.car_no_car_share * mode.car_no_car_factor))
@@ -232,42 +226,47 @@ def _takt_mode_shares(
         else min(0.95, max(0.03, float(no_car_share)))
     )
 
-    wo = (
-        math.exp(
-            -(transit_s + fare_eur * ks + mode.rider_bias_s) / ks
-        )
+    transit_u = (
+        math.exp(-(transit_s + fare_eur * ks + mode.rider_bias_s) / ks)
         if transit_s is not None
         else 0.0
     )
-    jt = math.exp(-_takt_car_cost_s(mode, od_meters) / ks)
-    js = math.exp(-_takt_walk_cost_s(mode, od_meters) / ks)
-    te = (
-        mode.two_wheel_share * math.exp(-_takt_bike_cost_s(mode, od_meters) / ks)
+    car_u = math.exp(-_takt_car_cost_s(mode, od_meters) / ks)
+    walk_u = math.exp(-_takt_walk_cost_s(mode, od_meters) / ks)
+    ebike_u = (
+        mode.two_wheel_share
+        * math.exp(-_takt_bike_cost_s(mode, od_meters) / ks)
         if mode.two_wheel_share > 0.0
         else 0.0
     )
+    rest_u = math.exp(-max(0.0, float(rest_s)) / ks) if rest_s is not None and rest_s > 0 else 0.0
 
-    us = wo + jt + js + te
-    hr = wo + js + te
+    us = transit_u + car_u + walk_u + ebike_u + rest_u
+    hr = transit_u + walk_u + ebike_u + rest_u
     if us <= 0.0:
-        if transit_s is not None:
-            return 1.0, 0.0, 0.0, 0.0
-        if js + te > 0.0:
-            walk = js / (js + te)
-            return 0.0, 0.0, walk, 1.0 - walk
-        return 0.0, 1.0, 0.0, 0.0
+        return 0.0, 1.0, 0.0, 0.0, 0.0
     if hr <= 0.0:
-        transit = wo / us
-        car = jt / us
-        walk = js / us
-        return transit, car, walk, te / us
+        return (transit_u / us, car_u / us, walk_u / us, ebike_u / us, rest_u / us)
 
-    transit = (1.0 - be) * (wo / us) + be * (wo / hr)
-    car = (1.0 - be) * (jt / us)
-    walk = (1.0 - be) * (js / us) + be * (js / hr)
-    ebike = (1.0 - be) * (te / us) + be * (te / hr)
-    return transit, car, walk, ebike
+    transit = (1.0 - be) * (transit_u / us) + be * (transit_u / hr)
+    car = (1.0 - be) * (car_u / us)
+    walk = (1.0 - be) * (walk_u / us) + be * (walk_u / hr)
+    ebike = (1.0 - be) * (ebike_u / us) + be * (ebike_u / hr)
+    rest = (1.0 - be) * (rest_u / us) + be * (rest_u / hr)
+    return transit, car, walk, ebike, rest
 
+
+def _takt_mode_shares(
+    mode: ModeChoiceConfig,
+    od_meters: float,
+    transit_s: float | None,
+    fare_eur: float,
+    no_car_share: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Совместимый 4-режимный интерфейс без ``baseT``."""
+    return _takt_mode_shares_with_rest(
+        mode, od_meters, transit_s, fare_eur, no_car_share=no_car_share
+    )[:4]
 
 def _takt_route_probs(costs_s: np.ndarray) -> np.ndarray:
     """Частотный сплит маршрутов по Takt ``Ge = 1/max(1, cost)``.
