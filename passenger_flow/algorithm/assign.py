@@ -22,6 +22,7 @@ from ..network.geometry import _stop_key, haversine_meters
 from ..network.routes import (
     _route_segment_indices,
     _scheduled_transfer_wait_min,
+    _leg_alternatives,
     build_journeys,
 )
 from .mode_choice import (
@@ -396,6 +397,63 @@ def _takt_co_route_probs(
         total = 1.0
     return weights / total
 
+
+def _takt_leg_choice_probs(
+    journey: _Journey,
+    leg_index: int,
+    route_sequences: list[dict[str, Any]],
+    *,
+    period_index: int,
+    seq_headway_min: Mapping[int, float] | None,
+    seq_jitter_s: Mapping[int, float] | None,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]],
+    stop_time_min: float,
+    transfer_radius_m: float,
+) -> tuple[tuple[tuple[int, int, int], ...], np.ndarray]:
+    """JS co(): normalized inverse-Rr weights for one journey leg."""
+    candidates: list[tuple[int, int, int]] = [journey.legs[leg_index]]
+    if leg_index > 0:
+        candidates.extend(_leg_alternatives(
+            journey, leg_index, route_sequences, transfer_index,
+            stop_time_min=stop_time_min, crowd_state=crowd_state,
+            transfer_radius_m=transfer_radius_m,
+        ))
+    seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
+    seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
+    unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
+    prev = journey.legs[leg_index - 1] if leg_index > 0 else None
+    weights = np.zeros(len(candidates), dtype=np.float64)
+    for idx, (seq_idx, a, b) in enumerate(candidates):
+        selected = _route_segment_indices(route_sequences[seq_idx], a, b)
+        load = 1.0
+        if selected:
+            seg_i, forward = selected[0]
+            loads = seg_forward if forward else seg_reverse
+            load = max(1.0, float(loads.get((seq_idx, seg_i), 0.0)))
+        if seq_headway_min is None or seq_idx not in seq_headway_min:
+            rr_min = 1.0
+        elif prev is None:
+            wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
+            unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
+            rr_min = wait_s / 60.0 * unev * load
+        else:
+            prev_seq, _prev_a, prev_b = prev
+            rr_min = _scheduled_transfer_wait_min(
+                prev_seq, seq_idx,
+                route_sequences[prev_seq]["stops"][prev_b],
+                route_sequences[seq_idx]["stops"][a],
+                stop_time_min=stop_time_min,
+                route_stop_sequences=route_sequences,
+                seq_headway_min=seq_headway_min,
+                seq_jitter_s=seq_jitter_s or {},
+            ) * load
+        weights[idx] = 1.0 / max(1.0, rr_min)
+    total = float(weights.sum())
+    if total <= 0.0:
+        weights[0] = 1.0
+        total = 1.0
+    return tuple(candidates), weights / total
 
 def _accumulate_transit_journeys(
     totals: _OdTotals,
