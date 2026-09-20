@@ -197,6 +197,12 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         ("two_wheel_per_km_eur", mode_choice.two_wheel_per_km_eur),
         ("two_wheel_fixed_s", mode_choice.two_wheel_fixed_s),
         ("two_wheel_circuity", mode_choice.two_wheel_circuity),
+        ("rider_bias_s", mode_choice.rider_bias_s),
+        ("rest_base_speed_kmh", mode_choice.rest_base_speed_kmh),
+        ("rest_cont_speed_kmh", mode_choice.rest_cont_speed_kmh),
+        ("rest_access_s", mode_choice.rest_access_s),
+        ("rest_wait_s", mode_choice.rest_wait_s),
+        ("rest_circuity", mode_choice.rest_circuity),
     ):
         if value < 0:
             raise PassengerFlowError(f"{name} не может быть отрицательным")
