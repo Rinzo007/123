@@ -183,8 +183,6 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         raise PassengerFlowError("two_wheel_reach_m не может быть отрицательным")
     if mode_choice.car_no_car_factor < 0:
         raise PassengerFlowError("car_no_car_factor не может быть отрицательным")
-    if mode_choice.rider_bias_s < 0:
-        raise PassengerFlowError("rider_bias_s не может быть отрицательным")
     for name, value in (
         ("car_parking_min", mode_choice.car_parking_min),
         ("car_cost_per_km_eur", mode_choice.car_cost_per_km_eur),
