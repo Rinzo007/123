@@ -20,7 +20,7 @@ from ..base.takt import (
     _takt_po_seconds,
 )
 from ..network.geometry import _stop_key, haversine_meters
-from ..network.routes import build_journeys
+from ..network.routes import _route_segment_indices, build_journeys
 from .mode_choice import (
     _od_fare_eur,
     _takt_mode_shares_with_rest,
@@ -233,22 +233,22 @@ def _journey_crowd_extra(
         for seq_idx, a, b in journey[1]:
             seq = route_sequences[seq_idx]
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
-            lo, hi = sorted((a, b))
-            forward = a <= b
-            loads = seg_forward if forward else seg_reverse
-            for seg_i in range(lo, hi):
+            selected_segments = _route_segment_indices(seq, a, b)
+            for seg_i, is_forward in selected_segments:
+                loads = seg_forward if is_forward else seg_reverse
                 lf = float(loads.get((seq_idx, seg_i), 0.0))
                 if lf <= 0.0:
                     continue
                 extra_s += _segment_time_s(seq, seg_i) * (
                     _takt_crowding_ride_mult(lf) - 1.0
                 )
+            lo, hi = sorted((a, b))
             for stop_i in range(lo + 1, hi + 1):
                 extra_s += float(stop_extra.get((seq_idx, stop_i), 0.0))
-            if seq_headway_min is not None and seq_idx in seq_headway_min:
-                boarding_seg = a if forward else a - 1
-                if 0 <= boarding_seg < max(len(seq["stops"]) - 1, 1):
-                    lf = float(loads.get((seq_idx, boarding_seg), 0.0))
+            if seq_headway_min is not None and seq_idx in seq_headway_min and selected_segments:
+                first_seg, first_forward = selected_segments[0]
+                loads = seg_forward if first_forward else seg_reverse
+                lf = float(loads.get((seq_idx, first_seg), 0.0))
                     if lf > 1.0:
                         base_wait_s = _takt_po_seconds(
                             float(seq_headway_min[seq_idx])
@@ -303,9 +303,10 @@ def _accumulate_journey(
         totals.dir_totals[(rid, di)] += route_trips
 
         rs_key = (rid, di)
+        lo, hi = sorted((orig_pos, dest_pos))
         for stop in seq["stops"]:
             si = stop["position"]
-            if not (orig_pos <= si <= dest_pos):
+            if not (lo <= si <= hi):
                 continue
             _accumulate_stop(
                 totals.stop_totals[_stop_key(stop)],
@@ -314,15 +315,17 @@ def _accumulate_journey(
                 is_alighting=(si == dest_pos),
                 trips=route_trips,
             )
+            if si == orig_pos or si == dest_pos:
+                totals.seq_stop_totals[(seq_idx, si)] += route_trips
             stop_name_key = stop["name"]
             totals.route_stop_totals[rs_key][stop_name_key] = (
                 totals.route_stop_totals[rs_key].get(stop_name_key, 0.0)
                 + route_trips
             )
 
-        for seg_i in range(min(orig_pos, dest_pos), max(orig_pos, dest_pos)):
+        for seg_i, is_forward in _route_segment_indices(seq, orig_pos, dest_pos):
             totals.seg_totals[(seq_idx, seg_i)] += route_trips
-            if orig_pos < dest_pos:
+            if is_forward:
                 totals.seg_forward_totals[(seq_idx, seg_i)] += route_trips
             else:
                 totals.seg_reverse_totals[(seq_idx, seg_i)] += route_trips
