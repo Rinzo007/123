@@ -28,6 +28,8 @@ from passenger_flow.algorithm.kpis import _build_line_kpis
 from passenger_flow.core import _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
+    _takt_car_cost_s,
+    _takt_car_period_multiplier,
     _takt_mode_shares,
     _takt_no_car_shares,
     _takt_route_probs,
@@ -87,6 +89,24 @@ def test_takt_defaults_are_the_reference_defaults() -> None:
     assert math.isclose(mode.walk_circuity, 1.25)
     assert math.isclose(mode.rider_bias_s, 0.0)
 
+
+def test_takt_car_period_multiplier_matches_reference_formula() -> None:
+    assert math.isclose(_takt_car_period_multiplier(200.0, 200.0), 1.0)
+    assert math.isclose(_takt_car_period_multiplier(320.0, 200.0), 1.36)
+    assert math.isclose(_takt_car_period_multiplier(1000.0, 200.0), 1.8)
+    assert math.isclose(_takt_car_period_multiplier(10.0, 0.0), 1.0)
+
+
+def test_takt_car_cost_uses_base_time_and_period_multiplier() -> None:
+    mode = ModeChoiceConfig()
+    got = _takt_car_cost_s(
+        mode,
+        10000.0,
+        road_time_s=1800.0,
+        period_multiplier=1.8,
+    )
+    expected = 1800.0 * 1.8 + 240.0 + (10.0 * 1.3 * 0.25 + 1.5) * 360.0
+    assert math.isclose(got, expected, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_takt_wait_and_fare_golden_values() -> None:
     wait = FIXTURE["wait"]
