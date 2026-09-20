@@ -275,6 +275,44 @@ def test_multi_leg_search_reaches_four_legs() -> None:
 
 
 
+def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    journeys = build_journeys(
+        [(0, 2, 2)],
+        [(0, 0, 0)],
+        [seq],
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=5.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=0,
+        transfer_penalty_calc="fixed",
+        seq_headway_min={0: 10.0},
+        seq_jitter_s={0: 0.0},
+        wait_calc="takt",
+    )
+    assert journeys
+    assert journeys[0].legs == ((0, 2, 0),)
+
+
+def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
+    seq_a = _synthetic_sequence([1, 2, 3])
+    seq_b = _synthetic_sequence([4, 5, 6])
+    seq_b["stops"][0]["lat"] = seq_a["stops"][0]["lat"] + 0.0001
+    seq_b["stops"][1]["lat"] = seq_a["stops"][0]["lat"] + 0.0002
+    seq_c = _synthetic_sequence([7, 8, 9])
+    seq_c["stops"][0]["lat"] = seq_a["stops"][0]["lat"] + 0.0003
+    seq_c["stops"][1]["lat"] = seq_a["stops"][0]["lat"] + 0.0004
+    from passenger_flow.network.routes import _transfer_targets
+
+    got = list(_transfer_targets(0, 0, [seq_a, seq_b, seq_c], set((0,)), 800.0))
+    target_ids = [tb["id"] for _line, _ta, tb in got]
+    assert target_ids.count(4) == 1
+    assert target_ids.count(7) == 1
+    assert len(got) == 2
+
 def test_route_alternatives_use_takt_first_boarding_radius() -> None:
     seq0 = _synthetic_sequence([1, 2, 3])
     seq0["route_id"] = 10
