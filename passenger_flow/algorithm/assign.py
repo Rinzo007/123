@@ -247,31 +247,31 @@ def _journey_crowd_extra(
     seq_headway_min: Mapping[int, float] | None,
     wait_extra: Mapping[int, float] | None = None,
 ) -> np.ndarray:
-    """Дополнительное время ожидания из crowd/reliability feedback.
-
-    Ride-time и stop-dwell feedback уже входят в shortest-path edge cost.
-    Здесь остаётся crowding-множитель ожидания и внешний reliability extra.
-    """
+    """Дополнительное время ожидания по Takt Fr→unev→Rr."""
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
     seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
+    unreliability = crowd_state.get("unreliability", {}) if crowd_state else {}
     result = np.zeros(len(journeys), dtype=np.float64)
     wait_extra = wait_extra or {}
     for jidx, journey in enumerate(journeys):
         extra_s = 0.0
-        for seq_idx, a, b in journey[1]:
-            if seq_headway_min is not None and seq_idx in seq_headway_min:
-                selected_segments = _route_segment_indices(route_sequences[seq_idx], a, b)
-                if selected_segments:
-                    first_seg, first_forward = selected_segments[0]
-                    loads = seg_forward if first_forward else seg_reverse
-                    lf = float(loads.get((seq_idx, first_seg), 0.0))
-                    if lf > 1.0:
-                        base_wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
-                        extra_s += base_wait_s * (_takt_crowding_wait_mult(lf) - 1.0)
+        for leg_no, (seq_idx, a, b) in enumerate(journey.legs):
+            selected = _route_segment_indices(route_sequences[seq_idx], a, b)
+            if not selected or seq_headway_min is None or seq_idx not in seq_headway_min:
+                continue
+            first_seg, forward = selected[0]
+            loads = seg_forward if forward else seg_reverse
+            lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
+            wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
+            if leg_no == 0:
+                unev = max(1.0, float(unreliability.get((seq_idx, 0), 1.0)))
+                extra_s += wait_s * (unev * lf - 1.0)
+            else:
+                extra_s += wait_s * (lf - 1.0)
+        for seq_idx, _a, _b in journey.legs:
             extra_s += float(wait_extra.get(seq_idx, 0.0)) * 60.0
-        result[jidx] = extra_s / 60.0
+        result[jidx] = max(0.0, extra_s / 60.0)
     return result
-
 # ===== Накопление загрузок по вариантам =====
 
 
@@ -498,6 +498,8 @@ def _assign_od(
             wait_calc=wait_calc,
             crowd_state=crowd_state,
             transfer_index=transfer_index,
+            od_distance_m=_od_distance_meters(zones, zi, zj),
+            road_time_s=road_time_s,
         )
         if not journeys:
             _apply_car_only_modes(
