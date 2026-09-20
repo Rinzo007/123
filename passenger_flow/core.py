@@ -1006,6 +1006,7 @@ def run_passenger_flow(
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
+    period_seq_stop_totals: list[tuple[Mapping[tuple[int, int], float], float]] = []
 
     # 7. Проходы по периодам
     for period_index, period in enumerate(period_sources):
@@ -1021,6 +1022,7 @@ def run_passenger_flow(
             line=line,
         )
         _merge_pass_aggregates(accum, pass_agg)
+        period_seq_stop_totals.append((dict(pass_agg.get("seq_stop_totals", {})), period_hours))
         if period is not None:
             period_flows.append(
                 PeriodFlow(
@@ -1068,6 +1070,7 @@ def run_passenger_flow(
                     if accum["seg_reverse_totals"]
                     else None
                 ),
+                period_seq_stop_totals=period_seq_stop_totals,
             )
         )
     result = assemble_flow_result(
