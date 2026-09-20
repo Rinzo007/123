@@ -393,9 +393,6 @@ def _build_route_stop_sequence(
             open_values = _optional_value(
                 direction, ("openStops", "open_stops")
             )
-            open_values = _optional_value(
-                direction, ("openStops", "open_stops")
-            )
             if open_values is None:
                 open_values = _optional_value(route, ("openStops", "open_stops"))
             if open_values is None:
