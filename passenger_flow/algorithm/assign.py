@@ -90,6 +90,7 @@ class _OdTotals:
     fare_revenue: float = 0.0
     period_total: float = 0.0
     last_transit_s: float = 0.0
+    transit_s_by_period: dict[int, float] = field(default_factory=dict)
     route_totals: dict[int, float] = field(
         default_factory=lambda: defaultdict(float)
     )
@@ -133,6 +134,7 @@ class _OdTotals:
             "seg_reverse_totals": self.seg_reverse_totals,
             "seq_stop_totals": self.seq_stop_totals,
             "last_transit_s": self.last_transit_s,
+            "transit_s_by_period": self.transit_s_by_period,
         }
 
 
@@ -715,6 +717,7 @@ def _assign_od(
                 )[1]
             )
             totals.last_transit_s = transit_cost_s
+            totals.transit_s_by_period.setdefault(int(period_index), transit_cost_s)
             transit_trips = _split_transit_trips(
                 totals,
                 mode=mode,
