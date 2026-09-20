@@ -264,10 +264,15 @@ def _run_msa_period(
                 abs(v - smoothed_seg_reverse.get(k, 0.0))
                 for k, v in raw_seg_reverse.items()
             )
+            + sum(
+                abs(v - smoothed_stop.get(k, 0.0))
+                for k, v in raw_stop.items()
+            )
         ) / max(
             denom
             + sum(smoothed_seg_forward.values())
-            + sum(smoothed_seg_reverse.values()),
+            + sum(smoothed_seg_reverse.values())
+            + sum(smoothed_stop.values()),
             1.0,
         )
         prev_smoothed = dict(smoothed)
