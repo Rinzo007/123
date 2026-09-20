@@ -76,6 +76,9 @@ const bundleStart = bundle.indexOf("async function Bs(");
 const odNeedle = "et.fareJ[at]=uo;";
 const odIndex = bundle.indexOf(odNeedle, bundleStart);
 if (odIndex < 0) throw new Error("Could not locate initialized Takt fare block");
+const odDebugNeedle = "if(et.eWalk[at]=ln,!c)";
+const odDebugIndex = bundle.indexOf(odDebugNeedle, odIndex);
+if (odDebugIndex < 0) throw new Error("Could not locate initialized Takt mode-choice block");
 const debugNeedle = "const Xt=at*k+G;";
 const debugIndex = bundle.indexOf(debugNeedle, odIndex);
 if (debugIndex < 0) throw new Error("Could not locate Takt assignment decision marker");
@@ -92,9 +95,9 @@ const modeDebugCode = `\nglobalThis.__TAKT_debug_modes = {
   transit: Ht.transit, car: Ht.car, walk: Ht.walk, rest: Ht.rest
 };\n`;
 const instrumented =
-  bundle.slice(0, odIndex + odNeedle.length) +
+  bundle.slice(0, odDebugIndex) +
   odDebugCode +
-  bundle.slice(odIndex, debugIndex) +
+  bundle.slice(odDebugIndex, debugIndex) +
   routeDebugCode +
   bundle.slice(debugIndex, modeIndex) +
   modeDebugCode +
