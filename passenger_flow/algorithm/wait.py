@@ -135,10 +135,16 @@ def _build_crowd_state(
                 continue
             if open_values is not None and not bool(open_values[stop_idx]):
                 continue
+            capacity = float(seq.get("capacity") or spec.capacity)
             dwell_integral += (
                 float(spec.dwell_per_pax_s)
                 * pax
-                / (2.0 * direction_factor * max(float(period_hours), 1e-9) * 3600.0)
+                / (
+                    2.0
+                    * max(capacity, 1.0)
+                    * max(float(period_hours), 1e-9)
+                    * 3600.0
+                )
             )
         H = min(
             1.0,
