@@ -803,6 +803,20 @@ def test_station_qa_can_raise_min_headway_above_vehicle_track_limit() -> None:
     assert len(results) == 1
     assert math.isclose(results[0].min_headway, 0.75, rel_tol=1e-9, abs_tol=1e-9)
 
+def test_station_qa_uses_peak_stop_rate_not_pax_per_train() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    results = _build_line_kpis(
+        [seq],
+        {1: 100.0},
+        10.0,
+        0.0,
+        100.0,
+        None,
+        period_seq_stop_totals=[({(0, 0): 120.0}, 2.0)],
+    )
+    expected = (20.0 + 25.0) / (60.0 - 2.0 * (120.0 / 2.0) / 60.0)
+    assert math.isclose(results[0].min_headway, expected, rel_tol=1e-12, abs_tol=1e-12)
+
 def test_fixed_build_ranges_charge_full_segment_before_reuse() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
     seq_b = _synthetic_sequence([1, 2, 3])
