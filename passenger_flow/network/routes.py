@@ -273,6 +273,16 @@ def _takt_ri_anchor_min() -> float:
     """An = Sn(62) = 405 + 0.25×62 секунд."""
     return (_TAKT_WALK_BASE_S + 62.0 * _TAKT_WALK_PER_M_S) / 60.0
 
+def _takt_pool_access_min(distance_m: float) -> float:
+    """Access/egress cost used by Takt ri() shortest-path candidate."""
+    return (
+        max(0.0, float(distance_m))
+        / max(float(_TAKT_WALK_SPEED_MPS), 0.01)
+        * 1.5
+        / 60.0
+    )
+
+
 def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> float:
     """Время поездки по формуле Takt C(...) без прохода по сегментам."""
     if orig_pos == dest_pos:
