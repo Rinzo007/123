@@ -199,6 +199,17 @@ tests/test_passenger_flow_takt_parity.py
 
 Следующий крупный P2-узел — выравнивание поиска маршрутов с графовым поиском Takt, затем shared-infrastructure capacity.
 
+## P2 — shared infrastructure parity
+
+Добавлен первый слой ``Ga/Ya`` parity: общие физические stop-to-stop секции
+одного вида транспорта используют общий ``track_tph`` budget; для каждой
+линии вычисляется residual capacity после остальных линий и из неё —
+минимально допустимый ``headway``.
+
+Ограничение намеренно использует stop-to-stop секции; геометрическое
+разбиение JS ``Ja/Xa`` по промежуточным пересечениям остаётся следующим
+уровнем exact parity.
+
 ## JSON — манифесты городов
 
 Структура: `{city, version, sha256, files: {имя_роли: размер_в_байтах}, total}`.
