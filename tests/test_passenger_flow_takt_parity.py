@@ -275,6 +275,41 @@ def test_multi_leg_search_reaches_four_legs() -> None:
 
 
 
+def test_route_alternatives_use_takt_first_boarding_radius() -> None:
+    seq0 = _synthetic_sequence([1, 2, 3])
+    seq0["route_id"] = 10
+    seq1 = _synthetic_sequence([4, 5, 6])
+    seq1["route_id"] = 11
+    seq1["stops"][0]["lat"] += 0.0005  # ≈55 m
+    seq2 = _synthetic_sequence([7, 8, 9])
+    seq2["route_id"] = 12
+    seq2["stops"][0]["lat"] += 0.005  # ≈550 m
+    seqs = [seq0, seq1, seq2]
+    origins = [(0, 0, 0), (1, 0, 0), (2, 0, 0)]
+    destinations = [(0, 2, 2), (1, 2, 2), (2, 2, 2)]
+
+    journeys = build_journeys(
+        origins,
+        destinations,
+        seqs,
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=5.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=0,
+        transfer_penalty_calc="fixed",
+        seq_headway_min={0: 10.0, 1: 10.0, 2: 10.0},
+        seq_jitter_s={0: 0.0, 1: 0.0, 2: 0.0},
+        wait_calc="takt",
+    )
+
+    first_boarding = journeys[0].legs[0][0]
+    assert first_boarding == 0
+    assert all(j.legs[0][0] in {0, 1} for j in journeys)
+    assert len(journeys) == 2
+
 def test_segment_crowding_uses_directional_feedback() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["route_type_key"] = "bus"
