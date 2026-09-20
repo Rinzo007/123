@@ -103,7 +103,8 @@ def _build_crowd_state(
         if period_runs <= 0.0 or spec.capacity <= 0:
             continue
 
-        denom = period_runs * float(spec.capacity)
+        capacity = float(seq.get("capacity") or spec.capacity)
+        denom = period_runs * max(capacity, 1.0)
         seg_count = (
             len(seq["stops"])
             if seq.get("closed")
