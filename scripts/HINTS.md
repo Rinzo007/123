@@ -297,3 +297,5 @@ float32-потоки по периодам (времена поездки, дл�
 | `4ba4a1990dc5e1b72b38.json` | Стиль карты OpenFreeMap (`sources`/`sprite`/`layers`). |
 | `cd7f8edb06b60130359a.json` | `tiles.json` OpenFreeMap (векторные тайлы planet, версия). |
 | `73e75e58d8c7bb62cc25.json` | Спрайт-атлас (`aerialway`, `airfield`, … координаты иконок на атласе). |
+
+P1 cleanup: `mode_choice.py` оставляет только единую Takt-модель выбора режима; исторический простой логит удалён.
