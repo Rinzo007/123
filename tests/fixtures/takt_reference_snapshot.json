@@ -1,8 +1,8 @@
 {
   "reference": {
     "engine": "Takt web bundle",
-    "bundle": "bd956ff0a1875604740f40.js",
-    "source": "scripts/bd956ff0a1875604740f40.js"
+    "bundle": "bd956ff0a1875604740f.js",
+    "source": "scripts/bd956ff0a1875604740f.js"
   },
   "tolerance": {
     "default_abs": 1e-9,
