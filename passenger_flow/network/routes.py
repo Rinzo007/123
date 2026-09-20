@@ -803,29 +803,16 @@ def _enumerate_journeys(
                 seen_journeys.add(signature)
                 journeys.append(JourneyAlternative(total, final_legs))
 
-        # Ride one physical segment in either direction. For a closed route
-        # the same sequence edge is traversable cyclically.
+        # Takt's `we` connects every pair of open stops on the same line.
+        # Dijkstra can therefore jump directly from a boarding stop to any
+        # alighting stop; the edge cost is the exact C(...) travel time.
         n = len(seq["stops"])
-        neighbors: list[int] = []
-        if seq.get("closed") and n >= 2:
-            if seq.get("both_ways"):
-                neighbors = [(pos - 1) % n, (pos + 1) % n]
-                if neighbors[0] == neighbors[1]:
-                    neighbors = neighbors[:1]
-            else:
-                neighbors = [(pos + 1) % n]
-        elif n >= 2:
-            if pos > 0:
-                neighbors.append(pos - 1)
-            if pos + 1 < n:
-                neighbors.append(pos + 1)
-
-        for next_pos in neighbors:
-            if next_pos == pos:
-                continue
+        open_flags = seq.get("open", [True] * n)
+        ride_targets = [i for i in range(n) if i != pos and open_flags[i]]
+        for next_pos in ride_targets:
             ride = _route_ride_time_min(seq, pos, next_pos)
             if ride <= 0.0:
-                ride = stop_time_min
+                ride = abs(next_pos - pos) * stop_time_min
             new_cost = cost + ride
             nkey = (seq_idx, next_pos, transfers, leg_start, used)
             if new_cost + 1e-12 < best.get(nkey, math.inf):
