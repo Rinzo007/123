@@ -87,7 +87,7 @@ const debugCode = `\nif (H === 0 && at === 0 && G === 0) globalThis.__TAKT_debug
   btS: bt[0].s,
   Lr: Lr(bt[0].legs[0], 0),
   legs: bt[0].legs
-};\n`;
+};\nif (typeof Ht !== "undefined") globalThis.__TAKT_debug_modes = { transit: Ht.transit, car: Ht.car, walk: Ht.walk, rest: Ht.rest };\n`;
 const instrumented =
   bundle.slice(0, debugIndex) +
   debugCode +
@@ -163,6 +163,7 @@ async function main() {
   const line = result.lines?.[0];
   const snapshot = {
     debug: sandbox.__TAKT_debug ?? null,
+    debugModes: sandbox.__TAKT_debug_modes ?? null,
     reference: {
       engine: "Takt web bundle",
       bundle: "bd956ff0a1875604740f.js",
