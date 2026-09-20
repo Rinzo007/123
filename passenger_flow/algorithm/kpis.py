@@ -112,39 +112,57 @@ def _atomic_infrastructure_sections(
         by_segment[(seq_idx, seg_i)] = pieces
     return section_lines, by_segment
 
+def _sequence_period_headway(
+    seq: Mapping[str, Any],
+    period_index: int,
+    default_headway_min: float,
+    headway_by_route: Mapping[int, float] | None,
+) -> float:
+    raw = seq.get("headways")
+    if isinstance(raw, (list, tuple)) and period_index < len(raw):
+        try:
+            hv = float(raw[period_index])
+            if hv > 0.0 and math.isfinite(hv):
+                return hv
+        except (TypeError, ValueError):
+            pass
+    rid = int(seq["route_id"])
+    if headway_by_route is not None and rid in headway_by_route:
+        return float(headway_by_route[rid])
+    return float(default_headway_min)
+
+
 def _shared_capacity_min_headways(
     route_sequences: list[dict[str, Any]],
     default_headway_min: float,
     headway_by_route: Mapping[int, float] | None,
     atomic_sections: dict[tuple[str, str, str], set[int]] | None = None,
 ) -> dict[int, float]:
-    """Минимальный интервал с учётом shared infrastructure, по модели Takt Ga.
-
-    Секция определяется физической парой соседних открытых остановок и типом
-    транспорта. Для каждой линии residual capacity равна `track_tph` секции
-    минус частота остальных линий, использующих ту же секцию.
-    """
+    """Ga: shared track residual capacity, evaluated for every period."""
     section_lines = atomic_sections if atomic_sections is not None else _atomic_infrastructure_sections(route_sequences)[0]
-    min_headway: dict[int, float] = {rid: 60.0 / max(tph, 1e-9) for rid, tph in line_limit.items()}
-    line_headway = lambda rid: float(headway_by_route.get(rid, default_headway_min)) if headway_by_route is not None else float(default_headway_min)
+    result: dict[int, float] = {
+        int(seq["route_id"]): 60.0 / max(float(vehicle_spec_for_route_type(seq.get("route_type_key", "bus")).track_tph), 1e-9)
+        for seq in route_sequences
+    }
+    by_seq = {int(seq.get("_seq_idx", i)): seq for i, seq in enumerate(route_sequences)}
     for key, lines in section_lines.items():
         if len(lines) < 2:
             continue
         mode = key[0]
-        limit = min(
-            float(vehicle_spec_for_route_type(mode).track_tph),
-            *(line_limit.get(rid, 0.0) for rid in lines),
-        )
-        for rid in lines:
-            own_tph = 60.0 / max(line_headway(rid), 1e-9)
-            others_tph = sum(
-                60.0 / max(line_headway(other), 1e-9)
-                for other in lines if other != rid
-            )
-            residual = limit - others_tph
-            min_headway[rid] = max(min_headway.get(rid, 0.0), 60.0 / residual) if residual > 0.01 else math.inf
-    return min_headway
-
+        limit = float(vehicle_spec_for_route_type(mode).track_tph)
+        for period_index in range(5):
+            line_freq: dict[int, float] = {}
+            for seq_idx in lines:
+                seq = by_seq.get(int(seq_idx))
+                if seq is None:
+                    continue
+                h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
+                line_freq[int(seq["route_id"])] = 60.0 / max(h, 1e-9) if h > 0.0 else 0.0
+            for rid in list(line_freq):
+                residual = limit - sum(freq for other, freq in line_freq.items() if other != rid)
+                minimum = 60.0 / residual if residual > 0.01 else math.inf
+                result[rid] = max(result.get(rid, 0.0), minimum)
+    return result
 def _sequence_capital_cost_eur(
     seq: Mapping[str, Any],
     spec: VehicleSpec,
@@ -288,8 +306,10 @@ def _station_min_headways(
     route_sequences: list[dict[str, Any]],
     period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None,
     vehicle_specs: Mapping[str, VehicleSpec] | None = None,
+    default_headway_min: float = 10.0,
+    headway_by_route: Mapping[int, float] | None = None,
 ) -> dict[int, float]:
-    """Минимальный headway из станционного dwell/turnback ограничения Qa."""
+    """Qa: station dwell/turnback limit for each service period."""
     result: dict[int, float] = {}
     if not period_seq_stop_totals:
         return result
@@ -299,19 +319,21 @@ def _station_min_headways(
         spec = vehicle_specs.get(mode) if vehicle_specs else None
         if spec is None:
             spec = vehicle_spec_for_route_type(mode)
-        if spec.capacity <= 0:
-            continue
         station_min = 0.0
-        stops = seq.get("stops") or []
-        for stop_totals, hours in period_seq_stop_totals:
-            hours = max(float(hours), 1e-9)
-            peak_rate = 0.0
-            for stop_idx in range(len(stops)):
-                stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
-                peak_rate = max(peak_rate, stop_p / hours / float(spec.capacity))
-            n = 60.0 - float(spec.dwell_per_pax_s) * peak_rate / 60.0
+        for period_index, (stop_totals, hours) in enumerate(period_seq_stop_totals):
+            h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
+            if h <= 0.0:
+                continue
+            period_runs = max(float(hours), 1e-9) * 60.0 / h
+            direction_factor = 1.0 if bool(seq.get("closed")) and not bool(seq.get("both_ways")) else 2.0
+            pax_per_train = 0.0
+            if period_runs > 0.0:
+                for stop_idx in range(len(seq.get("stops") or [])):
+                    stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
+                    pax_per_train = max(pax_per_train, stop_p / (period_runs * direction_factor))
+            n = 60.0 - float(spec.dwell_per_pax_s) * pax_per_train / 60.0
             dwell_min = (float(spec.dwell_s) + 25.0) / n if n > 6.0 else 999.0
-            turnback_min = 0.0 if seq.get("closed") else float(spec.turnback_s) / 120.0
+            turnback_min = 0.0 if bool(seq.get("closed")) else float(spec.turnback_s) / 120.0
             station_min = max(station_min, dwell_min, turnback_min)
         result[rid] = max(result.get(rid, 0.0), station_min)
     return result
