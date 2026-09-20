@@ -15,7 +15,7 @@ from typing import Any, NamedTuple
 from scipy.spatial import cKDTree
 
 from ..models import RouteLike
-from ...support import type_label
+from support import type_label
 from ..base.models import vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_ALTS,
