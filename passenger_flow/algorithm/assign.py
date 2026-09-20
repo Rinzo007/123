@@ -23,7 +23,7 @@ from ..network.geometry import _stop_key, haversine_meters
 from ..network.routes import _route_segment_indices, build_journeys
 from .mode_choice import (
     _od_fare_eur,
-    _takt_mode_shares_with_rest,
+    _takt_mode_shares,
     _takt_route_choice,
     _takt_route_probs,
 )
@@ -185,7 +185,7 @@ def _apply_car_only_modes(
     if mode is None:
         return
     od_meters = _od_distance_meters(zones, zi, zj)
-    _transit, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares_with_rest(
+    _transit, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares(
         mode,
         od_meters,
         None,
@@ -218,7 +218,7 @@ def _split_transit_trips(
         od_meters,
         transit_s / 60.0 if transit_s > 0.0 else None,
     )
-    transit_share, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares_with_rest(
+    transit_share, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares(
         mode,
         od_meters,
         transit_s,
