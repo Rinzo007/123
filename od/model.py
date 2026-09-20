@@ -77,7 +77,9 @@ class PurposeOd:
     ``matrix`` — суммарная матрица, ``purpose_matrices`` — по целям в том же
     порядке, что ``purposes`` (CSR для движка Takt, плотные для gravity);
     ``period_out``/``period_ret`` — взвешенные по
-    долям поездок профили периодов суток; ``shares`` — доля каждой цели.
+    долям поездок профили периодов суток; ``shares`` — доля каждой цели;
+    ``purpose_base_times`` — сохранённые времена ``baseT`` по целям;
+    ``commute_base_time`` — сохранённый ``commuteBaseT``.
     """
 
     matrix: np.ndarray
