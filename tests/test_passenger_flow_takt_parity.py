@@ -24,6 +24,8 @@ except ImportError:
 
 import numpy as np
 
+from passenger_flow.algorithm.kpis import _build_line_kpis
+from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
     _takt_mode_shares,
     _takt_mode_shares_with_rest,
@@ -216,3 +218,36 @@ def test_multi_leg_search_reaches_four_legs() -> None:
     assert len(journeys) <= 3
 
 
+
+def test_segment_crowding_uses_directional_feedback() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["route_type_key"] = "bus"
+    state = _build_crowd_state(
+        [seq],
+        {(0, 0): 300.0, (0, 1): 300.0},
+        {(0, 0): 600.0, (0, 1): 50.0},
+        {(0, 0): 100.0},
+        {0: 10.0},
+        None,
+        3.0,
+    )
+    assert state["seg_forward"][(0, 0)] < state["seg_reverse"][(0, 0)]
+    assert state["seg_reverse"][(0, 0)] > 1.0
+    assert state["stop_extra"][(0, 0)] > 0.0
+
+
+def test_line_opex_includes_daily_vehicle_cost() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["route_id"] = 7
+    seq["route_name"] = "bus 7"
+    results = _build_line_kpis(
+        [seq],
+        {7: 100.0},
+        10.0,
+        0.0,
+        100.0,
+        None,
+    )
+    result = results[0]
+    assert result.fleet >= 1.0
+    assert result.opex_day > result.fleet * 250.0
