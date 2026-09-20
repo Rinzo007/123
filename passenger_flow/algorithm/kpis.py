@@ -50,7 +50,7 @@ def _route_cycle(
     j_s = run_s + open_count * spec.dwell_s
     if closed:
         cycle_s = j_s + 300.0
-        cycle_km = one_way_km
+        cycle_km = one_way_km * (2.0 if seq.get("both_ways") else 1.0)
     else:
         cycle_s = 2.0 * j_s + 600.0
         cycle_km = 2.0 * one_way_km
@@ -104,8 +104,20 @@ def _build_line_kpis(
             fleet *= 2
         share = trips / assigned_trips if assigned_trips > 0.0 else 0.0
         capacity = spec.capacity
-        one_way_km = cycle_km if seq.get("closed") else cycle_km / 2.0
-        capital_cost_eur = one_way_km * float(spec.capex_eur_per_km) * capex_factor
+        one_way_km = (
+            cycle_km / 2.0
+            if seq.get("closed") and seq.get("both_ways")
+            else (cycle_km if seq.get("closed") else cycle_km / 2.0)
+        )
+        capital_multiplier = (
+            2.0 if seq.get("closed") and seq.get("both_ways") else 1.0
+        )
+        capital_cost_eur = (
+            one_way_km
+            * float(spec.capex_eur_per_km)
+            * capex_factor
+            * capital_multiplier
+        )
 
         # Пассажиро-километры и классы: по сегментам направления при наличии
         # seg_totals (Takt: segP → passengerKm/классы по nt сегмента).
