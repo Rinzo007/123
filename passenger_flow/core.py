@@ -514,6 +514,35 @@ def _load_od_pairs(
     return od_rows, od_cols, matrix[od_rows, od_cols]
 
 
+def _period_seq_headways(
+    route_sequences: Sequence[Mapping[str, Any]],
+    headway_min: float | None,
+    headway_by_route: Mapping[int, float] | None,
+    period_index: int,
+) -> dict[int, float] | None:
+    """Возвращает headway каждой sequence для конкретного Takt-периода."""
+    if headway_min is None and headway_by_route is None and not route_sequences:
+        return None
+    result: dict[int, float] = {}
+    for seq_idx, seq in enumerate(route_sequences):
+        raw = seq.get("headways")
+        hv: float | None = None
+        if isinstance(raw, (list, tuple)) and period_index < len(raw):
+            try:
+                candidate = float(raw[period_index])
+                if candidate > 0.0 and math.isfinite(candidate):
+                    hv = candidate
+            except (TypeError, ValueError):
+                hv = None
+        rid = int(seq["route_id"])
+        if hv is None and headway_by_route is not None and rid in headway_by_route:
+            hv = float(headway_by_route[rid])
+        if hv is None and headway_min is not None:
+            hv = float(headway_min)
+        if hv is not None and hv > 0.0:
+            result[seq_idx] = hv
+    return result or None
+
 def _prepare_seq_timing(
     route_sequences: list[dict[str, Any]],
     headway_min: float | None,
@@ -668,12 +697,20 @@ class _AssignContext:
     base_time_s: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
+    seq_headway_periods: tuple[Mapping[int, float] | None, ...]
     wait_calc: str
     vehicle_specs: Mapping[str, VehicleSpec] | None
     car_period_multipliers: tuple[float, ...]
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
 
-    def _common_kwargs(self) -> dict[str, Any]:
+    def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
+        headway = (
+            self.seq_headway_min
+            if period_index is None
+            else self.seq_headway_periods[period_index]
+            if period_index < len(self.seq_headway_periods)
+            else self.seq_headway_min
+        )
         return {
             "stop_time_min": self.stop_time_min,
             "wait_time_min": self.wait_base,
@@ -688,7 +725,7 @@ class _AssignContext:
             "zones": self.zones,
             "no_car_shares": self.no_car_shares,
             "base_time_s": self.base_time_s,
-            "seq_headway_min": self.seq_headway_min,
+            "seq_headway_min": headway,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
             "transfer_index": self.transfer_index,
@@ -720,7 +757,7 @@ class _AssignContext:
                 else 1.0
             ),
             transfer_index=self.transfer_index,
-            **{k: v for k, v in self._common_kwargs().items() if k != "transfer_index"},
+            **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
     def msa(
@@ -754,7 +791,7 @@ class _AssignContext:
                 if period_index < len(self.car_period_multipliers)
                 else 1.0
             ),
-            **self._common_kwargs(),
+            **self._common_kwargs(period_index),
         )
 
 
@@ -1089,6 +1126,10 @@ def run_passenger_flow(
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
+        seq_headway_periods=tuple(
+            _period_seq_headways(route_sequences, headway_min, headway_by_route, pi)
+            for pi in range(max(1, len(period_sources)))
+        ),
         wait_calc=wait_calc,
         vehicle_specs=vehicle_specs,
         car_period_multipliers=car_period_multipliers,
