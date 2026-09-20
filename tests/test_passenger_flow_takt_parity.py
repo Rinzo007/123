@@ -25,7 +25,11 @@ except ImportError:
 import numpy as np
 
 from passenger_flow.algorithm.assign import _journey_crowd_extra
-from passenger_flow.algorithm.kpis import _build_line_kpis, _shared_capacity_min_headways
+from passenger_flow.algorithm.kpis import (
+    _build_line_kpis,
+    _sequence_capital_cost_eur,
+    _shared_capacity_min_headways,
+)
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
 from passenger_flow.algorithm.mode_choice import (
@@ -393,6 +397,23 @@ def test_base_time_nan_is_treated_as_missing() -> None:
         1,
     )
 
+
+def test_explicit_takt_row_drives_segment_capital_cost() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["route_type_key"] = "tram"
+    seq["row"] = "reserved"
+    seq["row_explicit"] = True
+    seq["seg_cost_mul"] = [1.0, 1.0]
+    spec = __import__("passenger_flow.base.models", fromlist=["VehicleSpec"]).VEHICLE_DEFAULTS["tram"]
+    distance_km = sum(
+        haversine_meters(
+            seq["stops"][i]["lat"], seq["stops"][i]["lon"],
+            seq["stops"][i + 1]["lat"], seq["stops"][i + 1]["lon"],
+        ) / 1000.0
+        for i in range(2)
+    )
+    got = _sequence_capital_cost_eur(seq, spec, 1.0)
+    assert math.isclose(got, distance_km * 18_000_000.0, rel_tol=1e-12, abs_tol=1e-8)
 
 def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
     seq = _synthetic_sequence([1, 2, 3])
