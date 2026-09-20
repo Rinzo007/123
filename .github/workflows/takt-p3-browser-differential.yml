@@ -17,7 +17,14 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Fetch pinned Takt bundle
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/Rinzo007/123/${GITHUB_SHA}/scripts/bd956ff0a1875604740f7.js" \
+            -o "${RUNNER_TEMP}/bd956ff0a1875604740f7.js"
+
       - name: Execute Takt bundle
+        env:
+          TAKT_BUNDLE_PATH: "${{ runner.temp }}/bd956ff0a1875604740f7.js"
         run: node scripts/takt_browser_snapshot.js tests/fixtures/takt_browser_snapshot.generated.json
 
       - name: Upload JS snapshot
