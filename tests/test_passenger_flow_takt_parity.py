@@ -45,6 +45,7 @@ from passenger_flow.base.takt import (
     _takt_hold_prob,
     _takt_po_seconds,
 )
+from passenger_flow.network.geometry import haversine_meters
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
