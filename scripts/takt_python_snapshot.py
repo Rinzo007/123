@@ -28,6 +28,17 @@ class _Direction:
 
 
 @dataclass(frozen=True)
+class _HarnessZones:
+    ids: np.ndarray
+    polygons: tuple[object, ...]
+    xy: np.ndarray
+    bounds: tuple[float, float, float, float]
+
+    def __len__(self) -> int:
+        return int(self.ids.shape[0])
+
+
+@dataclass(frozen=True)
 class _Route:
     ok: bool
     route_id: int
@@ -56,7 +67,7 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         [[0.0000, 52.3700, 1000.0], [0.0050, 52.3700, 1000.0]],
         dtype=np.float64,
     )
-    zones = SimpleNamespace(
+    zones = _HarnessZones(
         ids=np.array([0, 1], dtype=np.int64),
         polygons=(None, None),
         xy=points[:, :2],
