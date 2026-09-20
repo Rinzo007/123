@@ -218,6 +218,7 @@ def _run_msa_period(
     period_hours: float = 24.0,
     vehicle_specs: Mapping[str, VehicleSpec] | None = None,
     base_time_s: np.ndarray | None = None,
+    car_base_time_s: np.ndarray | None = None,
     period_index: int = 0,
     car_period_multiplier: float = 1.0,
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
