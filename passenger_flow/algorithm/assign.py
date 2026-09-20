@@ -451,6 +451,7 @@ def _assign_od(
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
+                rest_s=_base_time_for_pair(base_time_s, period_index, zi, zj),
             )
             continue
 
