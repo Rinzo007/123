@@ -131,6 +131,28 @@ def test_route_sequence_validation_rejects_invalid_geometry() -> None:
     with pytest.raises(PassengerFlowError):
         _validate_route_sequences([seq])
 
+def test_route_sequence_validation_rejects_non_monotonic_cumulative_time() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["cum_t_s"] = [0.0, 120.0, 60.0]
+    with pytest.raises(PassengerFlowError):
+        _validate_route_sequences([seq])
+
+
+def test_flow_input_validation_rejects_non_finite_logit_temperature() -> None:
+    from passenger_flow.base.takt import TAKT_PERIODS
+    kwargs = dict(
+        max_transfers=3, transfer_radius_m=800.0, transfer_wait_min=None,
+        transfer_penalty_calc="takt", headway_min=10.0, headway_by_route=None,
+        wait_calc="takt", include_reliability=True, capex_factor=1.0,
+        capex_amort_years=30.0, wait_crowding_per_100_min=0.1,
+        msa_max_iterations=20, msa_gap=0.01, periods=TAKT_PERIODS,
+        mode_choice=ModeChoiceConfig(), base_time_s=None,
+        stop_search_radius_m=1500.0, stop_time_min=2.0, wait_time_min=0.0,
+        walk_to_stop_min=0.0, transfer_penalty_min=10.0, logit_temp=float("nan"),
+    )
+    with pytest.raises(PassengerFlowError):
+        _validate_flow_inputs(np.zeros((1, 1)), 1, **kwargs)
+
 def test_takt_defaults_are_the_reference_defaults() -> None:
     mode = ModeChoiceConfig()
     assert math.isclose(mode.car_no_car_share, 0.35)
