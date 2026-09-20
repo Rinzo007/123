@@ -156,7 +156,8 @@ load factor ≈ пассажиры на участке / доступная вм
 | per-line headway | Прямые поездки получают ожидание из headway конкретного маршрута, включая `headway_by_route`. |
 | mode choice | Дефолты приведены к Takt: `noCar=0.35`, множитель `0.78`, `VOT=360`, ходьба `1.33 м/с` и `×1.25`. |
 | density adjustment | `run_passenger_flow(..., population=...)` позволяет применять плотностную поправку `noCar` по origin-зонам, как в JS. |
-| rider bias | Добавлен `rider_bias_s` для постоянного сдвига стоимости транзита `Wo`. |
+| rider bias | Добавлен `rider_bias_s` для постоянного сдвига стоимости транзита `Wo`; знак значения не ограничивается. |
+| defaults | Критичные parity-константы вынесены в `passenger_flow/base/defaults.py`; `models.py` и `takt.py` используют единый источник. |
 
 Golden/regression-набор:
 
