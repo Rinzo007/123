@@ -140,7 +140,7 @@ def _takt_bike_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
 
 def _takt_walk_cost_s(mode: ModeChoiceConfig, od_meters: float) -> float:
     """Стоимость пешей поездки в секундах (Takt ``Ze*1.25/ae``)."""
-    return od_meters * mode.walk_circuity / mode.walk_speed_mps
+    return od_meters * 1.25 * mode.walk_circuity / mode.walk_speed_mps
 
 
 def _takt_mode_shares(
