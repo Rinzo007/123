@@ -265,7 +265,9 @@ Route sequence сохраняет `headways[0..4]` из route/direction metadata
 `Ga` считает residual track tph отдельно по каждому периоду и возвращает максимальный требуемый minimum headway.
 `Qa` считает `pax/train` через периодный runs × direction factor, затем применяет dwell/turnback constraint.
 Fleet/OPEX повторяют `cn`: fleet считается по каждому headway, берётся максимум; `vehicleKm/day` суммирует периоды, а OPEX умножается на `J(def)/capacity`.
-### P2-C parity update — La decoded geometry
+
+`Qa` дополнительно выровнен: его вход теперь `peak stopP / period.hours / direction_factor`,
+что соответствует вызову `Qa(c.def.mode,c.closed,Ct)` в JS; расчёт `pax/train` используется только в `Fr`-style dwell feedback.### P2-C parity update — La decoded geometry
 
 `La()`-style CAPEX reuse теперь использует `geometry_legs`/`segment_lengths_m`:
 канонический edge key округляется по JS `Math.round(x*1e5)`, а reused fraction считается по длине фактических sub-edges.
