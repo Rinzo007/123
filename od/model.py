@@ -86,6 +86,8 @@ class PurposeOd:
     period_ret: tuple[float, ...]
     shares: tuple[float, ...]
     purposes: tuple[Purpose, ...]
+    purpose_base_times: tuple[np.ndarray | None, ...] = ()
+    commute_base_time: np.ndarray | None = None
 
 
 def _as_sparse(matrix: np.ndarray) -> sparse.csr_matrix:
