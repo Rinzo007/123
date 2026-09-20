@@ -260,6 +260,7 @@ def assemble_flow_result(
     period_flows: tuple[PeriodFlow, ...] = (),
     line_results: tuple[LineResult, ...] = (),
     raw_transit_s: float = 0.0,
+    raw_transit_s_by_period: tuple[float, ...] = (),
 ) -> FlowResult:
     """Собирает маршруты и остановки с потоками в ``FlowResult``."""
     route_flows = _build_route_flows(
@@ -303,4 +304,5 @@ def assemble_flow_result(
         raw_revenue_day=float(raw_revenue_day),
         raw_opex_day=float(raw_opex_day),
         raw_transit_s=float(raw_transit_s),
+        raw_transit_s_by_period=tuple(float(v) for v in raw_transit_s_by_period),
     )
