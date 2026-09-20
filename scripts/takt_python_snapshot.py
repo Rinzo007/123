@@ -10,7 +10,6 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from od.model import Zones
 from passenger_flow import TAKT_PERIODS, run_passenger_flow
 
 
@@ -57,7 +56,7 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         [[0.0000, 52.3700, 1000.0], [0.0050, 52.3700, 1000.0]],
         dtype=np.float64,
     )
-    zones = Zones(
+    zones = SimpleNamespace(
         ids=np.array([0, 1], dtype=np.int64),
         polygons=(None, None),
         xy=points[:, :2],
