@@ -325,6 +325,56 @@ def test_direct_route_allows_reverse_travel_within_direction_sequence() -> None:
     assert journeys
     assert journeys[0].legs == ((0, 2, 0),)
 
+def test_same_stop_transfer_is_reachable_in_state_graph() -> None:
+    seq_a = _synthetic_sequence([1, 2, 3])
+    seq_b = _synthetic_sequence([1, 4, 5])
+    seq_a["route_id"] = 201
+    seq_b["route_id"] = 202
+    journeys = build_journeys(
+        [(0, 0, 0)],
+        [(1, 2, 2)],
+        [seq_a, seq_b],
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=0.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=1,
+        transfer_penalty_calc="fixed",
+        seq_headway_min={0: 10.0, 1: 10.0},
+        seq_jitter_s={0: 0.0, 1: 0.0},
+        wait_calc="takt",
+    )
+    assert any(
+        len(j.legs) == 2 and j.legs[0] == (0, 0, 0) and j.legs[1][0] == 1
+        for j in journeys
+    )
+
+
+def test_closed_one_way_route_does_not_add_reverse_state() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["closed"] = True
+    seq["both_ways"] = False
+    journeys = build_journeys(
+        [(0, 1, 1)],
+        [(0, 0, 0)],
+        [seq],
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=0.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=0,
+        transfer_penalty_calc="fixed",
+        seq_headway_min={0: 10.0},
+        seq_jitter_s={0: 0.0},
+        wait_calc="takt",
+    )
+    assert journeys
+    assert journeys[0].legs == ((0, 1, 0),)
+
 
 def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
