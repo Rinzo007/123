@@ -216,6 +216,7 @@ tests/test_passenger_flow_takt_parity.py
 Python теперь считает CAPEX по физическим сегментам и значениям `TAKT_FLEET.rows`.
 Для fixed leg поддерживаются `costM`/`rebuildCostM`; `gaps` дают нулевую стоимость.
 Без явной инфраструктурной разметки сохраняется старый type-level CAPEX fallback.
+При явном `row` скорость ряда также используется при построении fallback `cumT`.
 ## JSON — манифесты городов
 
 Структура: `{city, version, sha256, files: {имя_роли: размер_в_байтах}, total}`.
