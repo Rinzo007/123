@@ -206,6 +206,7 @@ def _round_line_result(r: LineResult) -> LineResult:
         veh_km_day=round_half_up(r.veh_km_day, 1),
         opex_day=round_half_up(r.opex_day, 1),
         revenue_day=round_half_up(r.revenue_day, 1),
+        capital_cost_eur=round_half_up(r.capital_cost_eur, 1),
         capex_day=round_half_up(r.capex_day, 1),
         crowding=round_half_up(r.crowding, 2),
         min_headway=round_half_up(r.min_headway, 1),
