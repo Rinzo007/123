@@ -145,9 +145,13 @@ def _base_time_for_pair(
 def _segment_time_s(seq: dict[str, Any], seg_idx: int) -> float:
     """Время движения физического сегмента по cumT, без ожидания."""
     cum = seq.get("cum_t_s") or []
-    if seg_idx + 1 >= len(cum):
+    if seg_idx < 0 or seg_idx >= len(cum):
         return 0.0
-    return abs(float(cum[seg_idx + 1]) - float(cum[seg_idx]))
+    if seg_idx + 1 < len(cum):
+        return abs(float(cum[seg_idx + 1]) - float(cum[seg_idx]))
+    if seq.get("closed") and cum:
+        return max(0.0, float(seq.get("cycle_run_s", 0.0)) - float(cum[-1]))
+    return 0.0
 
 
 
