@@ -382,3 +382,14 @@ Python-расчёты проходят через тот же comparator, поэ
 Для реального browser differential достаточно экспортировать JS snapshot и
 Python snapshot в одинаковой JSON-схеме и запустить:
 `python scripts/takt_differential.py reference.json actual.json`
+
+## P4 — performance baseline
+
+Добавлен `scripts/bench_passenger_flow.py` для воспроизводимых измерений двух
+горячих путей: построение spatial transfer index и вычисление Takt C(...)
+для большого числа stop-pairs.
+
+Transfer spatial index создаётся один раз на `_AssignContext` и повторно
+используется во всех OD-парах и MSA-итерациях. `_route_ride_time_min`
+вычисляется O(1) через `cum_t_s/open_pre`, без прохода по промежуточным
+сегментам.
