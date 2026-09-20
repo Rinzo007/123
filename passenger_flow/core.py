@@ -361,6 +361,25 @@ def _validate_base_time(
             "base_time_s должен содержать неотрицательные значения или NaN"
         )
 
+def _validate_car_base_time(
+    car_base_time_s: np.ndarray | None,
+    n_zones: int,
+    n_pairs: int,
+) -> None:
+    """Validate Takt fourth OD field: car base time per OD pair."""
+    if car_base_time_s is None:
+        return
+    if car_base_time_s.ndim == 1:
+        if car_base_time_s.shape != (n_pairs,):
+            raise PassengerFlowError("car_base_time_s имеет неверный размер [pair]")
+    elif car_base_time_s.ndim == 2:
+        if car_base_time_s.shape != (n_zones, n_zones):
+            raise PassengerFlowError("car_base_time_s имеет неверный размер NxN")
+    else:
+        raise PassengerFlowError("car_base_time_s должен быть [pair] или NxN")
+    if not np.isfinite(car_base_time_s).all() or np.any(car_base_time_s < 0.0):
+        raise PassengerFlowError("car_base_time_s должен содержать конечные неотрицательные значения")
+
 def _validate_flow_inputs(
     matrix: np.ndarray,
     n_zones: int,
