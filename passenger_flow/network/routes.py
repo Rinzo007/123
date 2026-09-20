@@ -7,9 +7,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Mapping
 from typing import Any, NamedTuple
-import math
 
 from ...models import RouteLike
 from ...support import type_label
