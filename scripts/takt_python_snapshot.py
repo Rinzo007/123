@@ -126,6 +126,7 @@ def main() -> int:
             "revenueDay": js_round(result.raw_revenue_day),
             "opexDay": js_round(result.raw_opex_day),
             "transitS": float(result.raw_transit_s),
+            "transitSByPeriod": [float(v) for v in result.raw_transit_s_by_period],
             "modeSplit": {
                 "transit": raw_assigned / mode_den,
                 "car": raw_car / mode_den,
