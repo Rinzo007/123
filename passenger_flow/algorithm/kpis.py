@@ -63,6 +63,8 @@ def _build_line_kpis(
     capex_factor: float = 1.0,
     capex_amort_years: float = 30.0,
     seg_totals: Mapping[tuple[int, int], float] | None = None,
+    seg_forward_totals: Mapping[tuple[int, int], float] | None = None,
+    seg_reverse_totals: Mapping[tuple[int, int], float] | None = None,
 ) -> list[LineResult]:
     """Эксплуатационные KPI линий (при заданном ``headway_min``).
 
@@ -120,6 +122,18 @@ def _build_line_kpis(
                 seg_pax = float(seg_totals.get((seq.get("_seq_idx", -1), seg_i), 0.0))
                 if seg_pax <= 0.0:
                     continue
+                seg_forward = (
+                    float(seg_forward_totals.get((seq.get("_seq_idx", -1), seg_i), 0.0))
+                    if seg_forward_totals is not None
+                    else 0.0
+                )
+                seg_reverse = (
+                    float(seg_reverse_totals.get((seq.get("_seq_idx", -1), seg_i), 0.0))
+                    if seg_reverse_totals is not None
+                    else 0.0
+                )
+                if seg_forward_totals is not None or seg_reverse_totals is not None:
+                    seg_pax = max(seg_forward, seg_reverse)
                 nt = (
                     seg_pax / (capacity * runs_day)
                     if capacity > 0 and runs_day > 0
