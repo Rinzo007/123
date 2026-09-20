@@ -38,9 +38,13 @@ def _route_cycle(
 
     cum = seq.get("cum_t_s") or []
     run_s = (
-        float(cum[-1])
-        if cum
-        else one_way_km * 1000.0 / max(spec.speed_kmh / 3.6, 0.01)
+        float(seq.get("cycle_run_s", 0.0))
+        if closed and seq.get("cycle_run_s") is not None
+        else (
+            float(cum[-1])
+            if cum
+            else one_way_km * 1000.0 / max(spec.speed_kmh / 3.6, 0.01)
+        )
     )
     open_count = int(sum(bool(v) for v in seq.get("open", [True] * len(stops))))
     j_s = run_s + open_count * spec.dwell_s
