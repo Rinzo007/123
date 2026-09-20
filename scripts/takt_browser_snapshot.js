@@ -213,6 +213,7 @@ async function main() {
       revenueDay: result.revenueDay,
       opexDay: result.opexDay,
       modeSplit: result.modeSplit,
+      equilibrium: result.equilibrium,
       line: line
         ? {
             id: line.id,
