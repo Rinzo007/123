@@ -14,11 +14,17 @@ import numpy as np
 
 from ...od import Zones
 from ..base.models import ModeChoiceConfig
+from ..base.takt import (
+    _takt_crowding_ride_mult,
+    _takt_crowding_wait_mult,
+    _takt_po_seconds,
+)
 from ..network.geometry import _stop_key, haversine_meters
 from ..network.routes import build_journeys
 from .mode_choice import (
     _od_fare_eur,
-    _takt_mode_shares,
+    _takt_mode_shares_with_rest,
+    _takt_route_choice,
     _takt_route_probs,
 )
 
@@ -73,6 +79,7 @@ class _OdTotals:
     car_trips: float = 0.0
     walk_trips: float = 0.0
     two_wheel_trips: float = 0.0
+    rest_trips: float = 0.0
     fare_revenue: float = 0.0
     period_total: float = 0.0
     route_totals: dict[int, float] = field(
@@ -90,6 +97,15 @@ class _OdTotals:
     seg_totals: dict[tuple[int, int], float] = field(
         default_factory=lambda: defaultdict(float)
     )
+    seg_forward_totals: dict[tuple[int, int], float] = field(
+        default_factory=lambda: defaultdict(float)
+    )
+    seg_reverse_totals: dict[tuple[int, int], float] = field(
+        default_factory=lambda: defaultdict(float)
+    )
+    seq_stop_totals: dict[tuple[int, int], float] = field(
+        default_factory=lambda: defaultdict(float)
+    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +113,7 @@ class _OdTotals:
             "car_trips": self.car_trips,
             "walk_trips": self.walk_trips,
             "two_wheel_trips": self.two_wheel_trips,
+            "rest_trips": self.rest_trips,
             "fare_revenue": self.fare_revenue,
             "period_total": self.period_total,
             "route_totals": self.route_totals,
