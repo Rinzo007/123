@@ -283,6 +283,7 @@ def _route_cycle(
 def _station_min_headways(
     route_sequences: list[dict[str, Any]],
     period_seq_stop_totals: Sequence[tuple[Mapping[tuple[int, int], float], float]] | None,
+    vehicle_specs: Mapping[str, VehicleSpec] | None = None,
 ) -> dict[int, float]:
     """Минимальный headway из станционного dwell/turnback ограничения Qa."""
     result: dict[int, float] = {}
@@ -291,7 +292,9 @@ def _station_min_headways(
     for seq_idx, seq in enumerate(route_sequences):
         rid = int(seq["route_id"])
         mode = str(seq.get("route_type_key") or "").lower()
-        spec = vehicle_spec_for_route_type(mode)
+        spec = vehicle_specs.get(mode) if vehicle_specs else None
+        if spec is None:
+            spec = vehicle_spec_for_route_type(mode)
         if spec.capacity <= 0:
             continue
         station_min = 0.0
@@ -339,7 +342,7 @@ def _build_line_kpis(
     shared_min_headway = _shared_capacity_min_headways(
         route_sequences, headway_min, headway_by_route
     )
-    station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals)
+    station_min_headway = _station_min_headways(route_sequences, period_seq_stop_totals, vehicle_specs)
     shared_capital_sections: set[tuple[str, str]] = set()
     _atomic_lines, atomic_sections = _atomic_infrastructure_sections(route_sequences)
     for seq in route_sequences:
