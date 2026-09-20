@@ -6,7 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const ROOT = path.resolve(__dirname, "..");
-const bundlePath = path.join(ROOT, "scripts", "bd956ff0a1875604740f7.js");
+const bundlePath = process.env.TAKT_BUNDLE_PATH\n  ? path.resolve(process.env.TAKT_BUNDLE_PATH)\n  : path.join(ROOT, "scripts", "bd956ff0a1875604740f7.js");
 const bundle = fs.readFileSync(bundlePath, "utf8");
 const marker = "})();";
 const markerIndex = bundle.lastIndexOf(marker);
