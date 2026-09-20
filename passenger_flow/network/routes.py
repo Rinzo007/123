@@ -140,27 +140,55 @@ def _route_segment_indices(
     return result
 
 def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> float:
-    """Время поездки между остановками с семантикой Takt C(...)."""
+    """Время поездки по формуле Takt C(...) без прохода по сегментам."""
     if orig_pos == dest_pos:
         return 0.0
-    segments = _route_segment_indices(seq, orig_pos, dest_pos)
-    if not segments:
+    stops = seq.get("stops") or []
+    n = len(stops)
+    if n < 2:
         return 0.0
-    movement_s = sum(
-        _segment_time_s(seq, seg_idx) for seg_idx, _forward in segments
-    )
-    dwell_count = 0
-    for offset, (seg_idx, is_forward) in enumerate(segments[:-1]):
-        arrival = (
-            (seg_idx + 1) % len(seq["stops"])
-            if is_forward
-            else seg_idx
-        )
-        if seq.get("open", [True] * len(seq["stops"]))[arrival]:
-            dwell_count += 1
-    return (
-        movement_s + dwell_count * float(seq["dwell_s"])
-    ) / 60.0
+    cum = seq.get("cum_t_s") or []
+    if orig_pos < 0 or dest_pos < 0 or orig_pos >= n or dest_pos >= n:
+        return 0.0
+    open_pre = seq.get("open_pre")
+    if open_pre is None or len(open_pre) < n + 1:
+        flags = seq.get("open", [True] * n)
+        open_pre = [0]
+        for value in flags:
+            open_pre.append(open_pre[-1] + (1 if value else 0))
+    dwell_s = float(seq.get("dwell_s", 0.0))
+    speed_kmh = max(float(seq.get("speed_kmh", 0.0)), 0.01)
+
+    def at(position: int) -> float:
+        if position < len(cum):
+            return float(cum[position])
+        return float(position) * 3600.0 / speed_kmh
+
+    def dwell_count(a: int, b: int) -> int:
+        if b >= a:
+            return max(0, int(open_pre[b]) - int(open_pre[a + 1]))
+        return max(0, int(open_pre[n]) - int(open_pre[a + 1])) + max(0, int(open_pre[b]))
+
+    def weighted(run_s: float, a: int, b: int) -> float:
+        return run_s + dwell_count(a, b) * dwell_s
+
+    if seq.get("closed"):
+        cycle_s = float(seq.get("cycle_run_s", 0.0))
+        if cycle_s <= 0.0:
+            if len(cum) > 1:
+                cycle_s = float(cum[-1])
+            else:
+                cycle_s = n * 3600.0 / speed_kmh
+        forward_s = (at(dest_pos) - at(orig_pos)) % cycle_s
+        forward = weighted(forward_s, orig_pos, dest_pos)
+        if not seq.get("both_ways"):
+            return forward / 60.0
+        backward_s = (cycle_s - forward_s) % cycle_s
+        backward = weighted(backward_s, dest_pos, orig_pos)
+        return min(forward, backward) / 60.0
+
+    run_s = abs(at(dest_pos) - at(orig_pos))
+    return weighted(run_s, orig_pos, dest_pos) / 60.0 if dest_pos >= orig_pos else weighted(run_s, dest_pos, orig_pos) / 60.0
 
 
 def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
