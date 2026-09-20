@@ -350,6 +350,12 @@ def _validate_flow_inputs(
     periods: Sequence[Period],
     mode_choice: ModeChoiceConfig,
     base_time_s: np.ndarray | None,
+    stop_search_radius_m: float,
+    stop_time_min: float,
+    wait_time_min: float,
+    walk_to_stop_min: float,
+    transfer_penalty_min: float,
+    logit_temp: float,
 ) -> None:
     """Полная валидация входов — композиция групп проверок.
 
@@ -357,6 +363,12 @@ def _validate_flow_inputs(
     нескольких нарушениях сообщение об ошибке не менялось.
     """
     _validate_od_matrix(matrix, n_zones)
+    _finite_number("stop_search_radius_m", stop_search_radius_m, positive=True)
+    _finite_number("stop_time_min", stop_time_min, nonnegative=True)
+    _finite_number("wait_time_min", wait_time_min, nonnegative=True)
+    _finite_number("walk_to_stop_min", walk_to_stop_min, nonnegative=True)
+    _finite_number("transfer_penalty_min", transfer_penalty_min, nonnegative=True)
+    _finite_number("logit_temp", logit_temp, positive=True)
     _validate_base_time(base_time_s, n_zones, len(periods) if periods else 1)
     _validate_transfer_args(max_transfers, transfer_radius_m)
     _validate_headway_args(headway_min, headway_by_route)
@@ -924,6 +936,12 @@ def run_passenger_flow(
         periods=periods,
         mode_choice=mode_choice,
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
+        stop_search_radius_m=stop_search_radius_m,
+        stop_time_min=stop_time_min,
+        wait_time_min=wait_time_min,
+        walk_to_stop_min=walk_to_stop_min,
+        transfer_penalty_min=transfer_penalty_min,
+        logit_temp=logit_temp,
     )
 
     # 1–2. Подготовка данных маршрутов и индекс остановок.
