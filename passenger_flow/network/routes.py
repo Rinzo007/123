@@ -90,12 +90,14 @@ def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> f
         return cycle - cum[a] + cum[b], len(stops) - a + b
 
     fwd_s, fwd_steps = forward(orig_pos, dest_pos)
+    fwd_dwell_steps = max(0, fwd_steps - 1)
     if not closed:
-        return (fwd_s + fwd_steps * dwell_s) / 60.0
+        return (fwd_s + fwd_dwell_steps * dwell_s) / 60.0
     rev_s, rev_steps = forward(dest_pos, orig_pos)
+    rev_dwell_steps = max(0, rev_steps - 1)
     if bool(seq.get("both_ways")) and rev_s < fwd_s:
-        return (rev_s + rev_steps * dwell_s) / 60.0
-    return (fwd_s + fwd_steps * dwell_s) / 60.0
+        return (rev_s + rev_dwell_steps * dwell_s) / 60.0
+    return (fwd_s + fwd_dwell_steps * dwell_s) / 60.0
 
 
 def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
