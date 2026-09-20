@@ -328,7 +328,7 @@ def _build_route_stop_sequence(
                     "cum_t_s": cum_t_s,
                     "cycle_run_s": cycle_run_s,
                     "dwell_s": float(spec.dwell_s),
-                    "speed_kmh": float(spec.speed_kmh),
+                    "speed_kmh": float(row_speed_kmh),
                     "closed": closed,
                     "both_ways": both_ways,
                     "phase_s": phase_s,
