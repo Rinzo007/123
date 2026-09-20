@@ -804,9 +804,9 @@ def _enumerate_journeys(
         headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
-    transfer_cache: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    transfer_cache: dict[int, tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
     def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
-        key = (seq_idx, pos)
+        key = seq_idx
         cached = transfer_cache.get(key)
         if cached is not None:
             return cached
@@ -855,26 +855,10 @@ def _enumerate_journeys(
                 seen_journeys.add(signature)
                 journeys.append(JourneyAlternative(total, final_legs))
 
-        # Takt's `we` connects every pair of open stops on the same line.
-        # Dijkstra can therefore jump directly from a boarding stop to any
-        # alighting stop; the edge cost is the exact C(...) travel time.
-        n = len(seq["stops"])
-        open_flags = seq.get("open", [True] * n)
-        ride_targets = [i for i in range(n) if i != pos and open_flags[i]]
-        for next_pos in ride_targets:
-            ride = _ride_edge_time_min(
-                seq, pos, next_pos,
-                stop_time_min=stop_time_min,
-                crowd_state=crowd_state,
-            )
-            new_cost = cost + ride
-            nkey = (seq_idx, next_pos, transfers, leg_start, used)
-            if new_cost + 1e-12 < best.get(nkey, math.inf):
-                best[nkey] = new_cost
-                heapq.heappush(heap, (
-                    new_cost, seq_idx, next_pos, transfers, leg_start, legs, used
-                ))
-
+        # Full same-line edges are evaluated lazily when terminating at a
+        # destination or transferring. Because every pair of stops is linked
+        # in Takt's `we` graph, creating intermediate same-line states would
+        # only duplicate those direct edges and inflate the search space.
         if transfers >= max_legs - 1:
             continue
 
