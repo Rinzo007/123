@@ -87,6 +87,7 @@ def _build_crowd_state(
         "seg_forward": {},
         "seg_reverse": {},
         "stop_extra": {},
+        "unreliability": {},
     }
     if seq_headway_min is None:
         return state
@@ -121,6 +122,24 @@ def _build_crowd_state(
         direction_factor = (
             2.0 if not seq.get("closed") or seq.get("both_ways") else 1.0
         )
+        dwell_integral = 0.0
+        open_values = seq.get("open")
+        for stop_idx in range(len(seq["stops"])):
+            pax = float(seq_stop_totals.get((seq_idx, stop_idx), 0.0))
+            if pax <= 0.0:
+                continue
+            if open_values is not None and not bool(open_values[stop_idx]):
+                continue
+            dwell_integral += (
+                float(spec.dwell_per_pax_s)
+                * (pax / period_runs)
+                / (2.0 * direction_factor * max(float(period_hours), 1e-9) * 3600.0)
+            )
+        H = min(
+            1.0,
+            float(spec.jitter_s) * math.exp(dwell_integral) / (h * 60.0),
+        )
+        state["unreliability"][(seq_idx, 0)] = 1.0 + H * H
         dwell_runs = direction_factor * period_runs
         if dwell_runs > 0.0:
             for stop_idx in range(len(seq["stops"])):
