@@ -306,6 +306,7 @@ def _build_route_stop_sequence(
         access_m = float(spec.access_m)
         route_type_key = str(route.route_type).strip().lower()
         route_capacity = _optional_value(route, ("capacity",))
+        route_track_id = _optional_value(route, ("trackId", "track_id"))
         route_type_label = type_label(route.route_type)
         fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
         explicit_route_row = _optional_value(route, ("row", "track_row"))
@@ -447,6 +448,7 @@ def _build_route_stop_sequence(
                     "access_m": access_m,
                     "geometry_legs": geometry_legs,
                     "segment_lengths_m": segment_lengths,
+                    "track_id": route_track_id,
                     "capacity": (
                         float(route_capacity)
                         if route_capacity is not None
