@@ -17,6 +17,10 @@ from ...models import RouteLike
 from ...support import type_label
 from ..base.models import vehicle_spec_for_route_type
 from ..base.takt import (
+    _TAKT_ALTS,
+    _TAKT_ALT_DETOUR_FACTOR,
+    _TAKT_ALT_DETOUR_FIXED_S,
+    _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
     _TAKT_WALK_SPEED_MPS,
     _takt_hs,
@@ -535,6 +539,195 @@ def _transfer_journeys(
     return journeys
 
 
+
+def _destination_positions(
+    seq_idx: int,
+    destinations: list[tuple[int, int, int]],
+    current_pos: int = -1,
+) -> list[int]:
+    """Позиции высадки на выбранной последовательности после current_pos."""
+    return sorted(
+        {
+            pos
+            for seq, _stop, pos in destinations
+            if seq == seq_idx and pos > current_pos
+        }
+    )
+
+
+def _transfer_targets(
+    seq_a: int,
+    current_pos: int,
+    route_stop_sequences: list[dict[str, Any]],
+    excluded: set[int],
+    transfer_radius_m: float,
+) -> Iterator[tuple[int, dict[str, Any], dict[str, Any]]]:
+    """Генерирует все допустимые переходы A→B после current_pos."""
+    for ta in route_stop_sequences[seq_a]["stops"]:
+        if int(ta["position"]) <= current_pos:
+            continue
+        for seq_b, data_b in enumerate(route_stop_sequences):
+            if seq_b == seq_a or seq_b in excluded:
+                continue
+            for tb in data_b["stops"]:
+                if _transfers_match(ta, tb, transfer_radius_m):
+                    yield seq_b, ta, tb
+
+
+def _dedupe_journeys(
+    journeys: list[_Journey],
+    max_alternatives: int,
+) -> list[_Journey]:
+    """Оставляет лучшие уникальные варианты в окне Takt detour + 120 секунд."""
+    if not journeys:
+        return []
+    best = min(j[0] for j in journeys)
+    threshold = (
+        best * _TAKT_ALT_DETOUR_FACTOR + _TAKT_ALT_DETOUR_FIXED_S / 60.0
+    )
+    seen: set[tuple[tuple[int, int, int], ...]] = set()
+    result: list[_Journey] = []
+    for journey in sorted(journeys, key=lambda item: (item[0], item[1])):
+        if journey[0] > threshold + 1e-9:
+            continue
+        if journey[1] in seen:
+            continue
+        seen.add(journey[1])
+        result.append(journey)
+        if len(result) >= max(1, max_alternatives):
+            break
+    return result
+
+
+def _enumerate_journeys(
+    origins: list[tuple[int, int, int]],
+    destinations: list[tuple[int, int, int]],
+    route_stop_sequences: list[dict[str, Any]],
+    *,
+    stop_time_min: float,
+    wait_time_min: float,
+    walk_to_stop_min: float,
+    transfer_penalty_min: float,
+    transfer_wait_min: float | None,
+    transfer_radius_m: float,
+    transfer_penalty_calc: str,
+    seq_headway_min: Mapping[int, float] | None,
+    seq_jitter_s: Mapping[int, float] | None,
+    wait_calc: str,
+    max_legs: int,
+    max_alternatives: int,
+) -> list[_Journey]:
+    """Ограниченный поиск 0..4 ножек."""
+    max_legs = min(max(1, int(max_legs)), _TAKT_MAX_LEGS)
+    board = _board_positions(origins)
+    journeys: list[_Journey] = []
+    frontier: list[
+        tuple[
+            float,
+            int,
+            int,
+            tuple[tuple[int, int, int], ...],
+            frozenset[int],
+        ]
+    ] = []
+
+    for seq_idx, orig_pos in board.items():
+        headway = (
+            seq_headway_min.get(seq_idx)
+            if seq_headway_min is not None
+            else None
+        )
+        first_wait = _boarding_wait_min(headway, wait_time_min, wait_calc)
+        for d_pos in _destination_positions(seq_idx, destinations, orig_pos):
+            ride = _route_ride_time_min(
+                route_stop_sequences[seq_idx], orig_pos, d_pos
+            )
+            if ride <= 0.0:
+                ride = (d_pos - orig_pos) * stop_time_min
+            journeys.append(
+                (
+                    ride + first_wait + walk_to_stop_min,
+                    ((seq_idx, orig_pos, d_pos),),
+                )
+            )
+        frontier.append(
+            (first_wait, seq_idx, orig_pos, tuple(), frozenset((seq_idx,)))
+        )
+
+    beam_size = max(256, len(route_stop_sequences) * 8)
+    while frontier:
+        next_frontier = []
+        for base_cost, seq_a, current_pos, legs, used in frontier:
+            if len(legs) >= max_legs - 1:
+                continue
+            for seq_b, ta, tb in _transfer_targets(
+                seq_a,
+                current_pos,
+                route_stop_sequences,
+                set(used),
+                transfer_radius_m,
+            ):
+                ta_pos = int(ta["position"])
+                tb_pos = int(tb["position"])
+                ride_a = _route_ride_time_min(
+                    route_stop_sequences[seq_a], current_pos, ta_pos
+                )
+                if ride_a <= 0.0:
+                    ride_a = max(0, ta_pos - current_pos) * stop_time_min
+                transfer_wait = _transfer_wait_min(
+                    seq_a,
+                    seq_b,
+                    ta,
+                    tb,
+                    stop_time_min=stop_time_min,
+                    wait_time_min=wait_time_min,
+                    transfer_wait_min=transfer_wait_min,
+                    seq_headway_min=seq_headway_min,
+                    seq_jitter_s=seq_jitter_s,
+                    route_stop_sequences=route_stop_sequences,
+                )
+                penalty = _transfer_penalty(
+                    ta,
+                    tb,
+                    transfer_penalty_min=transfer_penalty_min,
+                    transfer_penalty_calc=transfer_penalty_calc,
+                )
+                new_cost = base_cost + ride_a + penalty + transfer_wait
+                new_legs = legs + ((seq_a, current_pos, ta_pos),)
+
+                for d_pos in _destination_positions(
+                    seq_b, destinations, tb_pos
+                ):
+                    ride_b = _route_ride_time_min(
+                        route_stop_sequences[seq_b], tb_pos, d_pos
+                    )
+                    if ride_b <= 0.0:
+                        ride_b = (d_pos - tb_pos) * stop_time_min
+                    journeys.append(
+                        (
+                            new_cost + ride_b + walk_to_stop_min,
+                            new_legs + ((seq_b, tb_pos, d_pos),),
+                        )
+                    )
+
+                if len(new_legs) < max_legs - 1:
+                    next_frontier.append(
+                        (
+                            new_cost,
+                            seq_b,
+                            tb_pos,
+                            new_legs,
+                            used | {seq_b},
+                        )
+                    )
+        if not next_frontier:
+            break
+        next_frontier.sort(key=lambda state: (state[0], state[3]))
+        frontier = next_frontier[:beam_size]
+
+    return _dedupe_journeys(journeys, max_alternatives)
+
+
 # ===== Главная точка входа =====
 
 
@@ -555,45 +748,23 @@ def build_journeys(
     seq_jitter_s: Mapping[int, float] | None = None,
     wait_calc: str = "takt",
 ) -> list[_Journey]:
-    """Возвращает варианты поездки: (время, ножки), где ножка — (seq_idx, посадка, высадка).
-
-    Включает прямые варианты и (при ``max_transfers > 0``) варианты с одной
-    пересадкой между разными маршрутами.
-
-    При передаче ``seq_headway_min``/``seq_jitter_s`` ожидание на пересадке
-    считается по расписанию двух линий (координация Takt ``jo``/``hs``):
-    две линии «ловит» ту, чей интервал делится на другой; иначе —
-    базовое ожидание ``Po(headway)``.
-    """
-    best_span = _best_direct_spans(origins, destinations)
-    journeys = _direct_journeys(
-        best_span,
+    """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
+    max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
+    return _enumerate_journeys(
+        origins,
+        destinations,
         route_stop_sequences,
         stop_time_min=stop_time_min,
-        walk_to_stop_min=walk_to_stop_min,
         wait_time_min=wait_time_min,
+        walk_to_stop_min=walk_to_stop_min,
+        transfer_penalty_min=transfer_penalty_min,
+        transfer_wait_min=transfer_wait_min,
+        transfer_radius_m=transfer_radius_m,
+        transfer_penalty_calc=transfer_penalty_calc,
         seq_headway_min=seq_headway_min,
+        seq_jitter_s=seq_jitter_s,
         wait_calc=wait_calc,
+        max_legs=max_legs,
+        max_alternatives=min(_TAKT_ALTS, 3),
     )
 
-    # Пересадки: остановка маршрута A совпадает (id/радиус) с остановкой
-    # маршрута B, причём A проезжает её после посадки, а B — до высадки.
-    if max_transfers > 0:
-        journeys.extend(
-            _transfer_journeys(
-                _board_positions(origins),
-                _alight_positions(destinations),
-                route_stop_sequences,
-                stop_time_min=stop_time_min,
-                wait_time_min=wait_time_min,
-                walk_to_stop_min=walk_to_stop_min,
-                transfer_penalty_min=transfer_penalty_min,
-                transfer_wait_min=transfer_wait_min,
-                transfer_radius_m=transfer_radius_m,
-                transfer_penalty_calc=transfer_penalty_calc,
-                seq_headway_min=seq_headway_min,
-                seq_jitter_s=seq_jitter_s,
-                wait_calc=wait_calc,
-            )
-        )
-    return journeys
