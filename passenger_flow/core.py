@@ -31,6 +31,7 @@ from ..od import Zones
 from .algorithm.assign import _assign_od
 from .algorithm.kpis import _build_line_kpis
 from .algorithm.wait import (
+    _build_crowd_state,
     _build_wait_extra,
     _expected_wait_min,
     _reliability_min,
@@ -485,6 +486,7 @@ class _AssignContext:
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
     wait_calc: str
+    vehicle_specs: Mapping[str, VehicleSpec] | None
 
     def _common_kwargs(self) -> dict[str, Any]:
         return {
@@ -513,6 +515,7 @@ class _AssignContext:
         ret_factor: float,
         wait_extra: Mapping[int, float] | None,
         period_index: int,
+        crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -524,6 +527,7 @@ class _AssignContext:
             ret_factor=ret_factor,
             wait_extra=wait_extra,
             period_index=period_index,
+            crowd_state=crowd_state,
             **self._common_kwargs(),
         )
 
@@ -605,19 +609,27 @@ def _run_period(
             wait_extra=reliability_extra,
             period_index=period_index,
         )
-        wait_extra = _build_wait_extra(
+        crowd_state = _build_crowd_state(
             ctx.route_sequences,
-            pass_one["route_totals"],
-            wait_crowding_per_100_min,
-            reliability_extra,
+            pass_one.get("seg_forward_totals", {}),
+            pass_one.get("seg_reverse_totals", {}),
+            pass_one.get("seq_stop_totals", {}),
+            ctx.seq_headway_min,
+            ctx.vehicle_specs,
+            period_hours,
         )
-    else:
-        wait_extra = reliability_extra
+        return ctx.assign(
+            out_factor=out_factor,
+            ret_factor=ret_factor,
+            wait_extra=reliability_extra,
+            period_index=period_index,
+            crowd_state=crowd_state,
+        )
 
     return ctx.assign(
         out_factor=out_factor,
         ret_factor=ret_factor,
-        wait_extra=wait_extra,
+        wait_extra=reliability_extra,
         period_index=period_index,
     )
 
@@ -844,6 +856,7 @@ def run_passenger_flow(
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
         wait_calc=wait_calc,
+        vehicle_specs=vehicle_specs,
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
