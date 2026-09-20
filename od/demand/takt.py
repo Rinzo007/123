@@ -206,7 +206,7 @@ def write_takt_purposes(
     равна полной матрице (автономен).
     """
     layers: list[dict[str, Any]] = []
-    for purpose, mat in zip(purpose_od.purposes, purpose_od.purpose_matrices):
+    for purpose_index, (purpose, mat) in enumerate(zip(purpose_od.purposes, purpose_od.purpose_matrices)):
         if sparse.issparse(mat):
             mat = mat.tocsr()
             mat.sum_duplicates()
@@ -219,20 +219,37 @@ def write_takt_purposes(
         rows, cols, vals = rows[keep], cols[keep], vals[keep]
         if not rows.size:
             continue
-        time = (np.rint(costs[rows, cols] * 60.0)).astype(np.int64)
+        retained_base = None
+        base_items = getattr(purpose_od, "purpose_base_times", ())
+        if purpose_index < len(base_items):
+            retained_base = base_items[purpose_index]
+        if retained_base is not None:
+            retained = np.asarray(retained_base, dtype=np.float64)
+            if retained.ndim != 2 or retained.shape[1] != rows.size:
+                raise OdMatrixError(
+                    f"Цель {purpose.key!r}: purpose_base_times не совпадает с OD-парами"
+                )
+            time = np.rint(retained[0]).astype(np.int64)
+        else:
+            time = (np.rint(costs[rows, cols] * 60.0)).astype(np.int64)
         pairs = np.column_stack(
             (rows, cols, np.rint(vals).astype(np.int64), time)
         )
         encoded = base64.b64encode(pairs.astype("<f4").tobytes()).decode("ascii")
-        layers.append(
-            {
-                "t": purpose.key,
-                "n": int(pairs.shape[0]),
-                "out": [float(v) for v in purpose.out],
-                "ret": [float(v) for v in purpose.ret],
-                "od": encoded,
-            }
-        )
+        layer_payload: dict[str, Any] = {
+            "t": purpose.key,
+            "n": int(pairs.shape[0]),
+            "out": [float(v) for v in purpose.out],
+            "ret": [float(v) for v in purpose.ret],
+            "od": encoded,
+        }
+        if retained_base is not None:
+            retained = np.asarray(retained_base, dtype="<f4")
+            layer_payload["baseT"] = [
+                base64.b64encode(retained[i].tobytes()).decode("ascii")
+                for i in range(retained.shape[0])
+            ]
+        layers.append(layer_payload)
     Path(path).write_text(
         json.dumps({"v": 2, "layers": layers, "commuteBaseT": []}),
         encoding="utf-8",
