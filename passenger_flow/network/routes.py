@@ -145,6 +145,77 @@ def _route_segment_indices(
         i = (i - 1 + n) % n
     return result
 
+def _nearest_stop_on_sequence(
+    seq: Mapping[str, Any],
+    target_stop: Mapping[str, Any],
+    *,
+    radius_m: float,
+) -> tuple[int, dict[str, Any], float] | None:
+    best: tuple[int, dict[str, Any], float] | None = None
+    for pos, stop in enumerate(seq.get("stops") or []):
+        d = haversine_meters(
+            float(target_stop["lat"]), float(target_stop["lon"]),
+            float(stop["lat"]), float(stop["lon"]),
+        )
+        if d <= radius_m + 1e-9 and (best is None or d < best[2] or (d == best[2] and pos < best[0])):
+            best = (pos, stop, d)
+    return best
+
+
+def _leg_alternatives(
+    journey: _Journey,
+    leg_index: int,
+    route_sequences: list[dict[str, Any]],
+    transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]],
+    *,
+    stop_time_min: float,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    transfer_radius_m: float,
+) -> tuple[tuple[int, int, int], ...]:
+    """JS ei(): альтернативные линии для конкретной ножки после пересадки."""
+    if leg_index <= 0 or leg_index >= len(journey.legs):
+        return ()
+    prev_seq, _prev_a, prev_b = journey.legs[leg_index - 1]
+    base_seq, base_a, base_b = journey.legs[leg_index]
+    prev_stop = route_sequences[prev_seq]["stops"][prev_b]
+    base_dest = route_sequences[base_seq]["stops"][base_b]
+    base_ride = _ride_edge_time_min(
+        route_sequences[base_seq], base_a, base_b,
+        stop_time_min=stop_time_min, crowd_state=crowd_state
+    )
+    alternatives: list[tuple[float, tuple[int, int, int]]] = []
+    for alt_seq, alt_board, _alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
+        if alt_seq == base_seq:
+            continue
+        found = _nearest_stop_on_sequence(
+            route_sequences[alt_seq], base_dest, radius_m=transfer_radius_m
+        )
+        if found is None:
+            continue
+        alt_pos, _stop, _dist = found
+        if alt_pos == int(alt_board["position"]):
+            continue
+        alt_ride = _ride_edge_time_min(
+            route_sequences[alt_seq], int(alt_board["position"]), alt_pos,
+            stop_time_min=stop_time_min, crowd_state=crowd_state
+        )
+        if alt_ride > base_ride * 1.25 + 2.0:
+            continue
+        alternatives.append((
+            alt_ride, (alt_seq, int(alt_board["position"]), alt_pos)
+        ))
+    alternatives.sort(key=lambda item: (item[0], item[1]))
+    seen: set[tuple[int, int, int]] = set()
+    result: list[tuple[int, int, int]] = []
+    for _cost, leg in alternatives:
+        if leg in seen:
+            continue
+        seen.add(leg)
+        result.append(leg)
+        if len(result) >= 3:
+            break
+    return tuple(result)
+
 def _takt_ri_access_min(
     distance_m: float,
     *,
