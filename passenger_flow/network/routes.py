@@ -82,6 +82,13 @@ def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float) ->
     return result
 
 
+def _segment_time_s(seq: dict[str, Any], seg_idx: int) -> float:
+    """Время движения физического сегмента по cumT, без ожидания."""
+    cum = seq.get("cum_t_s") or []
+    if seg_idx < 0 or seg_idx + 1 >= len(cum):
+        return 0.0
+    return abs(float(cum[seg_idx + 1]) - float(cum[seg_idx]))
+
 def _route_segment_indices(
     seq: dict[str, Any],
     orig_pos: int,
