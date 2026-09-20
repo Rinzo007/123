@@ -32,6 +32,7 @@ from passenger_flow.algorithm.kpis import (
     _sequence_capital_cost_eur,
     _shared_capacity_min_headways,
     _period_service_metrics,
+    _geometry_reuse_edges,
 )
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
@@ -703,6 +704,33 @@ def test_explicit_takt_row_drives_segment_capital_cost() -> None:
     )
     got = _sequence_capital_cost_eur(seq, spec, 1.0)
     assert math.isclose(got, distance_km * 18_000_000.0, rel_tol=1e-12, abs_tol=1e-8)
+
+def test_capex_reuses_partial_decoded_polyline_geometry() -> None:
+    a = _synthetic_sequence([1, 2])
+    b = _synthetic_sequence([3, 4])
+    for seq in (a, b):
+        seq["route_type_key"] = "tram"
+        seq["route_type"] = "tram"
+        seq["row"] = "reserved"
+        seq["row_explicit"] = True
+    a["stops"][0]["lon"], a["stops"][0]["lat"] = 4.00000, 52.00000
+    a["stops"][1]["lon"], a["stops"][1]["lat"] = 4.02000, 52.00000
+    b["stops"][0]["lon"], b["stops"][0]["lat"] = 4.01000, 52.00000
+    b["stops"][1]["lon"], b["stops"][1]["lat"] = 4.02000, 52.00000
+    a["geometry_legs"] = [[
+        [4.00000, 52.00000], [4.01000, 52.00000], [4.02000, 52.00000]
+    ]]
+    b["geometry_legs"] = [[
+        [4.01000, 52.00000], [4.02000, 52.00000]
+    ]]
+    spec = __import__("passenger_flow.base.models", fromlist=["VehicleSpec"]).VEHICLE_DEFAULTS["tram"]
+    reuse = _geometry_reuse_edges([b])
+    got = _sequence_capital_cost_eur(a, spec, 1.0, geometry_reuse_edges=reuse)
+    total_m = haversine_meters(52.0, 4.0, 52.0, 4.01) + haversine_meters(52.0, 4.01, 52.0, 4.02)
+    remaining_m = haversine_meters(52.0, 4.0, 52.0, 4.01)
+    expected = remaining_m / 1000.0 * 18_000_000.0
+    assert math.isclose(total_m, haversine_meters(52.0, 4.0, 52.0, 4.02), rel_tol=1e-6)
+    assert math.isclose(got, expected, rel_tol=1e-9, abs_tol=1e-6)
 
 def test_shared_physical_section_is_not_charged_twice() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
