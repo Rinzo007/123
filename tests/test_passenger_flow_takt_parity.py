@@ -39,6 +39,7 @@ from passenger_flow.base.takt import (
     _takt_po_seconds,
 )
 from passenger_flow.network.routes import (
+    JourneyAlternative,
     _direct_journeys,
     _route_ride_time_min,
     build_journeys,
@@ -126,7 +127,8 @@ def test_mode_choice_golden_value_and_sum() -> None:
         case["transit_s"],
         case["fare_eur"],
     )
-    assert np.allclose(got, case["expected"], rtol=1e-10, atol=1e-12)
+    assert np.allclose(got[:4], case["expected"], rtol=1e-10, atol=1e-12)
+    assert math.isclose(got[4], 0.0, abs_tol=1e-12)
     assert math.isclose(sum(got), 1.0, rel_tol=1e-12, abs_tol=1e-12)
 
 
@@ -309,3 +311,25 @@ def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
         rel_tol=1e-12,
         abs_tol=1e-12,
     )
+
+
+def test_journey_alternative_exposes_named_fields() -> None:
+    option = JourneyAlternative(12.5, ((0, 1, 2),))
+    assert option.total_time_min == 12.5
+    assert option.legs == ((0, 1, 2),)
+    assert option[0] == option.total_time_min
+
+
+def test_prepared_flow_is_reusable_for_same_zones() -> None:
+    from passenger_flow.core import prepare_passenger_flow
+    seqs = [_synthetic_sequence([1, 2, 3])]
+    zones = types.SimpleNamespace(
+        xy=np.asarray([[4.0, 52.0], [4.002, 52.002]], dtype=float),
+        ids=np.asarray([1, 2], dtype=np.int64),
+        polygons=(None, None),
+        bounds=(4.0, 52.0, 4.002, 52.002),
+    )
+    prepared = prepare_passenger_flow(seqs, zones, stop_search_radius_m=1500.0)
+    assert prepared.zones is zones
+    assert len(prepared.route_sequences) == 1
+    assert 0 in prepared.zone_nearest and 1 in prepared.zone_nearest
