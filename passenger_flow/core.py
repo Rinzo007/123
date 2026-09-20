@@ -266,22 +266,25 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         raise PassengerFlowError(
             "car_no_car_share должен быть в диапазоне [0, 1]"
         )
-    if mode_choice.car_speed_kmh <= 0 or mode_choice.walk_speed_mps <= 0:
+    _finite_number("car_no_car_share", mode_choice.car_no_car_share)
+    _finite_number("car_no_car_factor", mode_choice.car_no_car_factor, nonnegative=True)
+    _finite_number("car_speed_kmh", mode_choice.car_speed_kmh, positive=True)
+    _finite_number("walk_speed_mps", mode_choice.walk_speed_mps, positive=True)
+    _finite_number("vot_per_eur_s", mode_choice.vot_per_eur_s, positive=True)
+    if not 0.0 <= mode_choice.car_no_car_share <= 1.0:
         raise PassengerFlowError(
-            "car_speed_kmh и walk_speed_mps должны быть положительными"
+            "car_no_car_share должен быть в диапазоне [0, 1]"
         )
-    if mode_choice.vot_per_eur_s <= 0:
-        raise PassengerFlowError("vot_per_eur_s должен быть положительным")
     if not 0.0 <= mode_choice.two_wheel_share <= 1.0:
         raise PassengerFlowError(
             "two_wheel_share должен быть в диапазоне [0, 1]"
         )
-    if mode_choice.two_wheel_speed_mps <= 0:
-        raise PassengerFlowError("two_wheel_speed_mps должен быть положительным")
-    if mode_choice.two_wheel_reach_m < 0:
-        raise PassengerFlowError("two_wheel_reach_m не может быть отрицательным")
-    if mode_choice.car_no_car_factor < 0:
-        raise PassengerFlowError("car_no_car_factor не может быть отрицательным")
+    _finite_number("two_wheel_speed_mps", mode_choice.two_wheel_speed_mps, positive=True)
+    _finite_number("two_wheel_reach_m", mode_choice.two_wheel_reach_m, nonnegative=True)
+    if not 0.0 <= mode_choice.two_wheel_share <= 1.0:
+        raise PassengerFlowError(
+            "two_wheel_share должен быть в диапазоне [0, 1]"
+        )
     for name, value in (
         ("car_parking_min", mode_choice.car_parking_min),
         ("car_cost_per_km_eur", mode_choice.car_cost_per_km_eur),
@@ -301,8 +304,7 @@ def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
         ("rest_wait_s", mode_choice.rest_wait_s),
         ("rest_circuity", mode_choice.rest_circuity),
     ):
-        if value < 0:
-            raise PassengerFlowError(f"{name} не может быть отрицательным")
+        _finite_number(name, value, nonnegative=True)
 
 
 def _validate_base_time(
