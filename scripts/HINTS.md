@@ -210,6 +210,12 @@ tests/test_passenger_flow_takt_parity.py
 разбиение JS ``Ja/Xa`` по промежуточным пересечениям остаётся следующим
 уровнем exact parity.
 
+## P2 — row-dependent infrastructure cost
+
+Если маршрут явно содержит ``row/rows``, ``segCostMul``, ``fixedLegs`` или ``gaps``,
+Python теперь считает CAPEX по физическим сегментам и значениям `TAKT_FLEET.rows`.
+Для fixed leg поддерживаются `costM`/`rebuildCostM`; `gaps` дают нулевую стоимость.
+Без явной инфраструктурной разметки сохраняется старый type-level CAPEX fallback.
 ## JSON — манифесты городов
 
 Структура: `{city, version, sha256, files: {имя_роли: размер_в_байтах}, total}`.
