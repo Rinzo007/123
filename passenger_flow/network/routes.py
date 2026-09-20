@@ -23,6 +23,7 @@ from ..base.takt import (
     _TAKT_MAX_LEGS,
     _TAKT_TRANSFER_MAX_WALK_M,
     _TAKT_WALK_SPEED_MPS,
+    _takt_crowding_ride_mult,
     _takt_hs,
     _takt_po_seconds,
 )
@@ -171,6 +172,37 @@ def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
         + float(seq["dwell_s"]) * dwell_before
     )
 
+
+def _ride_edge_time_min(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+    *,
+    stop_time_min: float,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+) -> float:
+    """Стоимость line-state edge: базовое C плюс crowd/dwell feedback."""
+    ride = _route_ride_time_min(seq, orig_pos, dest_pos)
+    if ride <= 0.0 and orig_pos != dest_pos:
+        ride = abs(dest_pos - orig_pos) * stop_time_min
+    if not crowd_state or orig_pos == dest_pos:
+        return max(0.0, ride)
+    seg_forward = crowd_state.get("seg_forward", {})
+    seg_reverse = crowd_state.get("seg_reverse", {})
+    stop_extra = crowd_state.get("stop_extra", {})
+    extra_s = 0.0
+    selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
+    prev_stop = orig_pos
+    for seg_i, is_forward in selected_segments:
+        loads = seg_forward if is_forward else seg_reverse
+        load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
+        if load > 0.0:
+            extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
+        arrival_stop = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i % len(seq["stops"])
+        if arrival_stop != prev_stop:
+            extra_s += float(stop_extra.get((seq.get("_seq_idx", -1), arrival_stop), 0.0))
+        prev_stop = arrival_stop
+    return max(0.0, ride + extra_s / 60.0)
 
 def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
     """Ожидание на посадке: Takt Po при известном такте."""
@@ -743,6 +775,7 @@ def _enumerate_journeys(
     wait_calc: str,
     max_legs: int,
     max_alternatives: int,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
 ) -> list[_Journey]:
     """Детерминированный shortest-path поиск по состояниям stop/line.
 
@@ -807,9 +840,11 @@ def _enumerate_journeys(
         for d_pos in destination_by_seq.get(seq_idx, ()):
             if d_pos == pos and not legs and d_pos == leg_start:
                 continue
-            ride = _route_ride_time_min(seq, leg_start, d_pos)
-            if ride <= 0.0:
-                ride = abs(d_pos - leg_start) * stop_time_min
+            ride = _ride_edge_time_min(
+                seq, leg_start, d_pos,
+                stop_time_min=stop_time_min,
+                crowd_state=crowd_state,
+            )
             final_legs = legs + ((seq_idx, leg_start, d_pos),)
             if not final_legs:
                 continue
@@ -827,9 +862,11 @@ def _enumerate_journeys(
         open_flags = seq.get("open", [True] * n)
         ride_targets = [i for i in range(n) if i != pos and open_flags[i]]
         for next_pos in ride_targets:
-            ride = _route_ride_time_min(seq, pos, next_pos)
-            if ride <= 0.0:
-                ride = abs(next_pos - pos) * stop_time_min
+            ride = _ride_edge_time_min(
+                seq, pos, next_pos,
+                stop_time_min=stop_time_min,
+                crowd_state=crowd_state,
+            )
             new_cost = cost + ride
             nkey = (seq_idx, next_pos, transfers, leg_start, used)
             if new_cost + 1e-12 < best.get(nkey, math.inf):
@@ -848,9 +885,11 @@ def _enumerate_journeys(
                 continue
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
-            ride_to_transfer = _route_ride_time_min(seq, leg_start, ta_pos)
-            if ride_to_transfer <= 0.0 and ta_pos != leg_start:
-                ride_to_transfer = abs(ta_pos - leg_start) * stop_time_min
+            ride_to_transfer = _ride_edge_time_min(
+                seq, leg_start, ta_pos,
+                stop_time_min=stop_time_min,
+                crowd_state=crowd_state,
+            )
             transfer_wait = _transfer_wait_min(
                 seq_idx, seq_b, ta, tb,
                 stop_time_min=stop_time_min,
@@ -898,6 +937,7 @@ def build_journeys(
     seq_headway_min: Mapping[int, float] | None = None,
     seq_jitter_s: Mapping[int, float] | None = None,
     wait_calc: str = "takt",
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
 ) -> list[_Journey]:
     """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
     max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
@@ -917,5 +957,6 @@ def build_journeys(
         wait_calc=wait_calc,
         max_legs=max_legs,
         max_alternatives=min(_TAKT_ALTS, 3),
+        crowd_state=crowd_state,
     )
 
