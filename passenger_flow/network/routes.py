@@ -15,7 +15,6 @@ from typing import Any, NamedTuple
 from scipy.spatial import cKDTree
 
 from ..models import RouteLike
-from support import type_label
 from ..base.models import vehicle_spec_for_route_type
 from ..base.takt import (
     _TAKT_ALTS,
@@ -31,6 +30,12 @@ from ..base.takt import (
     _takt_po_seconds,
 )
 from .geometry import _takt_transfer_penalty_min, _transfers_match, haversine_meters
+
+
+def _route_type_label(route_type: object) -> str:
+    """Normalize a string/enum-like route type without external support package."""
+    value = getattr(route_type, "value", route_type)
+    return str(value).strip()
 
 
 class JourneyAlternative(NamedTuple):
@@ -404,7 +409,7 @@ def _build_route_stop_sequence(
         route_type_key = str(route.route_type).strip().lower()
         route_capacity = _optional_value(route, ("capacity",))
         route_track_id = _optional_value(route, ("trackId", "track_id"))
-        route_type_label = type_label(route.route_type)
+        route_type_label = _route_type_label(route.route_type)
         fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
         explicit_route_row = _optional_value(route, ("row", "track_row"))
         route_rows = _optional_value(route, ("rows", "track_rows"))
