@@ -24,6 +24,7 @@ except ImportError:
 
 import numpy as np
 
+from passenger_flow.algorithm.assign import _journey_crowd_extra
 from passenger_flow.algorithm.kpis import _build_line_kpis, _shared_capacity_min_headways
 from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time
 from passenger_flow.algorithm.wait import _build_crowd_state
@@ -402,6 +403,24 @@ def test_shared_track_residual_capacity_changes_min_headway() -> None:
     )
     assert math.isclose(got[101], 2.0, rel_tol=1e-12, abs_tol=1e-12)
     assert math.isclose(got[102], 6.0, rel_tol=1e-12, abs_tol=1e-12)
+
+def test_journey_crowding_uses_selected_directional_load() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["speed_kmh"] = 18.0
+    state = {
+        "seg_forward": {(0, 0): 0.5, (0, 1): 0.5},
+        "seg_reverse": {(0, 0): 2.0, (0, 1): 2.0},
+        "stop_extra": {},
+    }
+    forward = JourneyAlternative(10.0, ((0, 0, 2),))
+    reverse = JourneyAlternative(10.0, ((0, 2, 0),))
+    got = _journey_crowd_extra(
+        [forward, reverse],
+        [seq],
+        state,
+        {0: 10.0},
+    )
+    assert got[0] < got[1]
 
 def test_line_opex_includes_daily_vehicle_cost() -> None:
     seq = _synthetic_sequence([1, 2, 3])
