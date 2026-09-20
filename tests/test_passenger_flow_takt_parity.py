@@ -808,6 +808,36 @@ def test_shared_capacity_uses_atomic_overlap_with_intermediate_stop() -> None:
     assert math.isclose(got[911], 2.0, rel_tol=1e-9, abs_tol=1e-9)
     assert math.isclose(got[912], 6.0, rel_tol=1e-9, abs_tol=1e-9)
 
+def test_transfer_crowding_uses_hs_times_load_factor() -> None:
+    a = _synthetic_sequence([1, 2, 3])
+    b = _synthetic_sequence([1, 4, 5])
+    a["route_id"] = 601
+    b["route_id"] = 602
+    journeys = [JourneyAlternative(
+        10.0, ((0, 0, 1), (1, 0, 2))
+    )]
+    state = {
+        "seg_forward": {(0, 0): 1.0, (1, 1): 1.5},
+        "seg_reverse": {},
+        "stop_extra": {},
+        "unreliability": {},
+    }
+    got = _journey_crowd_extra(
+        journeys, [a, b], state,
+        {0: 10.0, 1: 10.0},
+        period_index=0,
+        seq_jitter_s={0: 90.0, 1: 60.0},
+    )
+    from passenger_flow.network.routes import _scheduled_transfer_wait_min
+    expected_wait = _scheduled_transfer_wait_min(
+        0, 1, a["stops"][1], b["stops"][2],
+        stop_time_min=0.0,
+        route_stop_sequences=[a, b],
+        seq_headway_min={0: 10.0, 1: 10.0},
+        seq_jitter_s={0: 90.0, 1: 60.0},
+    )
+    assert math.isclose(got[0], expected_wait * 0.5, rel_tol=1e-12, abs_tol=1e-12)
+
 def test_station_qa_can_raise_min_headway_above_vehicle_track_limit() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["route_type_key"] = "bus"
