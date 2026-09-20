@@ -73,7 +73,7 @@ def build_case() -> tuple[list[_Route], np.ndarray, Zones, np.ndarray]:
         xy=points[:, :2],
         bounds=(-0.001, -0.001, 0.006, 0.001),
     )
-    base_time_s = np.full((5, 2, 2), 300.0, dtype=np.float64)
+    base_time_s = np.full((5, 2), 300.0, dtype=np.float64)
     return [route], od, zones, base_time_s
 
 
