@@ -241,6 +241,13 @@ def _build_route_stop_sequence(
         route_type_label = type_label(route.route_type)
         fleet_defaults = _TAKT_FLEET.get(route_type_key, {})
         explicit_route_row = _optional_value(route, ("row", "track_row"))
+        route_rows = _optional_value(route, ("rows", "track_rows"))
+        route_seg_cost_mul = _optional_value(route, ("segCostMul", "seg_cost_mul"))
+        route_fixed_legs = _optional_value(route, ("fixedLegs", "fixed_legs"))
+        route_gaps = _optional_value(route, ("gaps",))
+        route_built_segs = _optional_value(route, ("builtSegs", "built_segs"))
+        route_closed_segs = _optional_value(route, ("closedSegs", "closed_segs"))
+        route_on_track = _optional_value(route, ("onTrack", "on_track"))
         route_row = explicit_route_row
         default_row = fleet_defaults.get("default_row")
         if route_row is None:
@@ -322,6 +329,15 @@ def _build_route_stop_sequence(
                     "route_type": route_type_label,
                     "route_type_key": route_type_key,
                     "access_m": access_m,
+                    "row": route_row,
+                    "row_explicit": explicit_route_row is not None,
+                    "rows": _optional_value(direction, ("rows", "track_rows")) if _optional_value(direction, ("rows", "track_rows")) is not None else route_rows,
+                    "seg_cost_mul": _optional_value(direction, ("segCostMul", "seg_cost_mul")) if _optional_value(direction, ("segCostMul", "seg_cost_mul")) is not None else route_seg_cost_mul,
+                    "fixed_legs": _optional_value(direction, ("fixedLegs", "fixed_legs")) if _optional_value(direction, ("fixedLegs", "fixed_legs")) is not None else route_fixed_legs,
+                    "gaps": _optional_value(direction, ("gaps",)) if _optional_value(direction, ("gaps",)) is not None else route_gaps,
+                    "built_segs": _optional_value(direction, ("builtSegs", "built_segs")) if _optional_value(direction, ("builtSegs", "built_segs")) is not None else route_built_segs,
+                    "closed_segs": _optional_value(direction, ("closedSegs", "closed_segs")) if _optional_value(direction, ("closedSegs", "closed_segs")) is not None else route_closed_segs,
+                    "on_track": _optional_value(direction, ("onTrack", "on_track")) if _optional_value(direction, ("onTrack", "on_track")) is not None else route_on_track,
                     "di": di,
                     "direction_name": direction.name or f"Направление {di + 1}",
                     "stops": stops,
