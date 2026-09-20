@@ -270,6 +270,8 @@ def assemble_flow_result(
         route_stop_sequences,
     )
     stop_flows = _build_stop_flows(stop_totals, route_stop_sequences)
+    raw_revenue_day = sum(r.revenue_day for r in line_results)
+    raw_opex_day = sum(r.opex_day for r in line_results)
     rounded_line_results = tuple(_round_line_result(r) for r in line_results)
 
     return FlowResult(
@@ -292,4 +294,11 @@ def assemble_flow_result(
         capital_cost_eur=round_half_up(sum(r.capital_cost_eur for r in rounded_line_results), 1),
         capex_day=round_half_up(sum(r.capex_day for r in rounded_line_results), 1),
         fleet_total=round_half_up(sum(r.fleet for r in rounded_line_results), 1),
+        raw_assigned_trips=float(assigned_trips),
+        raw_car_trips=float(car_trips),
+        raw_walk_trips=float(walk_trips),
+        raw_two_wheel_trips=float(two_wheel_trips),
+        raw_rest_trips=float(rest_trips),
+        raw_revenue_day=float(raw_revenue_day),
+        raw_opex_day=float(raw_opex_day),
     )
