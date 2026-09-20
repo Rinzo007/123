@@ -199,19 +199,36 @@ def _takt_mode_shares(
     return transit, car, walk, ebike, rest
 
 
-def _takt_route_choice(costs_s: np.ndarray) -> tuple[np.ndarray, float]:
-    """Возвращает частотные доли и предельную стоимость набора маршрутов."""
+def _takt_route_choice(
+    costs_s: np.ndarray,
+    frequencies_s: np.ndarray | None = None,
+) -> tuple[np.ndarray, float]:
+    """Takt route-set choice with separate Rr frequency weights.
+
+    JS uses g=1/max(1,Rr) while the candidate route cost remains ds.
+    The optional frequencies_s argument exposes that exact separation;
+    the legacy single-array form remains unchanged for existing callers/tests.
+    """
     costs = np.asarray(costs_s, dtype=np.float64)
-    order = np.argsort(costs, kind="stable")
+    if costs.ndim != 1:
+        costs = costs.reshape(-1)
     if costs.size == 0:
         return np.zeros(0, dtype=np.float64), math.inf
+    if frequencies_s is None:
+        frequencies = costs.copy()
+    else:
+        frequencies = np.asarray(frequencies_s, dtype=np.float64)
+        if frequencies.shape != costs.shape:
+            raise ValueError("frequencies_s must have the same shape as costs_s")
+    order = np.argsort(costs, kind="stable")
     lt = 0.0
     ee = 0.0
     best = math.inf
     selected: list[int] = []
     for pos in order:
         cost = float(costs[pos])
-        g = 1.0 / max(1.0, cost)
+        frequency = max(1.0, float(frequencies[pos]))
+        g = 1.0 / frequency
         te = (1.0 + ee + g * cost) / (lt + g)
         if selected and te >= best:
             break
@@ -222,12 +239,11 @@ def _takt_route_choice(costs_s: np.ndarray) -> tuple[np.ndarray, float]:
     probs = np.zeros(costs.size, dtype=np.float64)
     if lt > 0.0:
         for pos in selected:
-            probs[pos] = (1.0 / max(1.0, float(costs[pos]))) / lt
+            frequency = max(1.0, float(frequencies[pos]))
+            probs[pos] = (1.0 / frequency) / lt
     elif selected:
         probs[selected[0]] = 1.0
     return probs, best
-
-
 def _takt_route_probs(costs_s: np.ndarray) -> np.ndarray:
     """Частотный сплит Takt; совместимый тонкий интерфейс."""
     return _takt_route_choice(costs_s)[0]
