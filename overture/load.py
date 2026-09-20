@@ -508,31 +508,8 @@ def load_overture_geometries(
     return polygon_geometries, epsg
 
 
-def resolve_poi_place_file(
-    override: str | None,
-    configured: str | None,
-    bbox: tuple[float, float, float, float] | None,
-    cache_dir: str | Path,
-    release: str | None,
-    retries: int,
-    warn: Any,
-) -> str | None:
-    """Совместимый прокси старого импорта; реализация находится в ``overture.poi``."""
-    from .poi import resolve_poi_place_file as _resolve_poi_place_file
-
-    return _resolve_poi_place_file(
-        override,
-        configured,
-        bbox,
-        cache_dir,
-        release,
-        retries,
-        warn,
-    )
-
-
-# Перенесено: сетевые/кэш-функции живут в overture_http / overture_download.
-# Публичное API сохранено re-export'ом для обратной совместимости импортов.
+# Совместимый экспорт: каноническая реализация находится в ``overture.poi``.
+from .poi import resolve_poi_place_file
 __all__ = [
     "_BUS_ROUTE_CLASSES",
     "_apply_overture_limit",
