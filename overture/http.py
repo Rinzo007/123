@@ -21,6 +21,11 @@ from typing import Any
 logger = logging.getLogger("wikiroutes.gis.overture")
 
 
+def __sql_literal(value: str) -> str:
+    """Экранирует строку для безопасной вставки в литерал SQL DuckDB."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 # Официальные endpoint'ы Overture. Azure добавлен как резервное зеркало:
 # документация Overture публикует основной каталог и на S3, и на Azure.
 # Второй Azure endpoint через dfs полезен там, где blob endpoint режется
@@ -776,8 +781,6 @@ def _duckdb_read_overture(
     min_lat, min_lon, max_lat, max_lon = bbox
     target = Path.cwd() / f".overture_duckdb_{uuid.uuid4().hex}.parquet"
 
-    def sql_literal(value: str) -> str:
-        return "'" + value.replace("'", "''") + "'"
 
     conn = duckdb.connect(":memory:")
     try:
@@ -797,12 +800,12 @@ def _duckdb_read_overture(
         query = (
             "COPY ("
             " SELECT *"
-            f" FROM read_parquet({sql_literal(source)}, filename=true, hive_partitioning=1)"
+            f" FROM read_parquet({_sql_literal(source)}, filename=true, hive_partitioning=1)"
             f" WHERE bbox.xmin < {max_lon}"
             f"   AND bbox.xmax > {min_lon}"
             f"   AND bbox.ymin < {max_lat}"
             f"   AND bbox.ymax > {min_lat}"
-            f") TO {sql_literal(str(target))} (FORMAT PARQUET)"
+            f") TO {_sql_literal(str(target))} (FORMAT PARQUET)"
         )
         logger.info(
             "Overture: DuckDB %s/%s/%s → %s",
@@ -841,28 +844,6 @@ def _duckdb_read_overture(
 def _part_local_path(key: str, cache_dir: str | Path) -> Path:
     safe = key.replace("/", "__").replace("=", "_")
     return Path(cache_dir) / "parts" / safe
-
-
-def _download_part_once(key: str, cache_dir: str | Path) -> None:
-    """Скачивает одну часть атомарно (tmp + replace), пропуская готовые.
-
-    Крупные парт-файлы тянутся с докачкой по HTTP Range (переживает TLS-обрывы):
-    частичный файл ``<name>.part`` продолжается на повторных запусках, а после
-    полного скачивания атомарно переименовывается в целевой.
-    """
-    dest = _part_local_path(key, cache_dir)
-    if dest.exists() and _is_valid_cached_part(dest):
-        return
-    if dest.exists():
-        logger.warning("Overture: повреждённый part-кэш, перекачиваем: %s", dest)
-        with contextlib.suppress(OSError):
-            dest.unlink()
-
-    bucket, _, obj_path = key.partition("/")
-    part = dest.with_name(dest.name + ".part")
-    urls = [_overture_host_url(host, bucket, key, obj_path) for host in _OVERTURE_HTTP_HOSTS]
-    _download_part_from_host(urls, part, timeout=120.0)
-    part.replace(dest)
 
 
 def _download_part_round(keys: list[str], cache_dir: str | Path) -> None:
