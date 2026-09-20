@@ -39,7 +39,6 @@ from .base.models import (
     FlowResult,
     LineResult,
     ModeChoiceConfig,
-    PreparedPassengerFlow,
     PassengerFlowError,
     Period,
     PeriodFlow,
@@ -48,11 +47,11 @@ from .base.models import (
     vehicle_spec_for_route_type,
 )
 from .base.takt import TAKT_FLEET, TAKT_PERIODS
+from .core import PreparedPassengerFlow, prepare_passenger_flow, run_passenger_flow
 from .base.takt import _takt_hs as _takt_hs
 from .base.takt import _takt_jo as _takt_jo
 from .base.takt import _takt_logit_prob as _takt_logit_prob
 from .base.takt import _takt_logit_shift as _takt_logit_shift
-from .core import prepare_passenger_flow, run_passenger_flow
 from .network.geometry import _find_nearest_stops as _find_nearest_stops
 from .network.geometry import _takt_transfer_penalty_min as _takt_transfer_penalty_min
 from .network.geometry import haversine_meters as haversine_meters
