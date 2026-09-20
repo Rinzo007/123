@@ -26,6 +26,7 @@ import numpy as np
 
 from passenger_flow.algorithm.assign import _journey_crowd_extra
 from passenger_flow.algorithm.kpis import (
+    _atomic_infrastructure_sections,
     _build_line_kpis,
     _sequence_capital_cost_eur,
     _shared_capacity_min_headways,
@@ -517,6 +518,39 @@ def test_shared_physical_section_is_not_charged_twice() -> None:
     assert len(results) == 2
     assert results[0].capital_cost_eur > 0.0
     assert math.isclose(results[1].capital_cost_eur, 0.0, abs_tol=1e-8)
+
+def test_atomic_infrastructure_sections_split_shared_segment_at_intermediate_stop() -> None:
+    a = _synthetic_sequence([1, 2])
+    b = _synthetic_sequence([3, 4, 5])
+    a["_seq_idx"] = 0; a["route_id"] = 901
+    b["_seq_idx"] = 1; b["route_id"] = 902
+    a["route_type_key"] = b["route_type_key"] = "tram"
+    coords_a = [(52.0, 4.0), (52.0, 4.02)]
+    coords_b = [(52.0, 4.0), (52.0, 4.01), (52.0, 4.02)]
+    for seq, coords in ((a, coords_a), (b, coords_b)):
+        for stop, (lat, lon) in zip(seq["stops"], coords):
+            stop["lat"], stop["lon"] = lat, lon
+    lines, pieces = _atomic_infrastructure_sections([a, b])
+    shared = [key for key, owners in lines.items() if owners == {901, 902}]
+    assert len(shared) == 2
+    assert len(pieces[(0, 0)]) == 2
+
+
+def test_station_qa_can_raise_min_headway_above_vehicle_track_limit() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["route_type_key"] = "bus"
+    seq["route_type"] = "bus"
+    results = _build_line_kpis(
+        [seq],
+        {1: 0.0},
+        10.0,
+        0.0,
+        0.0,
+        None,
+        period_seq_stop_totals=[({}, 2.0)],
+    )
+    assert len(results) == 1
+    assert math.isclose(results[0].min_headway, 0.75, rel_tol=1e-9, abs_tol=1e-9)
 
 def test_tram_capital_cost_is_separate_from_daily_amortization() -> None:
     seq = _synthetic_sequence([1, 2, 3])
