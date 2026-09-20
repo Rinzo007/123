@@ -106,7 +106,12 @@ def _build_crowd_state(
             continue
 
         denom = period_runs * float(spec.capacity)
-        for seg_idx in range(max(0, len(seq["stops"]) - 1)):
+        seg_count = (
+            len(seq["stops"])
+            if seq.get("closed")
+            else max(0, len(seq["stops"]) - 1)
+        )
+        for seg_idx in range(seg_count):
             f = float(seg_forward.get((seq_idx, seg_idx), 0.0))
             r = float(seg_reverse.get((seq_idx, seg_idx), 0.0))
             state["seg_forward"][(seq_idx, seg_idx)] = max(
