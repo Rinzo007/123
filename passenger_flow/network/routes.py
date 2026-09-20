@@ -44,19 +44,23 @@ def _optional_value(obj: Any, names: tuple[str, ...]) -> Any:
     return None
 
 
-def _cumulative_seconds(value: Any, count: int) -> list[float] | None:
-    """Проверяет массив накопленного времени движения по остановкам."""
+def _cumulative_seconds(value: Any, count: int) -> tuple[list[float] | None, float | None]:
+    """Проверяет cumT; допускает Takt-формат closed: ``n+1`` точек."""
     if value is None:
-        return None
+        return None, None
     try:
         values = [float(v) for v in value]
     except (TypeError, ValueError):
-        return None
-    if len(values) != count or any(not math.isfinite(v) for v in values):
-        return None
+        return None, None
+    if any(not math.isfinite(v) for v in values):
+        return None, None
     if any(b < a for a, b in zip(values, values[1:])):
-        return None
-    return values
+        return None, None
+    if len(values) == count:
+        return values, None
+    if len(values) == count + 1:
+        return values[:-1], values[-1]
+    return None, None
 
 
 def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float) -> list[float]:
@@ -174,11 +178,18 @@ def _build_route_stop_sequence(
                     explicit_cum = route_cum[di]
                 else:
                     explicit_cum = route_cum
-            cum_t_s = _cumulative_seconds(explicit_cum, len(stops))
+            cum_t_s, explicit_cycle_s = _cumulative_seconds(
+                explicit_cum, len(stops)
+            )
             if cum_t_s is None:
                 cum_t_s = _derive_cumulative_seconds(stops, spec.speed_kmh)
-            cycle_run_s = float(cum_t_s[-1])
-            if closed and len(stops) >= 2:
+                explicit_cycle_s = None
+            cycle_run_s = (
+                float(explicit_cycle_s)
+                if explicit_cycle_s is not None
+                else float(cum_t_s[-1])
+            )
+            if closed and len(stops) >= 2 and explicit_cycle_s is None:
                 cycle_run_s += (
                     haversine_meters(
                         stops[-1]["lat"], stops[-1]["lon"],
