@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from passenger_flow import TAKT_PERIODS, run_passenger_flow
+import passenger_flow.algorithm.mode_choice as _mode_choice_debug
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ def main() -> int:
             "opexDay": js_round(result.raw_opex_day),
             "transitS": float(result.raw_transit_s),
             "transitSByPeriod": [float(v) for v in result.raw_transit_s_by_period],
+            "modeChoiceDebug": list(_mode_choice_debug._TAKT_DEBUG_MODE_CALLS),
             "modeSplit": {
                 "transit": raw_assigned / mode_den,
                 "car": raw_car / mode_den,
