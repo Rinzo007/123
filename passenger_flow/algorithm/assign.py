@@ -128,6 +128,7 @@ def _apply_car_only_modes(
     zones: Zones,
     zi: int,
     zj: int,
+    no_car_share: float | None = None,
 ) -> None:
     """Fallback без транзитного пути: авто, пешком и (возможно) eBike.
 
@@ -138,7 +139,7 @@ def _apply_car_only_modes(
         return
     od_meters = _od_distance_meters(zones, zi, zj)
     _transit, car_s, walk_s, ebike_s = _takt_mode_shares(
-        mode, od_meters, None, 0.0
+        mode, od_meters, None, 0.0, no_car_share=no_car_share
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
@@ -152,6 +153,7 @@ def _split_transit_trips(
     trips: float,
     od_meters: float,
     best_time_min: float,
+    no_car_share: float | None = None,
 ) -> float:
     """Считает mode shares по Takt и возвращает число транзитных поездок.
 
@@ -159,7 +161,11 @@ def _split_transit_trips(
     """
     fare_eur = _od_fare_eur(mode, od_meters, best_time_min)
     transit_s, car_s, walk_s, ebike_s = _takt_mode_shares(
-        mode, od_meters, best_time_min * 60.0, fare_eur
+        mode,
+        od_meters,
+        best_time_min * 60.0,
+        fare_eur,
+        no_car_share=no_car_share,
     )
     totals.car_trips += trips * car_s
     totals.walk_trips += trips * walk_s
@@ -296,6 +302,8 @@ def _assign_od(
     transfer_penalty_calc: str = "takt",
     seq_headway_min: Mapping[int, float] | None = None,
     seq_jitter_s: Mapping[int, float] | None = None,
+    no_car_shares: np.ndarray | None = None,
+    wait_calc: str = "takt",
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -324,7 +332,15 @@ def _assign_od(
         )
         if not origin_stops or not destination_stops:
             _apply_car_only_modes(
-                totals, trips=trips, mode=mode, zones=zones, zi=zi, zj=zj
+                totals,
+                trips=trips,
+                mode=mode,
+                zones=zones,
+                zi=zi,
+                zj=zj,
+                no_car_share=(
+                    float(no_car_shares[zi]) if no_car_shares is not None else None
+                ),
             )
             continue
 
@@ -342,10 +358,19 @@ def _assign_od(
             transfer_penalty_calc=transfer_penalty_calc,
             seq_headway_min=seq_headway_min,
             seq_jitter_s=seq_jitter_s,
+            wait_calc=wait_calc,
         )
         if not journeys:
             _apply_car_only_modes(
-                totals, trips=trips, mode=mode, zones=zones, zi=zi, zj=zj
+                totals,
+                trips=trips,
+                mode=mode,
+                zones=zones,
+                zi=zi,
+                zj=zj,
+                no_car_share=(
+                    float(no_car_shares[zi]) if no_car_shares is not None else None
+                ),
             )
             continue
 
@@ -361,6 +386,9 @@ def _assign_od(
                 trips=trips,
                 od_meters=_od_distance_meters(zones, zi, zj),
                 best_time_min=float(travel_times.min()),
+                no_car_share=(
+                    float(no_car_shares[zi]) if no_car_shares is not None else None
+                ),
             )
         else:
             transit_trips = trips
