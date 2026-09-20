@@ -536,6 +536,22 @@ def test_atomic_infrastructure_sections_split_shared_segment_at_intermediate_sto
     assert len(pieces[(0, 0)]) == 2
 
 
+def test_shared_capacity_uses_atomic_overlap_with_intermediate_stop() -> None:
+    a = _synthetic_sequence([1, 2])
+    b = _synthetic_sequence([3, 4, 5])
+    a["_seq_idx"] = 0; a["route_id"] = 911
+    b["_seq_idx"] = 1; b["route_id"] = 912
+    for seq in (a, b):
+        seq["route_type_key"] = "tram"
+        seq["route_type"] = "tram"
+    for stop, (lat, lon) in zip(a["stops"], [(52.0, 4.0), (52.0, 4.02)]):
+        stop["lat"], stop["lon"] = lat, lon
+    for stop, (lat, lon) in zip(b["stops"], [(52.0, 4.0), (52.0, 4.01), (52.0, 4.02)]):
+        stop["lat"], stop["lon"] = lat, lon
+    got = _shared_capacity_min_headways([a, b], 10.0, {911: 2.0, 912: 6.0})
+    assert math.isclose(got[911], 2.0, rel_tol=1e-9, abs_tol=1e-9)
+    assert math.isclose(got[912], 6.0, rel_tol=1e-9, abs_tol=1e-9)
+
 def test_station_qa_can_raise_min_headway_above_vehicle_track_limit() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["route_type_key"] = "bus"
