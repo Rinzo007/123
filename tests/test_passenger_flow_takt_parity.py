@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sys
@@ -237,6 +238,19 @@ def test_takt_car_cost_uses_base_time_and_period_multiplier() -> None:
     )
     expected = 1800.0 * 1.8 + 240.0 + (10.0 * 1.3 * 0.25 + 1.5) * 360.0
     assert math.isclose(got, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+def test_takt_reference_bundle_provenance_is_pinned() -> None:
+    reference = json.loads(
+        (Path(__file__).parent / "fixtures" / "takt_reference_snapshot.json").read_text(encoding="utf-8")
+    )
+    rel = reference["reference"]["source"]
+    expected = reference["reference"]["bundle_git_blob_sha"]
+    path = Path(__file__).resolve().parents[1] / rel
+    data = path.read_bytes()
+    actual = hashlib.sha1(
+        f"blob {len(data)}\0".encode("ascii") + data
+    ).hexdigest()
+    assert actual == expected
 
 def test_python_snapshot_matches_canonical_takt_reference() -> None:
     reference = json.loads(
