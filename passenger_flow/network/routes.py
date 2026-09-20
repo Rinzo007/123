@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+import math
 from typing import Any
 
 from ...models import RouteLike
@@ -30,6 +31,90 @@ _Journey = tuple[float, tuple[tuple[int, int, int], ...]]
 
 
 # ===== Последовательности остановок маршрутов =====
+def _optional_value(obj: Any, names: tuple[str, ...]) -> Any:
+    """Читает первое доступное поле у объекта или mapping."""
+    if obj is None:
+        return None
+    for name in names:
+        if isinstance(obj, Mapping) and name in obj:
+            return obj[name]
+        value = getattr(obj, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _cumulative_seconds(value: Any, count: int) -> list[float] | None:
+    """Проверяет массив накопленного времени движения по остановкам."""
+    if value is None:
+        return None
+    try:
+        values = [float(v) for v in value]
+    except (TypeError, ValueError):
+        return None
+    if len(values) != count or any(not math.isfinite(v) for v in values):
+        return None
+    if any(b < a for a, b in zip(values, values[1:])):
+        return None
+    return values
+
+
+def _derive_cumulative_seconds(stops: list[dict[str, Any]], speed_kmh: float) -> list[float]:
+    """Строит cumT fallback из геометрии и скорости ряда."""
+    speed_mps = max(float(speed_kmh) / 3.6, 0.01)
+    result = [0.0]
+    for a, b in zip(stops, stops[1:]):
+        result.append(
+            result[-1]
+            + haversine_meters(
+                float(a["lat"]), float(a["lon"]),
+                float(b["lat"]), float(b["lon"]),
+            ) / speed_mps
+        )
+    return result
+
+
+def _route_ride_time_min(seq: dict[str, Any], orig_pos: int, dest_pos: int) -> float:
+    """Время поездки между остановками с семантикой Takt C(...)."""
+    if orig_pos == dest_pos:
+        return 0.0
+    stops = seq["stops"]
+    cum = seq["cum_t_s"]
+    dwell_s = float(seq["dwell_s"])
+    closed = bool(seq.get("closed"))
+
+    def forward(a: int, b: int) -> tuple[float, int]:
+        if b >= a:
+            return cum[b] - cum[a], b - a
+        cycle = float(seq["cycle_run_s"])
+        return cycle - cum[a] + cum[b], len(stops) - a + b
+
+    fwd_s, fwd_steps = forward(orig_pos, dest_pos)
+    if not closed:
+        return (fwd_s + fwd_steps * dwell_s) / 60.0
+    rev_s, rev_steps = forward(dest_pos, orig_pos)
+    if bool(seq.get("both_ways")) and rev_s < fwd_s:
+        return (rev_s + rev_steps * dwell_s) / 60.0
+    return (fwd_s + fwd_steps * dwell_s) / 60.0
+
+
+def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
+    """Накопленное время до остановки для фазы пересадки."""
+    return (
+        float(seq.get("phase_s", 0.0))
+        + float(seq["cum_t_s"][position])
+        + float(seq["dwell_s"]) * position
+    )
+
+
+def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
+    """Ожидание на посадке: Takt Po при известном такте."""
+    if headway_min is None:
+        return wait_time_min
+    if wait_calc == "takt":
+        return _takt_po_seconds(float(headway_min)) / 60.0
+    return max(wait_time_min, float(headway_min) / 2.0)
+
 
 
 def _direction_stops(direction: Any) -> list[dict[str, Any]]:
@@ -50,18 +135,55 @@ def _direction_stops(direction: Any) -> list[dict[str, Any]]:
 def _build_route_stop_sequence(
     routes: list[RouteLike],
 ) -> list[dict[str, Any]]:
-    """Для каждого (route, di) создаёт упорядоченный список остановок."""
+    """Для каждого (route, di) создаёт упорядоченный список остановок и cumT."""
     sequences: list[dict[str, Any]] = []
     for route in routes:
         if not route.ok:
             continue
-        access_m = float(vehicle_spec_for_route_type(route.route_type).access_m)
+        spec = vehicle_spec_for_route_type(route.route_type)
+        access_m = float(spec.access_m)
         route_type_key = str(route.route_type).strip().lower()
         route_type_label = type_label(route.route_type)
+        closed = bool(_optional_value(route, ("closed",)))
+        both_ways = bool(_optional_value(route, ("bothWays", "both_ways")))
+        phase = _optional_value(route, ("phase",))
+        try:
+            phase_s = float(phase) * 60.0 if phase is not None else 0.0
+        except (TypeError, ValueError):
+            phase_s = 0.0
         for di, direction in enumerate(route.directions):
             stops = _direction_stops(direction)
             if not stops:
                 continue
+            explicit_cum = _optional_value(
+                direction,
+                ("cumT", "cum_t", "cumulative_time_s", "cum_time_s"),
+            )
+            if explicit_cum is None:
+                route_cum = _optional_value(
+                    route,
+                    ("cumT", "cum_t", "cumulative_time_s", "cum_time_s"),
+                )
+                if (
+                    isinstance(route_cum, (list, tuple))
+                    and route_cum
+                    and isinstance(route_cum[0], (list, tuple))
+                ):
+                    explicit_cum = route_cum[di]
+                else:
+                    explicit_cum = route_cum
+            cum_t_s = _cumulative_seconds(explicit_cum, len(stops))
+            if cum_t_s is None:
+                cum_t_s = _derive_cumulative_seconds(stops, spec.speed_kmh)
+            cycle_run_s = float(cum_t_s[-1])
+            if closed and len(stops) >= 2:
+                cycle_run_s += (
+                    haversine_meters(
+                        stops[-1]["lat"], stops[-1]["lon"],
+                        stops[0]["lat"], stops[0]["lon"],
+                    )
+                    / max(float(spec.speed_kmh) / 3.6, 0.01)
+                )
             sequences.append(
                 {
                     "_seq_idx": len(sequences),
@@ -73,6 +195,13 @@ def _build_route_stop_sequence(
                     "di": di,
                     "direction_name": direction.name or f"Направление {di + 1}",
                     "stops": stops,
+                    "cum_t_s": cum_t_s,
+                    "cycle_run_s": cycle_run_s,
+                    "dwell_s": float(spec.dwell_s),
+                    "speed_kmh": float(spec.speed_kmh),
+                    "closed": closed,
+                    "both_ways": both_ways,
+                    "phase_s": phase_s,
                 }
             )
     return sequences
@@ -102,18 +231,30 @@ def _best_direct_spans(
 
 def _direct_journeys(
     best_span: dict[int, tuple[int, int, int]],
+    route_stop_sequences: list[dict[str, Any]],
     *,
     stop_time_min: float,
     walk_to_stop_min: float,
     wait_time_min: float,
+    seq_headway_min: Mapping[int, float] | None,
+    wait_calc: str,
 ) -> list[_Journey]:
-    """Прямые варианты поездки (одна ножка) по лучшим спанам."""
+    """Прямые варианты с реальным временем движения маршрута."""
     journeys: list[_Journey] = []
     for seq_idx, (_span, orig_pos, dest_pos) in best_span.items():
-        time_min = (dest_pos - orig_pos) * stop_time_min
+        seq = route_stop_sequences[seq_idx]
+        ride_min = _route_ride_time_min(seq, orig_pos, dest_pos)
+        if ride_min <= 0.0:
+            ride_min = (dest_pos - orig_pos) * stop_time_min
+        headway = (
+            seq_headway_min.get(seq_idx)
+            if seq_headway_min is not None
+            else None
+        )
+        wait_min = _boarding_wait_min(headway, wait_time_min, wait_calc)
         journeys.append(
             (
-                time_min + walk_to_stop_min + wait_time_min,
+                ride_min + walk_to_stop_min + wait_min,
                 ((seq_idx, orig_pos, dest_pos),),
             )
         )
@@ -197,8 +338,12 @@ def _scheduled_transfer_wait_min(
         _TAKT_TRANSFER_MAX_WALK_M,
     )
     walk_s = walk_m / _TAKT_WALK_SPEED_MPS
-    cum_from_s = float(ta["position"]) * stop_time_min * 60.0
-    cum_to_s = float(tb["position"]) * stop_time_min * 60.0
+    cum_from_s = _time_at_stop_s(
+        route_stop_sequences[seq_a], int(ta["position"])
+    )
+    cum_to_s = _time_at_stop_s(
+        route_stop_sequences[seq_b], int(tb["position"])
+    )
     return (
         _takt_hs(
             float(seq_headway_min[seq_a]),
@@ -265,28 +410,36 @@ def _transfer_penalty(
 
 
 def _transfer_leg_time_min(
+    seq_a: dict[str, Any],
+    seq_b: dict[str, Any],
     a_pos: int,
     ta: dict[str, Any],
     tb: dict[str, Any],
     d_pos: int,
     *,
     stop_time_min: float,
-    wait_time_min: float,
+    first_wait_min: float,
     transfer_wait: float,
     transfer_penalty_min: float,
     transfer_penalty_calc: str,
 ) -> float:
     """Полное время пересадочного варианта (без walk-to-stop)."""
+    ride_a = _route_ride_time_min(seq_a, a_pos, int(ta["position"]))
+    ride_b = _route_ride_time_min(seq_b, int(tb["position"]), d_pos)
+    if ride_a <= 0.0:
+        ride_a = max(0, int(ta["position"]) - a_pos) * stop_time_min
+    if ride_b <= 0.0:
+        ride_b = max(0, d_pos - int(tb["position"])) * stop_time_min
     return (
-        (ta["position"] - a_pos) * stop_time_min
-        + (d_pos - tb["position"]) * stop_time_min
+        ride_a
+        + ride_b
         + _transfer_penalty(
             ta,
             tb,
             transfer_penalty_min=transfer_penalty_min,
             transfer_penalty_calc=transfer_penalty_calc,
         )
-        + wait_time_min
+        + first_wait_min
         + transfer_wait
     )
 
@@ -331,13 +484,23 @@ def _transfer_journeys(
                     seq_headway_min=seq_headway_min,
                     seq_jitter_s=seq_jitter_s,
                 )
+                headway_a = (
+                    seq_headway_min.get(seq_a)
+                    if seq_headway_min is not None
+                    else None
+                )
+                first_wait = _boarding_wait_min(
+                    headway_a, wait_time_min, wait_calc
+                )
                 time_min = _transfer_leg_time_min(
+                    route_stop_sequences[seq_a],
+                    route_stop_sequences[seq_b],
                     a_pos,
                     ta,
                     tb,
                     d_pos,
                     stop_time_min=stop_time_min,
-                    wait_time_min=wait_time_min,
+                    first_wait_min=first_wait,
                     transfer_wait=transfer_wait,
                     transfer_penalty_min=transfer_penalty_min,
                     transfer_penalty_calc=transfer_penalty_calc,
@@ -372,7 +535,7 @@ def build_journeys(
     transfer_penalty_calc: str = "takt",
     seq_headway_min: Mapping[int, float] | None = None,
     seq_jitter_s: Mapping[int, float] | None = None,
-    wait_calc: str = "linear",
+    wait_calc: str = "takt",
 ) -> list[_Journey]:
     """Возвращает варианты поездки: (время, ножки), где ножка — (seq_idx, посадка, высадка).
 
@@ -387,9 +550,12 @@ def build_journeys(
     best_span = _best_direct_spans(origins, destinations)
     journeys = _direct_journeys(
         best_span,
+        route_stop_sequences,
         stop_time_min=stop_time_min,
         walk_to_stop_min=walk_to_stop_min,
         wait_time_min=wait_time_min,
+        seq_headway_min=seq_headway_min,
+        wait_calc=wait_calc,
     )
 
     # Пересадки: остановка маршрута A совпадает (id/радиус) с остановкой
