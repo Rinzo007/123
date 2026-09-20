@@ -176,25 +176,86 @@ def _geometry_edge_key(a: Any, b: Any) -> tuple[str, str]:
     return (ka, kb) if ka < kb else (kb, ka)
 
 
+def _geometry_segment_edges(
+    seq: Mapping[str, Any],
+    seg_idx: int,
+    by_track: Mapping[str, Mapping[str, Any]],
+    visiting: set[str],
+) -> list[tuple[Any, Any]]:
+    legs = seq.get("geometry_legs")
+    if isinstance(legs, (list, tuple)) and 0 <= seg_idx < len(legs):
+        leg = legs[seg_idx]
+        if isinstance(leg, (list, tuple)) and len(leg) >= 2:
+            return list(zip(leg, leg[1:]))
+    on_track = seq.get("on_track")
+    if not isinstance(on_track, (list, tuple)) or seg_idx >= len(on_track):
+        return []
+    ref = on_track[seg_idx]
+    if ref in (None, False, ""):
+        return []
+    source = by_track.get(str(ref))
+    if source is None:
+        return []
+    source_key = str(source.get("track_id") or source.get("route_id") or "")
+    if not source_key or source_key in visiting:
+        return []
+    target_stops = seq.get("stops") or []
+    source_stops = source.get("stops") or []
+    if seg_idx >= len(target_stops):
+        return []
+    a = target_stops[seg_idx]
+    b = target_stops[(seg_idx + 1) % len(target_stops)]
+    ka = _geometry_point_key((float(a["lon"]), float(a["lat"])))
+    kb = _geometry_point_key((float(b["lon"]), float(b["lat"])))
+    ia = ib = -1
+    for idx, stop in enumerate(source_stops):
+        key = _geometry_point_key((float(stop["lon"]), float(stop["lat"])))
+        if key == ka and ia < 0:
+            ia = idx
+        if key == kb and ib < 0:
+            ib = idx
+    if ia < 0 or ib < 0 or ia == ib:
+        return []
+    source_legs = source.get("geometry_legs")
+    if not isinstance(source_legs, (list, tuple)):
+        return []
+    edges: list[tuple[Any, Any]] = []
+    cur = ia
+    stop_count = len(source_stops)
+    step = 1 if ib > ia else -1
+    guard = 0
+    while cur != ib and guard <= stop_count:
+        leg_idx = cur if step > 0 else (cur - 1) % stop_count
+        seg_edges = _geometry_segment_edges(source, leg_idx, by_track, visiting | {source_key})
+        if step < 0:
+            seg_edges = [(right, left) for left, right in reversed(seg_edges)]
+        edges.extend(seg_edges)
+        cur = (cur + step) % stop_count
+        guard += 1
+    return edges
+
+
 def _geometry_reuse_edges(
     route_sequences: Sequence[Mapping[str, Any]],
 ) -> set[tuple[str, str]]:
-    """La(): edges of decoded legs that already have an owned geometry."""
+    """La(): canonical decoded edges already supplied by built/source tracks."""
     reused: set[tuple[str, str]] = set()
+    by_track: dict[str, Mapping[str, Any]] = {}
     for seq in route_sequences:
-        legs = seq.get("geometry_legs")
-        if not isinstance(legs, (list, tuple)):
-            continue
+        for key in (seq.get("track_id"), seq.get("route_id")):
+            if key is not None:
+                by_track.setdefault(str(key), seq)
+    for seq in route_sequences:
         gaps = seq.get("gaps") or []
         built = seq.get("built_segs")
-        for seg_i, leg in enumerate(legs):
+        legs = seq.get("geometry_legs")
+        seg_count = len(legs) if isinstance(legs, (list, tuple)) else max(0, len(seq.get("stops") or []) - 1)
+        for seg_i in range(seg_count):
             if seg_i < len(gaps) and bool(gaps[seg_i]):
                 continue
             if isinstance(built, (list, tuple)) and seg_i < len(built) and built[seg_i] is False:
                 continue
-            if not isinstance(leg, (list, tuple)) or len(leg) < 2:
-                continue
-            for a, b in zip(leg, leg[1:]):
+            for a, b in _geometry_segment_edges(seq, seg_i, by_track, {str(seq.get("track_id") or seq.get("route_id") or "")}):
                 try:
                     reused.add(_geometry_edge_key(a, b))
                 except (TypeError, ValueError, IndexError):
