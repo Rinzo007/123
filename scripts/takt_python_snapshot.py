@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the canonical synthetic P3 case through passenger_flow and emit JSON."""
+# temporary diagnostics for exact Takt Rr parity
 
 from __future__ import annotations
 
