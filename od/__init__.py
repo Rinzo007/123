@@ -24,6 +24,7 @@ from .demand import (
     load_takt_purposes,
     write_takt_demand,
     write_takt_purposes,
+    write_takt_purposes_bundle,
     zone_weights_from_streets,
 )
 from .io import (
@@ -108,6 +109,7 @@ __all__ = [
     "ways_from_overture",
     "write_takt_demand",
     "write_takt_purposes",
+    "write_takt_purposes_bundle",
     "zonal_weights",
     "zone_network_costs",
     "zone_weights_from_streets",
