@@ -654,27 +654,43 @@ def _transfer_targets(
 def _dedupe_journeys(
     journeys: list[_Journey],
     max_alternatives: int,
+    route_stop_sequences: list[dict[str, Any]],
 ) -> list[_Journey]:
-    """Оставляет лучшие уникальные варианты в окне Takt detour + 120 секунд."""
+    """Оставляет до ``max_alternatives`` кандидатов как в Takt ``ri``.
+
+    Первый кандидат определяется минимальным полным временем. Дополнительные
+    кандидаты принимаются только если их первая посадка находится не дальше
+    150 м от первой посадки лучшего кандидата (``ni`` в JS-движке Takt).
+    Это заменяет прежнее приближение через 25% + 120 с.
+    """
     if not journeys:
         return []
-    best = min(j[0] for j in journeys)
-    threshold = (
-        best * _TAKT_ALT_DETOUR_FACTOR + _TAKT_ALT_DETOUR_FIXED_S / 60.0
-    )
-    seen: set[tuple[tuple[int, int, int], ...]] = set()
-    result: list[_Journey] = []
-    for journey in sorted(journeys, key=lambda item: (item[0], item[1])):
-        if journey[0] > threshold + 1e-9:
-            continue
+    ordered = sorted(journeys, key=lambda item: (item[0], item[1]))
+    first = ordered[0]
+    selected: list[_Journey] = [first]
+    seen = {first[1]}
+    first_leg = first.legs[0]
+    first_seq, first_pos, _ = first_leg
+    first_stop = route_stop_sequences[first_seq]["stops"][first_pos]
+    for journey in ordered[1:]:
+        if len(selected) >= max(1, min(int(max_alternatives), _TAKT_ALTS)):
+            break
         if journey[1] in seen:
             continue
+        leg = journey.legs[0]
+        seq_idx, pos, _ = leg
+        stop = route_stop_sequences[seq_idx]["stops"][pos]
+        distance_m = haversine_meters(
+            float(first_stop["lat"]),
+            float(first_stop["lon"]),
+            float(stop["lat"]),
+            float(stop["lon"]),
+        )
+        if distance_m > 150.0 + 1e-9:
+            continue
+        selected.append(journey)
         seen.add(journey[1])
-        result.append(journey)
-        if len(result) >= max(1, max_alternatives):
-            break
-    return result
-
+    return selected
 
 def _enumerate_journeys(
     origins: list[tuple[int, int, int]],
@@ -810,7 +826,9 @@ def _enumerate_journeys(
         next_frontier.sort(key=lambda state: (state[0], state[3]))
         frontier = next_frontier[:beam_size]
 
-    return _dedupe_journeys(journeys, max_alternatives)
+    return _dedupe_journeys(
+        journeys, max_alternatives, route_stop_sequences
+    )
 
 
 # ===== Главная точка входа =====
