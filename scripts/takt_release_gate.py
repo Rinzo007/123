@@ -125,6 +125,7 @@ def verify_city_snapshots(
     repo_root: Path,
     *,
     require: bool,
+    check_schema: bool = False,
 ) -> list[str]:
     missing: list[str] = []
     for case in manifest["city_cases"]:
@@ -145,15 +146,65 @@ def verify_city_snapshots(
         js_snapshot = load_json(js_path)
         py_snapshot = load_json(py_path)
         differences = compare_snapshots(
-            js_snapshot.get("differential"),
-            py_snapshot.get("differential"),
+            js_snapshot.get("parity", js_snapshot.get("differential")),
+            py_snapshot.get("parity", py_snapshot.get("differential")),
         )
         if differences:
             first = differences[0]
             raise ReleaseGateError(
-                f"{name}: JS/Python differential mismatch at {first.path}: "
+                f"{name}: JS/Python parity mismatch at {first.path}: "
                 f"{first.detail}"
             )
+        if check_schema:
+            required = {
+                "parity": (
+                    "ridersPerDay", "capitalCostM", "revenueDay", "opexDay",
+                    "modeSplit", "transferTrips", "coveredCommuters", "totalCommuters",
+                ),
+                "result": (
+                    "satisfaction", "interchanges", "trackCapacity",
+                    "coveredPoint", "servedByPoint", "missedByPoint",
+                    "noRouteByPoint", "journeyOrigins", "equilibrium",
+                    "lines", "periods", "stops",
+                ),
+            }
+            for section, keys in required.items():
+                js_part = js_snapshot.get(section)
+                py_part = py_snapshot.get(section)
+                if not isinstance(js_part, dict):
+                    errors_msg = f"{name}: JS snapshot missing object section {section!r}"
+                    raise ReleaseGateError(errors_msg)
+                if not isinstance(py_part, dict):
+                    raise ReleaseGateError(
+                        f"{name}: Python snapshot missing object section {section!r}"
+                    )
+                for key in keys:
+                    if key not in js_part or key not in py_part:
+                        raise ReleaseGateError(
+                            f"{name}: missing {section}.{key} in one of the snapshots"
+                        )
+            zone_count = js_snapshot.get("scenario", {}).get("zones")
+            py_zone_count = py_snapshot.get("scenario", {}).get("zones")
+            if zone_count != py_zone_count:
+                raise ReleaseGateError(f"{name}: zone count differs between snapshots")
+            for label, snap in (("JS", js_snapshot), ("Python", py_snapshot)):
+                result = snap["result"]
+                for key in ("coveredPoint", "servedByPoint", "missedByPoint", "noRouteByPoint"):
+                    if len(result[key]) != zone_count:
+                        raise ReleaseGateError(
+                            f"{name}: {label} {key} length {len(result[key])} != zones {zone_count}"
+                        )
+                journeys = result["journeyOrigins"]
+                if not isinstance(journeys, dict) or any(
+                    len(journeys[k]) != zone_count for k in ("journeys", "trips")
+                ):
+                    raise ReleaseGateError(
+                        f"{name}: {label} journeyOrigins length does not match zones"
+                    )
+                if len(result["periods"]) != 5:
+                    raise ReleaseGateError(
+                        f"{name}: {label} period result must contain 5 periods"
+                    )
     if require and missing:
         raise ReleaseGateError(
             "missing city-level golden snapshots: " + ", ".join(missing)
@@ -178,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="fail unless every city case has checked-in JS/Python golden snapshots",
     )
+    parser.add_argument(
+        "--check-city-schemas",
+        action="store_true",
+        help="validate the richer city result schema and point-vector lengths",
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -190,7 +246,10 @@ def main(argv: list[str] | None = None) -> int:
         bundle_sha = verify_bundle_provenance(reference, repo_root)
         city_names = validate_city_manifest(manifest, repo_root)
         missing = verify_city_snapshots(
-            manifest, repo_root, require=args.require_city_snapshots
+            manifest,
+            repo_root,
+            require=args.require_city_snapshots,
+            check_schema=args.check_city_schemas,
         )
     except ReleaseGateError as exc:
         print(f"takt-release-gate: FAIL: {exc}", file=sys.stderr)
