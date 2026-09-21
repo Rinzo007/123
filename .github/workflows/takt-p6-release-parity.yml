@@ -75,7 +75,9 @@ jobs:
       - name: Install passenger_flow runtime dependencies
         run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
       - name: Run parity regression suite
-        run: python -m pytest -q tests/test_passenger_flow_takt_parity.py
+        run: |
+          cd tests
+          PYTHONPATH=.. python -m pytest -q test_passenger_flow_takt_parity.py
 
   record:
     name: Record verified city goldens
