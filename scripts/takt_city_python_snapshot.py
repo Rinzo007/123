@@ -5,6 +5,7 @@ import argparse,base64,json
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
+from scipy import sparse
 from passenger_flow import ModeChoiceConfig,TAKT_PERIODS,prepare_passenger_flow,run_passenger_flow
 from passenger_flow.algorithm.kpis import _atomic_infrastructure_sections
 from passenger_flow.base.models import vehicle_spec_for_route_type
@@ -61,7 +62,7 @@ def track_capacity(seqs):
  return out
 def snap(man,c):
  routes,raw,od,base,base_car,layers,z,src,model,pts=build(c);prep=prepare_passenger_flow(routes,z)
- result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=None,
+ result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=od,
    periods=TAKT_PERIODS,headway_min=None,mode_choice=mk(model),transfer_penalty_calc="takt",
    stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=6,msa_gap=.01,
    prepared=prep,demand_layers=layers)
