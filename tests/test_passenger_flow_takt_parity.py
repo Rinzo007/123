@@ -592,10 +592,10 @@ def test_multi_leg_search_reaches_four_legs() -> None:
     ]
     # Keep only the intended adjacent-line transfer stops inside 800 m.
     for idx, (shift, stops) in enumerate((
-        (0.000, (0.000, 0.001, 0.002)),
-        (0.002, (0.000, 0.008, 0.009)),
-        (0.011, (0.000, 0.008, 0.009)),
-        (0.020, (0.000, 0.008, 0.009)),
+        (0.00, (0.00, 0.01, 0.02)),
+        (0.02, (0.08, 0.09, 0.10)),
+        (0.11, (0.08, 0.09, 0.10)),
+        (0.20, (0.08, 0.09, 0.10)),
     )):
         for stop, dx in zip(seqs[idx]["stops"], stops):
             stop["lon"] = 4.0 + shift + dx
