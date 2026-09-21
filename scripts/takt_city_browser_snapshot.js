@@ -7,8 +7,9 @@ const MATRIX_WORKER_SOURCE=`
 const {parentPort}=require("node:worker_threads");
 let graph=null;
 function solve(msg){
-  const {job,start,end,stops,offsets,targets,costs}=msg;
+  const {job,start,end,stops,offsets,targets,costs,targetOffsets,targetNodes}=msg;
   const nodes=stops*2;
+  const targetMark=new Uint32Array(nodes);
   const times=new Float64Array((end-start)*stops);
   times.fill(Infinity);
   const previous=new Int32Array((end-start)*nodes);
@@ -18,6 +19,12 @@ function solve(msg){
   let heapNode=new Int32Array(Math.max(1024,nodes));
   let heapDist=new Float64Array(heapNode.length);
   for(let src=start;src<end;src++){
+    const targetFrom=targetOffsets?targetOffsets[src]:0;
+    const targetTo=targetOffsets?targetOffsets[src+1]:0;
+    const targetCount=targetTo-targetFrom;
+    if(targetOffsets && targetCount===0)continue;
+    for(let k=targetFrom;k<targetTo;k++)targetMark[targetNodes[k]]=src+1;
+    let remaining=targetCount;
     dist.fill(Infinity);used.fill(0);dist[src]=0;
     let size=1;
     heapNode[0]=src;heapDist[0]=0;
@@ -57,7 +64,13 @@ function solve(msg){
       const [node,cost]=pop();
       if(used[node])continue;
       used[node]=1;
-      if(node>=stops)times[(src-start)*stops+(node-stops)]=cost;
+      if(node>=stops){
+        times[(src-start)*stops+(node-stops)]=cost;
+        if(targetMark[node]===src+1){
+          remaining--;
+          if(remaining===0)break;
+        }
+      }
       for(let k=offsets[node],finish=offsets[node+1];k<finish;k++){
         const to=targets[k];
         if(used[to])continue;
@@ -89,6 +102,60 @@ function matrixGraphKey(offsets,targets,costs){
   };
   return offsets.length+":"+targets.length+":"+costs.length+":"+sample(offsets)+":"+sample(targets)+":"+sample(costs);
 }
+const MODE_ACCESS_M={bus:500,tram:600,metro:800,rail:1500};
+function buildMatrixTargetCSR(q){
+ const lines=q.lines||[],pts=q.city?.pts||[];
+ const refs=[];
+ const lineRefs=[];
+ let I=0;
+ for(let li=0;li<lines.length;li++){
+   const line=lines[li],stops=line.stops||[],rr=[];
+   if(stops.length<2){lineRefs.push(rr);continue;}
+   for(let si=0;si<stops.length;si++){
+     if(line.openStops&&line.openStops[si]===false){rr.push(-1);continue;}
+     rr.push(I);refs.push({li,si,stop:stops[si]});I++;
+   }
+   lineRefs.push(rr);
+ }
+ const zoneCache=new Map();
+ function candidates(zi){
+   if(zoneCache.has(zi))return zoneCache.get(zi);
+   const point=pts[zi],out=[];
+   if(!point){zoneCache.set(zi,out);return out;}
+   for(let li=0;li<lines.length;li++){
+     const line=lines[li],stops=line.stops||[],rr=lineRefs[li];
+     if(stops.length<2)continue;
+     const access=MODE_ACCESS_M[String(line.mode||"bus").toLowerCase()]??1500;
+     let best=-1,bestD=Infinity;
+     for(let si=0;si<stops.length;si++){
+       const g=rr[si];if(g<0)continue;
+       const d=hav(point,stops[si]);
+       if(d<bestD||(d===bestD&&g<best)){bestD=d;best=g;}
+     }
+     if(best>=0&&bestD<=access+1e-9)out.push(best);
+   }
+   zoneCache.set(zi,out);return out;
+ }
+ const rows=[];
+ for(const row of (q.city?.od||[]))rows.push(row);
+ for(const layer of (q.layers||[]))for(const row of layer.od||[])rows.push(row);
+ const targetSets=Array.from({length:I},()=>null);
+ for(const row of rows){
+   const srcs=candidates(Number(row[0])),dsts=candidates(Number(row[1]));
+   if(!srcs.length||!dsts.length)continue;
+   for(const src of srcs){
+     let set=targetSets[src];if(!set)targetSets[src]=set=new Set();
+     for(const dst of dsts)set.add(I+dst);
+   }
+ }
+ const offsets=new Int32Array(I+1);
+ let total=0;
+ for(let i=0;i<I;i++){offsets[i]=total;if(targetSets[i])total+=targetSets[i].size;}
+ offsets[I]=total;
+ const nodes=new Int32Array(total);let at=0;
+ for(let i=0;i<I;i++)if(targetSets[i])for(const node of targetSets[i])nodes[at++]=node;
+ return{offsets,nodes,stops:I};
+}
 class TaktNodeWorker{
   constructor(){
     this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
@@ -108,7 +175,12 @@ class TaktNodeWorker{
         new Int32Array(offsets).set(compressed.offsets);
         new Int32Array(targets).set(compressed.targets);
         new Float64Array(costs).set(compressed.costs);
-        this.worker.postMessage({type:"init",offsets,targets,costs});
+        const targetCSR=buildMatrixTargetCSR(MATRIX_CURRENT_CITY||{});
+        const targetOffsets=new SharedArrayBuffer(targetCSR.offsets.byteLength);
+        const targetNodes=new SharedArrayBuffer(targetCSR.nodes.byteLength);
+        new Int32Array(targetOffsets).set(targetCSR.offsets);
+        new Int32Array(targetNodes).set(targetCSR.nodes);
+        this.worker.postMessage({type:"init",offsets,targets,costs,targetOffsets,targetNodes});
       }
       this.worker.postMessage({type:"solve",job:msg.job,start:msg.start,end:msg.end,stops:msg.stops});
       return;
@@ -117,6 +189,7 @@ class TaktNodeWorker{
   }
   terminate(){return this.worker.terminate();}
 }
+let MATRIX_CURRENT_CITY=null;
 const ROOT=path.resolve(__dirname,".."),MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
@@ -201,7 +274,7 @@ function clean(x){
   };
 }
 async function runOne(Bs,man,c){
- const q=build(c),r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
+ const q=build(c); MATRIX_CURRENT_CITY=q; const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
  const full=clean(r),modes=r.modeSplit||{};
  const total=Number(r.ridersPerDay||0)+0; // scalar fields are already canonical rounded in the JS engine
  return {reference:{engine:"Takt web bundle",bundle:man.bundle.source,city:c.name,version:c.version,inputs:c.git_blob_sha},
