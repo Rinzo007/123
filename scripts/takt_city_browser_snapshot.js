@@ -89,7 +89,44 @@ parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type===
 `
 
 
-function compressMatrixGraph(offsets,targets,costs){ return {offsets,targets,costs}; }
+function compressMatrixGraph(offsets0,targets0,costs0,targetCSR){
+ const I=targetCSR.stops;
+ if(I<1200)return{offsets:offsets0,targets:targets0,costs:costs0};
+ const lineOfStop=targetCSR.lineOfStop;
+ const important=new Uint8Array(I);
+ for(let k=0;k<targetCSR.nodes.length;k++)important[targetCSR.nodes[k]-I]=1;
+ for(let stop=0;stop<I;stop++){
+   const node=I+stop;
+   for(let k=offsets0[node];k<offsets0[node+1];k++){
+     if(targets0[k]<I){important[stop]=1;break;}
+   }
+ }
+ const outOffsets=new Int32Array(I*2+1);
+ const targetParts=[],costParts=[];let total=0;
+ for(let node=0;node<I*2;node++){
+   outOffsets[node]=total;
+   const from=offsets0[node],to=offsets0[node+1];
+   if(node<I){
+     const srcLine=lineOfStop[node];
+     for(let k=from;k<to;k++){
+       const target=targets0[k];
+       if(target<I)continue;
+       const dst=target-I;
+       if(lineOfStop[dst]!==srcLine||!important[dst])continue;
+       targetParts.push(target);costParts.push(costs0[k]);total++;
+     }
+   }else{
+     for(let k=from;k<to;k++){
+       const target=targets0[k];
+       if(target<I){targetParts.push(target);costParts.push(costs0[k]);total++;}
+     }
+   }
+ }
+ outOffsets[I*2]=total;
+ const targets=new Int32Array(total),costs=new Float64Array(total);
+ for(let i=0;i<total;i++){targets[i]=targetParts[i];costs[i]=costParts[i];}
+ return{offsets:outOffsets,targets,costs};
+}
 function matrixGraphKey(offsets,targets,costs){
   const sample=(arr)=>{
     let h=2166136261>>>0,step=Math.max(1,Math.floor(arr.length/32));
@@ -105,15 +142,14 @@ function matrixGraphKey(offsets,targets,costs){
 const MODE_ACCESS_M={bus:500,tram:600,metro:800,rail:1500};
 function buildMatrixTargetCSR(q){
  const lines=q.lines||[],pts=q.city?.pts||[];
- const refs=[];
- const lineRefs=[];
+ const lineRefs=[],lineOfStop=[];
  let I=0;
  for(let li=0;li<lines.length;li++){
    const line=lines[li],stops=line.stops||[],rr=[];
    if(stops.length<2){lineRefs.push(rr);continue;}
    for(let si=0;si<stops.length;si++){
      if(line.openStops&&line.openStops[si]===false){rr.push(-1);continue;}
-     rr.push(I);refs.push({li,si,stop:stops[si]});I++;
+     rr.push(I);lineOfStop[I]=li;I++;
    }
    lineRefs.push(rr);
  }
@@ -154,8 +190,9 @@ function buildMatrixTargetCSR(q){
  offsets[I]=total;
  const nodes=new Int32Array(total);let at=0;
  for(let i=0;i<I;i++)if(targetSets[i])for(const node of targetSets[i])nodes[at++]=node;
- return{offsets,nodes,stops:I};
+ return{offsets,nodes,stops:I,lineOfStop:Int32Array.from(lineOfStop)};
 }
+
 class TaktNodeWorker{
   constructor(){
     this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
@@ -176,11 +213,18 @@ class TaktNodeWorker{
         new Int32Array(targets).set(compressed.targets);
         new Float64Array(costs).set(compressed.costs);
         const targetCSR=buildMatrixTargetCSR(MATRIX_CURRENT_CITY||{});
+        const compressed=compressMatrixGraph(msg.offsets,msg.targets,msg.costs,targetCSR);
         const targetOffsets=new SharedArrayBuffer(targetCSR.offsets.byteLength);
         const targetNodes=new SharedArrayBuffer(targetCSR.nodes.byteLength);
         new Int32Array(targetOffsets).set(targetCSR.offsets);
         new Int32Array(targetNodes).set(targetCSR.nodes);
-        this.worker.postMessage({type:"init",offsets,targets,costs,targetOffsets,targetNodes});
+        const offsetsOut=new SharedArrayBuffer(compressed.offsets.byteLength);
+        const targetsOut=new SharedArrayBuffer(compressed.targets.byteLength);
+        const costsOut=new SharedArrayBuffer(compressed.costs.byteLength);
+        new Int32Array(offsetsOut).set(compressed.offsets);
+        new Int32Array(targetsOut).set(compressed.targets);
+        new Float64Array(costsOut).set(compressed.costs);
+        this.worker.postMessage({type:"init",offsets:offsetsOut,targets:targetsOut,costs:costsOut,targetOffsets,targetNodes});
       }
       this.worker.postMessage({type:"solve",job:msg.job,start:msg.start,end:msg.end,stops:msg.stops});
       return;
