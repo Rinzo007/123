@@ -1277,6 +1277,31 @@ def test_run_passenger_flow_reuses_prepared_context() -> None:
     assert result.total_trips == 0.0
 
 
+def test_sparse_od_matrix_is_supported():
+    import scipy.sparse as sp
+    from od.model import Zones
+    from passenger_flow import run_passenger_flow
+
+    zones = Zones(
+        ids=np.array([1, 2], dtype=np.int64),
+        polygons=(None, None),
+        xy=np.array([[0.0, 52.37], [0.005, 52.37]], dtype=np.float64),
+        bounds=(-0.001, 52.369, 0.006, 52.371),
+    )
+    od = sp.csr_matrix(
+        (np.array([10.0, 10.0]), (np.array([0, 1]), np.array([1, 0]))),
+        shape=(2, 2),
+    )
+    result = run_passenger_flow([], od, zones, od_sparse=od, periods=())
+    assert result.total_trips == 20.0
+
+
+def test_flow_result_exposes_takt_diagnostics():
+    from passenger_flow.base.models import FlowResult
+    result = FlowResult(route_flows=(), stop_flows=(), total_trips=0.0, assigned_trips=0.0, routes_served=0)
+    assert result.takt_diagnostics == {}
+
+
 def test_p6_city_release_manifest_is_pinned() -> None:
     from scripts.takt_release_gate import validate_city_manifest
 

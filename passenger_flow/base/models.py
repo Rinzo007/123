@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from typing import Any
 
 from .defaults import (
     TAKT_CAR_CIRCUITY,
@@ -370,3 +371,4 @@ class FlowResult:
     raw_rest_trips: float = 0.0
     raw_revenue_day: float = 0.0
     raw_opex_day: float = 0.0
+    takt_diagnostics: dict[str, Any] = field(default_factory=dict)
