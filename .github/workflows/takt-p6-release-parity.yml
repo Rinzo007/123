@@ -80,7 +80,7 @@ jobs:
   record:
     name: Record verified city goldens
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: city-parity
+    needs: [city-parity, regression]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +110,7 @@ jobs:
   release:
     name: Release-only fail-closed gate
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: city-parity
+    needs: [city-parity, regression]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
