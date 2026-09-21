@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
+from scipy import sparse
 from scipy.spatial import cKDTree
 
 if TYPE_CHECKING:
@@ -189,7 +190,18 @@ def _validate_zones(zones: Zones) -> None:
         raise PassengerFlowError("zones.xy содержит координаты вне диапазона lon/lat")
 
 
-def _validate_od_matrix(matrix: np.ndarray, n_zones: int) -> None:
+def _validate_od_matrix(matrix: Any, n_zones: int) -> None:
+    if sparse.issparse(matrix):
+        if matrix.shape != (n_zones, n_zones):
+            raise PassengerFlowError(
+                f"Матрица OD {matrix.shape} не совпадает с числом зон {n_zones}"
+            )
+        data = np.asarray(matrix.data, dtype=np.float64)
+        if not np.isfinite(data).all():
+            raise PassengerFlowError("Разреженная матрица OD содержит NaN или Inf")
+        if np.any(data < 0.0):
+            raise PassengerFlowError("Разреженная матрица OD содержит отрицательные поездки")
+        return
     if matrix.shape != (n_zones, n_zones):
         raise PassengerFlowError(
             f"Матрица OD {matrix.shape} не совпадает с числом зон {n_zones}"
@@ -440,7 +452,7 @@ def _validate_flow_inputs(
         base_time_s,
         n_zones,
         len(periods) if periods else 1,
-        int(np.count_nonzero(matrix > 0.0)),
+        int(matrix.nnz if sparse.issparse(matrix) else np.count_nonzero(matrix > 0.0)),
     )
     _validate_car_base_time(
         car_base_time_s,
@@ -803,6 +815,23 @@ def _merge_pass_aggregates(
         accum["seg_reverse_totals"][key] += val
     for key, val in pass_agg.get("seq_stop_totals", {}).items():
         accum["seq_stop_totals"][key] += val
+    accum["transfer_trips"] += pass_agg.get("transfer_trips", 0.0)
+    for key, value in pass_agg.get("interchanges", {}).items():
+        item = accum["interchanges"].get(key)
+        if item is None:
+            item = {"trips": 0.0, "periods": [0.0] * 5}
+            accum["interchanges"][key] = item
+        item["trips"] += float(value.get("trips", 0.0))
+        for idx, period_value in enumerate(value.get("periods", ())[:5]):
+            item["periods"][idx] += float(period_value)
+    accum["total_commuters"] += pass_agg.get("total_commuters", 0.0)
+    accum["covered_commuters"] += pass_agg.get("covered_commuters", 0.0)
+    for name in ("total_by_origin","covered_by_origin","no_route_by_origin","journey_origin_trips","journey_origin_journeys"):
+        array = pass_agg.get(name)
+        if array is not None:
+            if accum[name] is None:
+                accum[name] = np.zeros_like(array, dtype=np.float64)
+            accum[name] += np.asarray(array, dtype=np.float64)
     accum["assigned_trips"] += pass_agg["assigned_trips"]
     accum["car_trips"] += pass_agg["car_trips"]
     accum["walk_trips"] += pass_agg["walk_trips"]
@@ -828,6 +857,17 @@ def _empty_accumulator() -> dict[str, Any]:
         "seg_forward_totals": defaultdict(float),
         "seg_reverse_totals": defaultdict(float),
         "seq_stop_totals": defaultdict(float),
+        "transfer_trips": 0.0,
+        "interchanges": {},
+        "total_commuters": 0.0,
+        "covered_commuters": 0.0,
+        "total_by_origin": None,
+        "covered_by_origin": None,
+        "no_route_by_origin": None,
+        "journey_origin_trips": None,
+        "journey_origin_journeys": None,
+        "msa_iterations": 0,
+        "msa_gap": 0.0,
     }
 
 
@@ -1009,6 +1049,8 @@ def _run_period(
             f"  MSA {period.key if period else 'общий'}: "
             f"{msa_iters} итераций, разрыв {msa_final_gap*100:.2f}%"
         )
+        pass_agg["_msa_iterations"] = msa_iters
+        pass_agg["_msa_gap"] = msa_final_gap
         return pass_agg
 
     if wait_crowding_per_100_min > 0:
@@ -1048,7 +1090,7 @@ def _run_period(
 
 def run_passenger_flow(
     routes: list[RouteLike],
-    od_matrix: np.ndarray,
+    od_matrix: np.ndarray | sparse.spmatrix,
     zones: Zones,
     *,
     population: np.ndarray | None = None,
@@ -1168,7 +1210,7 @@ def run_passenger_flow(
 
     n_zones = len(zones)
     _validate_zones(zones)
-    matrix = np.asarray(od_matrix, dtype=np.float64)
+    matrix = od_matrix.tocsr().astype(np.float64) if sparse.issparse(od_matrix) else np.asarray(od_matrix, dtype=np.float64)
     population_arr: np.ndarray | None = None
     if population is not None:
         population_arr = np.asarray(population, dtype=np.float64)
@@ -1340,6 +1382,9 @@ def run_passenger_flow(
             line=line,
         )
         _merge_pass_aggregates(accum, pass_agg)
+        accum["msa_iterations"] = max(int(accum.get("msa_iterations", 0)), int(pass_agg.get("_msa_iterations", 0)))
+        if "_msa_gap" in pass_agg:
+            accum["msa_gap"] = float(pass_agg["_msa_gap"])
         period_seq_stop_totals.append((dict(pass_agg.get("seq_stop_totals", {})), period_hours))
         if period is not None:
             period_flows.append(
@@ -1391,6 +1436,60 @@ def run_passenger_flow(
                 period_seq_stop_totals=period_seq_stop_totals,
             )
         )
+    total_by_origin = accum.get("total_by_origin")
+    covered_by_origin = accum.get("covered_by_origin")
+    no_route_by_origin = accum.get("no_route_by_origin")
+    if total_by_origin is None:
+        total_by_origin = np.zeros(n_zones, dtype=np.float64)
+    if covered_by_origin is None:
+        covered_by_origin = np.zeros(n_zones, dtype=np.float64)
+    if no_route_by_origin is None:
+        no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
+    missed_by_origin = np.maximum(total_by_origin - covered_by_origin, 0.0)
+    served_by_point = np.divide(covered_by_origin, np.maximum(total_by_origin, 1e-12),
+        out=np.zeros_like(covered_by_origin), where=total_by_origin > 0.0)
+    journey_origins = {
+        "journeys": (accum["journey_origin_journeys"].tolist() if accum.get("journey_origin_journeys") is not None else [0.0] * n_zones),
+        "trips": (accum["journey_origin_trips"].tolist() if accum.get("journey_origin_trips") is not None else [0.0] * n_zones),
+    }
+    covered_point = [int(any(float(dist) <= float(route_sequences[seqi]["access_m"]) for seqi, _s, _p, dist in zone_nearest.get(zi, ()))) for zi in range(n_zones)]
+    interchanges = []
+    for (ls_i, ls_stop, rs_i, rs_stop), item in sorted(accum["interchanges"].items(), key=lambda kv: (-float(kv[1]["trips"]), kv[0])):
+        ls, rs = route_sequences[ls_i], route_sequences[rs_i]
+        if ls_stop >= len(ls["stops"]) or rs_stop >= len(rs["stops"]):
+            continue
+        a, b = ls["stops"][ls_stop], rs["stops"][rs_stop]
+        walk_s = haversine_meters(float(a["lat"]), float(a["lon"]), float(b["lat"]), float(b["lon"])) / 1.33
+        interchanges.append({
+            "a": ls["route_id"], "ai": int(ls_stop), "b": rs["route_id"], "bi": int(rs_stop),
+            "trips": int(round(float(item["trips"]))),
+            "periods": [{"trips": int(round(float(v))), "walkS": walk_s} for v in item.get("periods", [0.0] * 5)],
+        })
+    scalar_total = max(float(sum(p.total_trips for p in period_flows)), 1e-12)
+    takt_diagnostics = {
+        "satisfaction": {
+            "score": float(merged_assigned / scalar_total),
+            "totalTrips": int(round(scalar_total)),
+            "causes": {
+                "noroute": int(round(float(no_route_by_origin.sum()))),
+                "wait": 0, "crowd": 0, "transfer": 0, "ride": 0, "price": 0,
+            },
+            "exact": False,
+        },
+        "interchanges": interchanges,
+        "trackCapacity": [],
+        "coveredCommuters": float(accum.get("covered_commuters", 0.0)),
+        "totalCommuters": float(accum.get("total_commuters", 0.0)),
+        "servedByPoint": served_by_point.tolist(),
+        "journeyOrigins": journey_origins,
+        "missedByPoint": missed_by_origin.tolist(),
+        "noRouteByPoint": np.minimum(no_route_by_origin, missed_by_origin).tolist(),
+        "coveredPoint": covered_point,
+        "equilibrium": {
+            "iterations": int(accum.get("msa_iterations", 0)),
+            "gap": round(float(accum.get("msa_gap", 0.0)), 4),
+        },
+    }
     result = assemble_flow_result(
         route_totals=accum["route_totals"],
         dir_totals=accum["dir_totals"],
@@ -1408,6 +1507,7 @@ def run_passenger_flow(
         rest_trips=merged_rest,
         period_flows=tuple(period_flows),
         line_results=line_results,
+        takt_diagnostics=takt_diagnostics,
     )
     interzonal_trips = max(total_trips - intrazonal_trips, 1.0)
     assigned_demand_trips = _assigned_demand_trips(period_flows, interzonal_trips)
