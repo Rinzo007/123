@@ -1,6 +1,84 @@
 #!/usr/bin/env node
 "use strict";
-const fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
+const fs=require("node:fs"),path=require("node:path"),vm=require("node:vm"),os=require("node:os");
+const {Worker:NodeWorker}=require("node:worker_threads");
+
+const MATRIX_WORKER_SOURCE=`
+const {parentPort}=require("node:worker_threads");
+let graph=null;
+function heapPush(h,item){
+  h.push(item); let k=h.length-1;
+  for(;k>0;){const p=(k-1)>>1;if(h[p][0]<=h[k][0])break;[h[p],h[k]]=[h[k],h[p]];k=p;}
+}
+function heapPop(h){
+  const top=h[0],last=h.pop();
+  if(h.length){h[0]=last;let k=0;
+    for(;;){const l=2*k+1,r=l+1;let m=k;
+      if(l<h.length&&h[l][0]<h[m][0])m=l;
+      if(r<h.length&&h[r][0]<h[m][0])m=r;
+      if(m===k)break;[h[m],h[k]]=[h[k],h[m]];k=m;
+    }
+  }
+  return top;
+}
+function solve(msg){
+  const {job,start,end,stops,offsets,targets,costs}=msg;
+  const nodes=stops*2;
+  const times=new Float64Array((end-start)*stops);
+  times.fill(Infinity);
+  const previous=new Int32Array((end-start)*nodes);
+  previous.fill(-1);
+  const dist=new Float64Array(nodes);
+  const used=new Uint8Array(nodes);
+  for(let src=start;src<end;src++){
+    dist.fill(Infinity);used.fill(0);dist[src]=0;
+    const heap=[[0,src]];
+    while(heap.length){
+      const [cost,node]=heapPop(heap);
+      if(used[node])continue;
+      used[node]=1;
+      if(node>=stops)times[(src-start)*stops+(node-stops)]=cost;
+      const begin=offsets[node],finish=offsets[node+1];
+      for(let k=begin;k<finish;k++){
+        const to=targets[k],next=cost+costs[k];
+        if(next<dist[to]){
+          dist[to]=next;previous[(src-start)*nodes+to]=node;
+          heapPush(heap,[next,to]);
+        }
+      }
+    }
+  }
+  parentPort.postMessage({type:"solved",job,start,times,previous});
+}
+parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type==="solve")solve({...msg,...graph});});
+`;
+
+class TaktNodeWorker{
+  constructor(){
+    this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
+    this.onmessage=null;this.onerror=null;this.graphKey=null;
+    this.worker.on("message",data=>{if(this.onmessage)this.onmessage({data});});
+    this.worker.on("error",err=>{if(this.onerror)this.onerror(err);});
+  }
+  postMessage(msg){
+    if(msg.type==="solve" && msg.offsets){
+      if(this.graphKey!==msg.offsets){
+        this.graphKey=msg.offsets;
+        const offsets=new SharedArrayBuffer(msg.offsets.byteLength);
+        const targets=new SharedArrayBuffer(msg.targets.byteLength);
+        const costs=new SharedArrayBuffer(msg.costs.byteLength);
+        new Int32Array(offsets).set(msg.offsets);
+        new Int32Array(targets).set(msg.targets);
+        new Float64Array(costs).set(msg.costs);
+        this.worker.postMessage({type:"init",offsets,targets,costs});
+      }
+      this.worker.postMessage({type:"solve",job:msg.job,start:msg.start,end:msg.end,stops:msg.stops});
+      return;
+    }
+    this.worker.postMessage(msg);
+  }
+  terminate(){return this.worker.terminate();}
+}
 const ROOT=path.resolve(__dirname,".."),MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
@@ -10,7 +88,7 @@ function getBs(){
  const b=fs.readFileSync(bundlePath,"utf8"),m="})();",i=b.lastIndexOf(m);if(i<0)throw Error("Takt bundle terminator not found");
  const s={console,performance,setTimeout,clearTimeout,setInterval,clearInterval,TextEncoder,TextDecoder,URL,URLSearchParams,
  Uint8Array,Uint16Array,Uint32Array,Int32Array,Float32Array,Float64Array,DataView,ArrayBuffer,SharedArrayBuffer,BigInt64Array,BigUint64Array,Math,Date,JSON,
- Map,Set,WeakMap,WeakSet,Promise,Error,TypeError,RangeError,Symbol,Reflect,Object,Array,Number,String,Boolean,RegExp,parseInt,parseFloat,isFinite,isNaN,
+ Map,Set,WeakMap,WeakSet,Promise,Error,TypeError,RangeError,Symbol,Reflect,Object,Array,Number,String,Boolean,RegExp,parseInt,parseFloat,isFinite,isNaN,Worker:TaktNodeWorker,navigator:{hardwareConcurrency:Math.max(2,os.cpus().length)},
  atob:globalThis.atob,btoa:globalThis.btoa};s.globalThis=s;s.self={location:{hostname:"localhost"},addEventListener(){},postMessage(){}};
  vm.runInNewContext(b.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+b.slice(i),s,{filename:bundlePath,displayErrors:true});
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
