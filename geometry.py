@@ -12,10 +12,10 @@ import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from .constants import EARTH_DIAMETER_KM
+from constants import EARTH_DIAMETER_KM
 
 if TYPE_CHECKING:
-    from .type_defs import Coordinate
+    from type_defs import Coordinate
 
 __all__ = [
     "geometry_diameter_km",
