@@ -13,16 +13,50 @@ from od.model import Zones
 ROOT=Path(__file__).resolve().parents[1];MANIFEST=ROOT/"tests/fixtures/takt_release_city_cases.json"
 def load(p): return json.loads(p.read_text(encoding="utf-8"))
 def f32(s): return np.frombuffer(base64.b64decode(s),dtype="<f4").copy()
+def coarse_cell(point: tuple[float, float]) -> tuple[int, int]:
+ return (int(np.floor(float(point[0]) / 0.01)), int(np.floor(float(point[1]) / 0.0062)))
+
+def _bounded_case(c, d, b, p):
+ s=c.get("golden_scenario") or {}
+ max_od=int(s.get("max_od_pairs",10**18)); max_purpose=int(s.get("max_purpose_od_pairs",10**18)); max_lines=int(s.get("max_lines",10**18))
+ raw=np.asarray(d["od"],dtype=np.float64)
+ order=np.argsort(-raw[:,2],kind="stable")
+ positive=[int(i) for i in order if raw[int(i),2]>0.0][:max_od]
+ endpoint_cells=set()
+ for i in positive:
+  endpoint_cells.add(coarse_cell(tuple(d["pts"][int(raw[i,0])])))
+  endpoint_cells.add(coarse_cell(tuple(d["pts"][int(raw[i,1])])))
+ ranked_lines=[]
+ for i,L in enumerate(b.get("lines",[])):
+  cells={coarse_cell((float(pt[0]),float(pt[1]))) for pt in (L.get("stops") or [])}
+  ranked_lines.append((len(cells & endpoint_cells),str(L.get("id","")),i,L))
+ ranked_lines.sort(key=lambda x:(-x[0],x[1],x[2]))
+ keep={x[2] for x in ranked_lines[:max_lines]}
+ lines_src=[L for i,L in enumerate(b.get("lines",[])) if i in keep]
+ layers=[]
+ original_purpose_rows=0
+ for layer in p.get("layers",[]):
+  q=f32(layer["od"])
+  nrow=int(layer.get("n",len(q)//4))
+  q=q.reshape((-1,4))[:nrow]
+  original_purpose_rows += nrow
+  idx=np.argsort(-q[:,2],kind="stable")[:max_purpose]
+  base_layer=[f32(x) for x in (layer.get("baseT") or [])]
+  layers.append({"od":q[idx],"out":layer.get("out",[]),"ret":layer.get("ret",[]),
+                 "base_time_s":np.stack([x[idx] for x in base_layer]) if len(base_layer)==5 else None})
+ return positive,raw,lines_src,layers,max_od,max_purpose,max_lines,original_purpose_rows
+
 def build(c):
  d=load(ROOT/c["demand"]);b=load(ROOT/c["baseline"]);p=load(ROOT/c["purposes"]);m=load(ROOT/c["model"])
- pts=np.asarray(d["pts"],dtype=np.float64);raw=np.asarray(d["od"],dtype=np.float64)
- n=len(pts);rows=raw[:,0].astype(np.int64);cols=raw[:,1].astype(np.int64);vals=raw[:,2].astype(np.float64)
- keep=vals>0;rows,cols,vals=rows[keep],cols[keep],vals[keep]
+ positive,raw,bounded_lines,layers,max_od,max_purpose,max_lines,original_purpose_rows=_bounded_case(c,d,b,p)
+ pts=np.asarray(d["pts"],dtype=np.float64)
+ sel_raw=raw[positive]
+ n=len(pts);rows=sel_raw[:,0].astype(np.int64);cols=sel_raw[:,1].astype(np.int64);vals=sel_raw[:,2].astype(np.float64)
  od=sparse.csr_matrix((vals,(rows,cols)),shape=(n,n))
- base_car=raw[keep,3].astype(np.float64) if raw.shape[1]>=4 else None
+ base_car=sel_raw[:,3].astype(np.float64) if sel_raw.shape[1]>=4 else None
  z=Zones(ids=np.arange(1,n+1,dtype=np.int64),polygons=tuple([None]*n),xy=pts[:,:2],bounds=(float(pts[:,0].min()),float(pts[:,1].min()),float(pts[:,0].max()),float(pts[:,1].max())))
  routes=[];src=[]
- for i,L in enumerate(b.get("lines",[])):
+ for i,L in enumerate(bounded_lines):
   ss=tuple(SimpleNamespace(id=10_000_000+i*100_000+k,name=f"{L.get('name',i)}:{k}",latitude=float(s[1]),longitude=float(s[0])) for k,s in enumerate(L.get("stops",[])))
   dr=SimpleNamespace(name=str(L.get("name",i)),stops=ss,cumT=tuple(map(float,L.get("cumT",[]))) or None,segLen=tuple(map(float,L.get("segLen",[]))) or None)
   routes.append(SimpleNamespace(ok=True,route_id=i,name=str(L.get("name",i)),route_type=str(L.get("mode","bus")),directions=(dr,),
@@ -31,15 +65,12 @@ def build(c):
     openStops=L.get("openStops"),builtSegs=L.get("builtSegs"),closedSegs=L.get("closedSegs"),gaps=L.get("gaps"),onTrack=L.get("onTrack")))
   src.append(L)
  bt=[f32(x) for x in p.get("commuteBaseT",[])]
- base=np.stack(bt) if len(bt)==5 and all(x.size==len(raw) for x in bt) else None
- layers=[]
- for layer in p.get("layers",[]):
-  enc=layer.get("od"); q=f32(enc) if isinstance(enc,str) else np.asarray(enc,dtype=np.float32)
-  if q.ndim==1:q=q.reshape((-1,4))
-  base_layer=[f32(x) for x in (layer.get("baseT") or [])]
-  layers.append({"od":q,"out":layer.get("out",[]),"ret":layer.get("ret",[]),
-                 "base_time_s":np.stack(base_layer) if len(base_layer)==5 else None})
- return routes,raw,od,base,base_car,layers,z,src,m,pts
+ base=np.stack([x[positive] for x in bt]) if len(bt)==5 and all(x.size==len(raw) for x in bt) else None
+ scenario={"maxOd":max_od,"maxPurpose":max_purpose,"maxLines":max_lines,"originalOdPairs":len(raw),
+           "selectedOdPairs":len(positive),"originalPurposeOdPairs":original_purpose_rows,
+           "originalLines":len(b.get("lines",[])),"selectedLines":len(routes)}
+ return routes,raw,od,base,base_car,layers,z,src,m,pts,scenario
+
 def mk(m):
  mob=m.get("mobility",{});car=m.get("car",{});rest=m.get("rest",{})
  return ModeChoiceConfig(car_no_car_share=float(mob.get("noCar",.35)),two_wheel_share=float(mob.get("twoWheelShare",.3)),
@@ -61,7 +92,7 @@ def track_capacity(seqs):
     "limit":float(vehicle_spec_for_route_type(mode).track_tph)})
  return out
 def snap(man,c):
- routes,raw,od,base,base_car,layers,z,src,model,pts=build(c);prep=prepare_passenger_flow(routes,z)
+ routes,raw,od,base,base_car,layers,z,src,model,pts,scenario=build(c);prep=prepare_passenger_flow(routes,z)
  result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=od,
    periods=TAKT_PERIODS,headway_min=10.0,mode_choice=mk(model),transfer_penalty_calc="takt",
    stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=6,msa_gap=.01,
@@ -87,7 +118,7 @@ def snap(man,c):
   "periods":[{"key":p.key,"label":p.label,"totalTrips":p.total_trips,"assignedTrips":p.assigned_trips,"carTrips":p.car_trips,"walkTrips":p.walk_trips,"twoWheelTrips":p.two_wheel_trips,"restTrips":p.rest_trips} for p in result.period_flows],
   "stops":[{"name":s.name,"lat":s.lat,"lon":s.lon,"boardings":s.boardings,"alightings":s.alightings,"totalFlow":s.total_flow,"routes":list(s.routes)} for s in result.stop_flows]}
  return {"reference":{"engine":"passenger_flow Python","bundle":man["bundle"]["source"],"city":c["name"],"version":c["version"],"inputs":c["git_blob_sha"]},
-   "scenario":{"demandLayer":"primary OD","purposeLayers":len(layers),"odPairs":len(raw),"zones":len(z),"lines":len(routes)},"parity":parity,"result":full}
+   "scenario":{"demandLayer":"primary OD","purposeLayers":len(layers),"odPairs":int(od.nnz),"zones":len(z),"lines":len(routes),**scenario},"parity":parity,"result":full}
 def main():
  ap=argparse.ArgumentParser();ap.add_argument("--city");ap.add_argument("--output-dir",type=Path,default=ROOT/"tests/fixtures/cities");a=ap.parse_args()
  man=load(MANIFEST);cases=man["city_cases"];cases=[next(x for x in cases if x["name"]==a.city)] if a.city else cases
