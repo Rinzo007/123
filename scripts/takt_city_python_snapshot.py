@@ -71,7 +71,7 @@ def snap(man,c):
  parity={"ridersPerDay":round(result.raw_assigned_trips),"capitalCostM":result.capital_cost_eur/1e6,"revenueDay":round(result.raw_revenue_day),"opexDay":round(result.raw_opex_day),
    "modeSplit":{"transit":result.raw_assigned_trips/max(total,1e-12),"car":result.raw_car_trips/max(total,1e-12),"walk":(result.raw_walk_trips+result.raw_two_wheel_trips)/max(total,1e-12),"rest":result.raw_rest_trips/max(total,1e-12)},
    "transferTrips":float(sum(x["trips"] for x in d.get("interchanges",[]))),"coveredCommuters":float(d.get("coveredCommuters",0)),
-   "totalCommuters":float(d.get("totalCommuters",0)),"satisfaction":d.get("satisfaction",{}),"equilibrium":d.get("equilibrium",{})}
+   "totalCommuters":float(d.get("totalCommuters",0)),"satisfactionScore":float(d.get("satisfaction",{}).get("score",0)),"satisfactionTotalTrips":int(d.get("satisfaction",{}).get("totalTrips",0)),"equilibrium":d.get("equilibrium",{})}
  lines=[]
  for lr in result.line_results:
   s=src[int(lr.route_id)] if 0<=int(lr.route_id)<len(src) else {}
