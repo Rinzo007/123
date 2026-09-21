@@ -330,7 +330,7 @@ def _journey_crowd_extra(
             else:
                 prev_seq, _prev_a, prev_b = journey.legs[leg_no - 1]
                 prev_stop = route_sequences[prev_seq]["stops"][prev_b]
-                curr_stop = route_sequences[seq_idx]["stops"][a]
+                curr_stop = route_sequences[seq_idx]["stops"][b]
                 transfer_wait_min = _scheduled_transfer_wait_min(
                     prev_seq,
                     seq_idx,
