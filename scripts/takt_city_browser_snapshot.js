@@ -205,13 +205,6 @@ class TaktNodeWorker{
       const key=matrixGraphKey(msg.offsets,msg.targets,msg.costs);
       if(this.graphKey!==key){
         this.graphKey=key;
-        const compressed=compressMatrixGraph(msg.offsets,msg.targets,msg.costs);
-        const offsets=new SharedArrayBuffer(compressed.offsets.byteLength);
-        const targets=new SharedArrayBuffer(compressed.targets.byteLength);
-        const costs=new SharedArrayBuffer(compressed.costs.byteLength);
-        new Int32Array(offsets).set(compressed.offsets);
-        new Int32Array(targets).set(compressed.targets);
-        new Float64Array(costs).set(compressed.costs);
         const targetCSR=buildMatrixTargetCSR(MATRIX_CURRENT_CITY||{});
         const compressed=compressMatrixGraph(msg.offsets,msg.targets,msg.costs,targetCSR);
         const targetOffsets=new SharedArrayBuffer(targetCSR.offsets.byteLength);
