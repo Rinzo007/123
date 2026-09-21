@@ -106,13 +106,14 @@ def snap(man,c):
     "capitalCostM":lr.capital_cost_eur/1e6,"fleet":lr.fleet,"revenueDay":lr.revenue_day,"opexDay":lr.opex_day,
     "peakLoadFactor":lr.crowding,"minHeadway":lr.min_headway,"passengerKm":lr.passenger_km,"crowdedPassengerKm":lr.crowded_passenger_km,
     "excessPassengerKm":lr.excess_passenger_km,"severePassengerKm":lr.severe_passenger_km,"extremePassengerKm":lr.extreme_passenger_km})
+ line_summary=[{"id":x.get("id"),"mode":x.get("mode"),"ridersPerDay":float(x.get("ridersPerDay",0)),"fleet":float(x.get("fleet",0)),
+   "revenueDay":float(x.get("revenueDay",0)),"opexDay":float(x.get("opexDay",0)),"peakLoadFactor":float(x.get("peakLoadFactor",0))} for x in lines]
  parity={"ridersPerDay":round(result.raw_assigned_trips),"capitalCostM":result.capital_cost_eur/1e6,"revenueDay":round(result.raw_revenue_day),"opexDay":round(result.raw_opex_day),
    "modeSplit":{"transit":result.raw_assigned_trips/max(total,1e-12),"car":result.raw_car_trips/max(total,1e-12),"walk":(result.raw_walk_trips+result.raw_two_wheel_trips)/max(total,1e-12),"rest":result.raw_rest_trips/max(total,1e-12)},
    "transferTrips":float(sum(x["trips"] for x in d.get("interchanges",[]))),"coveredCommuters":float(d.get("coveredCommuters",0)),
-
-   "totalCommuters":float(d.get("totalCommuters",0)),"satisfactionScore":float(d.get("satisfaction",{}).get("score",0)),"satisfactionTotalTrips":int(d.get("satisfaction",{}).get("totalTrips",0)),"equilibrium":d.get("equilibrium",{})}
-
-   "lineSummary":[{"id":x.get("id"),"mode":x.get("mode"),"ridersPerDay":float(x.get("ridersPerDay",0)),"fleet":float(x.get("fleet",0)),"revenueDay":float(x.get("revenueDay",0)),"opexDay":float(x.get("opexDay",0)),"peakLoadFactor":float(x.get("peakLoadFactor",0))} for x in lines], full={"ridersPerDay":parity["ridersPerDay"],"transferTrips":parity["transferTrips"],"coveredCommuters":parity["coveredCommuters"],
+   "totalCommuters":float(d.get("totalCommuters",0)),"satisfactionScore":float(d.get("satisfaction",{}).get("score",0)),"satisfactionTotalTrips":int(d.get("satisfaction",{}).get("totalTrips",0)),
+   "equilibrium":d.get("equilibrium",{}),"lineSummary":line_summary}
+ full={"ridersPerDay":parity["ridersPerDay"],"transferTrips":parity["transferTrips"],"coveredCommuters":parity["coveredCommuters"],
   "totalCommuters":parity["totalCommuters"],"capitalCostM":parity["capitalCostM"],"revenueDay":parity["revenueDay"],"opexDay":parity["opexDay"],
   "modeSplit":parity["modeSplit"],"satisfaction":d.get("satisfaction",{}),"interchanges":d.get("interchanges",[]),"trackCapacity":track_capacity(list(prep.route_sequences)),
   "coveredPoint":d.get("coveredPoint",[]),"servedByPoint":d.get("servedByPoint",[]),"missedByPoint":d.get("missedByPoint",[]),
@@ -121,6 +122,7 @@ def snap(man,c):
   "stops":[{"name":s.name,"lat":s.lat,"lon":s.lon,"boardings":s.boardings,"alightings":s.alightings,"totalFlow":s.total_flow,"routes":list(s.routes)} for s in result.stop_flows]}
  return {"reference":{"engine":"passenger_flow Python","bundle":man["bundle"]["source"],"city":c["name"],"version":c["version"],"inputs":c["git_blob_sha"]},
    "scenario":{"demandLayer":"primary OD","purposeLayers":len(layers),"odPairs":int(scenario["selectedOdPairs"]),"zones":len(z),"lines":len(routes),**scenario},"parity":parity,"result":full}
+
 def main():
  ap=argparse.ArgumentParser();ap.add_argument("--city");ap.add_argument("--output-dir",type=Path,default=ROOT/"tests/fixtures/cities");a=ap.parse_args()
  man=load(MANIFEST);cases=man["city_cases"];cases=[next(x for x in cases if x["name"]==a.city)] if a.city else cases
