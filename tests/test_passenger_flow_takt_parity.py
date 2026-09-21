@@ -58,6 +58,7 @@ from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
     _build_transfer_edge_index,
+    _cached_ride_edge_time_min,
     _ride_edge_time_min,
     _route_ride_time_min,
     _takt_ri_access_min,
@@ -405,6 +406,45 @@ def _synthetic_sequence(ids: list[int]) -> dict:
         "open": [True, True, True],
         "open_pre": [0, 1, 2, 3],
     }
+
+
+def test_cached_ride_edge_cost_is_identical_to_uncached() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    crowd_state = {
+        "seg_forward": {(0, 0): 0.75, (0, 1): 0.50},
+        "seg_reverse": {},
+        "stop_extra": {},
+        "unreliability": {(0, 0): 1.03},
+    }
+    expected = _ride_edge_time_min(
+        seq,
+        0,
+        2,
+        stop_time_min=0.0,
+        crowd_state=crowd_state,
+    )
+    cache: dict[tuple[int, int, int], float] = {}
+    first = _cached_ride_edge_time_min(
+        [seq],
+        0,
+        0,
+        2,
+        stop_time_min=0.0,
+        crowd_state=crowd_state,
+        cache=cache,
+    )
+    second = _cached_ride_edge_time_min(
+        [seq],
+        0,
+        0,
+        2,
+        stop_time_min=0.0,
+        crowd_state=crowd_state,
+        cache=cache,
+    )
+    assert math.isclose(first, expected, rel_tol=1e-12, abs_tol=1e-12)
+    assert math.isclose(second, expected, rel_tol=1e-12, abs_tol=1e-12)
+    assert cache == {(0, 0, 2): expected}
 
 
 def test_base_t_rest_alternative_is_present_when_base_time_exists() -> None:
