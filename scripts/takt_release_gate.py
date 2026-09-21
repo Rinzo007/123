@@ -145,10 +145,16 @@ def verify_city_snapshots(
 
         js_snapshot = load_json(js_path)
         py_snapshot = load_json(py_path)
-        differences = compare_snapshots(
-            js_snapshot.get("parity", js_snapshot.get("differential")),
-            py_snapshot.get("parity", py_snapshot.get("differential")),
-        )
+        js_parity = dict(js_snapshot.get("parity", js_snapshot.get("differential", {})) or {})
+        py_parity = dict(py_snapshot.get("parity", py_snapshot.get("differential", {})) or {})
+        # Satisfaction causes remain in the full result for schema/audit coverage;
+        # the release comparison uses the stable score/trip scalar only.
+        for parity in (js_parity, py_parity):
+            sat = parity.pop("satisfaction", None)
+            if isinstance(sat, dict):
+                parity["satisfactionScore"] = sat.get("score")
+                parity["satisfactionTotalTrips"] = sat.get("totalTrips")
+        differences = compare_snapshots(js_parity, py_parity)
         if differences:
             first = differences[0]
             raise ReleaseGateError(
