@@ -6,21 +6,6 @@ const {Worker:NodeWorker}=require("node:worker_threads");
 const MATRIX_WORKER_SOURCE=`
 const {parentPort}=require("node:worker_threads");
 let graph=null;
-function heapPush(h,item){
-  h.push(item); let k=h.length-1;
-  for(;k>0;){const p=(k-1)>>1;if(h[p][0]<=h[k][0])break;[h[p],h[k]]=[h[k],h[p]];k=p;}
-}
-function heapPop(h){
-  const top=h[0],last=h.pop();
-  if(h.length){h[0]=last;let k=0;
-    for(;;){const l=2*k+1,r=l+1;let m=k;
-      if(l<h.length&&h[l][0]<h[m][0])m=l;
-      if(r<h.length&&h[r][0]<h[m][0])m=r;
-      if(m===k)break;[h[m],h[k]]=[h[k],h[m]];k=m;
-    }
-  }
-  return top;
-}
 function solve(msg){
   const {job,start,end,stops,offsets,targets,costs}=msg;
   const nodes=stops*2;
@@ -30,20 +15,57 @@ function solve(msg){
   previous.fill(-1);
   const dist=new Float64Array(nodes);
   const used=new Uint8Array(nodes);
+  let heapNode=new Int32Array(Math.max(1024,nodes));
+  let heapDist=new Float64Array(heapNode.length);
   for(let src=start;src<end;src++){
     dist.fill(Infinity);used.fill(0);dist[src]=0;
-    const heap=[[0,src]];
-    while(heap.length){
-      const [cost,node]=heapPop(heap);
+    let size=1;
+    heapNode[0]=src;heapDist[0]=0;
+    function push(node,d){
+      if(size>=heapNode.length){
+        const nn=new Int32Array(heapNode.length*2),dd=new Float64Array(heapDist.length*2);
+        nn.set(heapNode);dd.set(heapDist);heapNode=nn;heapDist=dd;
+      }
+      let k=size++;
+      heapNode[k]=node;heapDist[k]=d;
+      while(k>0){
+        const p=(k-1)>>1;
+        if(heapDist[p]<=heapDist[k])break;
+        const tn=heapNode[p],td=heapDist[p];
+        heapNode[p]=heapNode[k];heapDist[p]=heapDist[k];
+        heapNode[k]=tn;heapDist[k]=td;k=p;
+      }
+    }
+    function pop(){
+      const node=heapNode[0],d=heapDist[0],last=--size;
+      if(last>0){
+        heapNode[0]=heapNode[last];heapDist[0]=heapDist[last];
+        let k=0;
+        for(;;){
+          const l=2*k+1,r=l+1;let m=k;
+          if(l<size&&heapDist[l]<heapDist[m])m=l;
+          if(r<size&&heapDist[r]<heapDist[m])m=r;
+          if(m===k)break;
+          const tn=heapNode[k],td=heapDist[k];
+          heapNode[k]=heapNode[m];heapDist[k]=heapDist[m];
+          heapNode[m]=tn;heapDist[m]=td;k=m;
+        }
+      }
+      return [node,d];
+    }
+    while(size){
+      const [node,cost]=pop();
       if(used[node])continue;
       used[node]=1;
       if(node>=stops)times[(src-start)*stops+(node-stops)]=cost;
-      const begin=offsets[node],finish=offsets[node+1];
-      for(let k=begin;k<finish;k++){
-        const to=targets[k],next=cost+costs[k];
+      for(let k=offsets[node],finish=offsets[node+1];k<finish;k++){
+        const to=targets[k];
+        if(used[to])continue;
+        const next=cost+costs[k];
         if(next<dist[to]){
-          dist[to]=next;previous[(src-start)*nodes+to]=node;
-          heapPush(heap,[next,to]);
+          dist[to]=next;
+          previous[(src-start)*nodes+to]=node;
+          push(to,next);
         }
       }
     }
@@ -51,7 +73,8 @@ function solve(msg){
   parentPort.postMessage({type:"solved",job,start,times,previous});
 }
 parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type==="solve")solve({...msg,...graph});});
-`;
+`
+
 
 class TaktNodeWorker{
   constructor(){
