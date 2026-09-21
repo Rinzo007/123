@@ -114,6 +114,15 @@ class _OdTotals:
     seq_stop_totals: dict[tuple[int, int], float] = field(
         default_factory=lambda: defaultdict(float)
     )
+    transfer_trips: float = 0.0
+    interchanges: dict[tuple[int, int, int, int], dict[str, Any]] = field(default_factory=dict)
+    total_commuters: float = 0.0
+    covered_commuters: float = 0.0
+    total_by_origin: np.ndarray | None = None
+    covered_by_origin: np.ndarray | None = None
+    no_route_by_origin: np.ndarray | None = None
+    journey_origin_trips: np.ndarray | None = None
+    journey_origin_journeys: np.ndarray | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +141,15 @@ class _OdTotals:
             "seg_forward_totals": self.seg_forward_totals,
             "seg_reverse_totals": self.seg_reverse_totals,
             "seq_stop_totals": self.seq_stop_totals,
+            "transfer_trips": self.transfer_trips,
+            "interchanges": self.interchanges,
+            "total_commuters": self.total_commuters,
+            "covered_commuters": self.covered_commuters,
+            "total_by_origin": self.total_by_origin,
+            "covered_by_origin": self.covered_by_origin,
+            "no_route_by_origin": self.no_route_by_origin,
+            "journey_origin_trips": self.journey_origin_trips,
+            "journey_origin_journeys": self.journey_origin_journeys,
         }
 
 
@@ -605,14 +623,24 @@ def _assign_od(
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
+    n_zones = len(zones)
+    totals.total_by_origin = np.zeros(n_zones, dtype=np.float64)
+    totals.covered_by_origin = np.zeros(n_zones, dtype=np.float64)
+    totals.no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
+    totals.journey_origin_trips = np.zeros(n_zones, dtype=np.float64)
+    totals.journey_origin_journeys = np.zeros(n_zones, dtype=np.float64)
     ride_edge_cache: dict[tuple[int, int, int], float] = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
         zj = int(od_cols[idx])
-        trips = float(od_vals[idx])
-        if trips <= 0:
+        raw_trips = float(od_vals[idx])
+        if raw_trips <= 0:
             continue
+        if period_index == 0:
+            totals.total_commuters += raw_trips
+            totals.total_by_origin[zi] += raw_trips
+        trips = raw_trips
         # Внутризонные поездки не моделируются общественным транспортом
         if zi == zj:
             continue
@@ -633,6 +661,8 @@ def _assign_od(
             zone_nearest.get(zj, []), route_sequences
         )
         if not origin_stops or not destination_stops:
+            if period_index == 0:
+                totals.no_route_by_origin[zi] += raw_trips
             _apply_car_only_modes(
                 totals,
                 trips=trips,
@@ -671,6 +701,8 @@ def _assign_od(
             ride_edge_cache=ride_edge_cache,
         )
         if not journeys:
+            if period_index == 0:
+                totals.no_route_by_origin[zi] += raw_trips
             _apply_car_only_modes(
                 totals,
                 trips=trips,
@@ -737,6 +769,12 @@ def _assign_od(
 
         if transit_trips <= 0:
             continue
+
+        if period_index == 0:
+            totals.covered_commuters += raw_trips
+            totals.covered_by_origin[zi] += raw_trips
+        totals.journey_origin_trips[zi] += raw_trips * float(out_factor)
+        totals.journey_origin_journeys[zi] += transit_trips * float(out_factor)
 
         _accumulate_transit_journeys(
             totals,
