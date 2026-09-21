@@ -482,13 +482,12 @@ def _station_min_headways(
             h = _sequence_period_headway(seq, period_index, default_headway_min, headway_by_route)
             if h <= 0.0:
                 continue
-            direction_factor = 1.0 if bool(seq.get("closed")) and not bool(seq.get("both_ways")) else 2.0
             peak_rate = 0.0
             for stop_idx in range(len(seq.get("stops") or [])):
                 stop_p = float(stop_totals.get((seq_idx, stop_idx), 0.0))
                 peak_rate = max(
                     peak_rate,
-                    stop_p / (max(float(hours), 1e-9) * direction_factor),
+                    stop_p / max(float(hours), 1e-9),
                 )
             n = 60.0 - float(spec.dwell_per_pax_s) * peak_rate / 60.0
             dwell_min = (float(spec.dwell_s) + 25.0) / n if n > 6.0 else 999.0
@@ -536,7 +535,8 @@ def _period_service_metrics(
         float(cum[-1]) if cum else one_way_km * 1000.0 / max(float(spec.speed_kmh) / 3.6, 0.01)
     )
     open_count = int(sum(bool(v) for v in seq.get("open", [True] * n)))
-    j_s = run_s + open_count * float(spec.dwell_s)
+    dwell_s = float(seq.get("dwell_s", spec.dwell_s))
+    j_s = run_s + open_count * dwell_s
     base_cycle_s = j_s + 300.0 if closed else 2.0 * j_s + 600.0
     direction_factor = 1.0 if closed and not bool(seq.get("both_ways")) else 2.0
     fleet_factor = 2.0 if closed and bool(seq.get("both_ways")) else 1.0
