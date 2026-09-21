@@ -18,6 +18,8 @@ jobs:
   city-parity:
     name: Canonical Takt city parity
     timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     strategy:
       fail-fast: false
       matrix:
