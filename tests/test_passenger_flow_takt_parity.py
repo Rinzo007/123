@@ -121,6 +121,15 @@ def test_sparse_od_validation_rejects_bad_shape_and_values() -> None:
     with pytest.raises(PassengerFlowError):
         _validate_sparse_od(SparseBadData(), 2)
 
+def test_mode_choice_bad_numeric_type_is_wrapped_in_passenger_flow_error() -> None:
+    from passenger_flow.core import _validate_mode_choice
+
+    mode = ModeChoiceConfig()
+    mode.car_no_car_share = "not-a-number"
+    with pytest.raises(PassengerFlowError):
+        _validate_mode_choice(mode)
+
+
 def test_flow_input_validation_rejects_non_finite_scalars() -> None:
     from passenger_flow.base.takt import TAKT_PERIODS
     kwargs = dict(
