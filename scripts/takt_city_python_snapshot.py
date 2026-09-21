@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 from scipy import sparse
+from scipy import sparse
 from passenger_flow import ModeChoiceConfig,TAKT_PERIODS,prepare_passenger_flow,run_passenger_flow
 from passenger_flow.algorithm.kpis import _atomic_infrastructure_sections
 from passenger_flow.base.models import vehicle_spec_for_route_type
@@ -18,8 +19,8 @@ def build(c):
  pts=np.asarray(d["pts"],dtype=np.float64);raw=np.asarray(d["od"],dtype=np.float64)
  n=len(pts);rows=raw[:,0].astype(np.int64);cols=raw[:,1].astype(np.int64);vals=raw[:,2].astype(np.float64)
  keep=vals>0;rows,cols,vals=rows[keep],cols[keep],vals[keep]
- od=np.zeros((0,4),dtype=np.float64) if raw.size==0 else raw[keep]
- base_car=od[:,3].astype(np.float64) if od.shape[1]>=4 else None
+ od=sparse.csr_matrix((vals,(rows,cols)),shape=(n,n))
+ base_car=raw[keep,3].astype(np.float64) if raw.shape[1]>=4 else None
  z=Zones(ids=np.arange(1,n+1,dtype=np.int64),polygons=tuple([None]*n),xy=pts[:,:2],bounds=(float(pts[:,0].min()),float(pts[:,1].min()),float(pts[:,0].max()),float(pts[:,1].max())))
  routes=[];src=[]
  for i,L in enumerate(b.get("lines",[])):
@@ -64,8 +65,8 @@ def snap(man,c):
  routes,raw,od,base,base_car,layers,z,src,model,pts=build(c);prep=prepare_passenger_flow(routes,z)
  result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=od,
    periods=TAKT_PERIODS,headway_min=None,mode_choice=mk(model),transfer_penalty_calc="takt",
-   stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=6,msa_gap=.01,
-   prepared=prep,demand_layers=layers)
+   stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=20,msa_gap=.01,
+   prepared=prep,demand_layers=layers,capex_factor=float(model.get('capex',{}).get('costFactor',1.0)))
  d=result.takt_diagnostics or {}
  total=result.raw_assigned_trips+result.raw_car_trips+result.raw_walk_trips+result.raw_two_wheel_trips+result.raw_rest_trips
  parity={"ridersPerDay":round(result.raw_assigned_trips),"capitalCostM":result.capital_cost_eur/1e6,"revenueDay":round(result.raw_revenue_day),"opexDay":round(result.raw_opex_day),
