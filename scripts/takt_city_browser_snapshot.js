@@ -170,7 +170,7 @@ async function runOne(Bs,man,c){
  parity:{ridersPerDay:Number(r.ridersPerDay||0),capitalCostM:Number(r.capitalCostM||0),revenueDay:Number(r.revenueDay||0),opexDay:Number(r.opexDay||0),
    modeSplit:{transit:Number(modes.transit||0),car:Number(modes.car||0),walk:Number(modes.walk||0),rest:Number(modes.rest||0)},
    transferTrips:Number(r.transferTrips||0),coveredCommuters:Number(r.coveredCommuters||0),totalCommuters:Number(r.totalCommuters||0),
-   satisfaction:r.satisfaction||null,equilibrium:r.equilibrium||null,
+   satisfactionScore:Number(r.satisfaction?.score||0),satisfactionTotalTrips:Number(r.satisfaction?.totalTrips||0),equilibrium:r.equilibrium||null,
    lineSummary:(r.lines||[]).map(x=>({id:x.id,mode:x.mode,ridersPerDay:Number(x.ridersPerDay||0),fleet:Number(x.fleet||0),revenueDay:Number(x.revenueDay||0),opexDay:Number(x.opexDay||0),peakLoadFactor:Number(x.peakLoadFactor||0)}))},
  result:full}
 }
