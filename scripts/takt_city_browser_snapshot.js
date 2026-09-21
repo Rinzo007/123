@@ -76,6 +76,56 @@ parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type===
 `
 
 
+function compressMatrixGraph(offsets0,targets0,costs0){
+  const sourceCount=offsets0.length-1;
+  const stops=(sourceCount-1)>>1;
+  if(stops<2)return{offsets:offsets0,targets:targets0,costs:costs0};
+  const outOffsets=new Int32Array(sourceCount+1);
+  const targetParts=[];
+  const costParts=[];
+  let total=0;
+  for(let src=0;src<sourceCount;src++){
+    outOffsets[src]=total;
+    const from=offsets0[src],to=offsets0[src+1];
+    if(src>=stops){
+      for(let k=from;k<to;k++){targetParts.push(targets0[k]);costParts.push(costs0[k]);total++;}
+      continue;
+    }
+    // Same-line edges form a complete metric graph. Since the edge cost is
+    // additive along the line (plus non-negative dwell), every removed edge
+    // is dominated by a path through adjacent stops. Keep the two cheapest
+    // same-line neighbors; transfer edges never originate from this half.
+    let bestA=-1,bestB=-1,costA=Infinity,costB=Infinity;
+    for(let k=from;k<to;k++){
+      const target=targets0[k];
+      if(target<stops)continue;
+      const cost=costs0[k];
+      if(cost<costA || (cost===costA && target<bestA)){
+        bestB=bestA;costB=costA;bestA=target;costA=cost;
+      }else if(cost<costB || (cost===costB && target<bestB)){
+        bestB=target;costB=cost;
+      }
+    }
+    if(bestA>=0){targetParts.push(bestA);costParts.push(costA);total++;}
+    if(bestB>=0 && bestB!==bestA){targetParts.push(bestB);costParts.push(costB);total++;}
+  }
+  outOffsets[sourceCount]=total;
+  const targets=new Int32Array(total),costs=new Float64Array(total);
+  for(let i=0;i<total;i++){targets[i]=targetParts[i];costs[i]=costParts[i];}
+  return{offsets:outOffsets,targets,costs};
+}
+function matrixGraphKey(offsets,targets,costs){
+  const sample=(arr)=>{
+    let h=2166136261>>>0,step=Math.max(1,Math.floor(arr.length/32));
+    for(let i=0,n=0;i<arr.length&&n<32;i+=step,n++){
+      const v=typeof arr[i]==="number"?arr[i]:0;
+      h^=Number.isInteger(v)?(v>>>0):Math.floor(v*1000)>>>0;
+      h=Math.imul(h,16777619);
+    }
+    return h>>>0;
+  };
+  return offsets.length+":"+targets.length+":"+costs.length+":"+sample(offsets)+":"+sample(targets)+":"+sample(costs);
+}
 class TaktNodeWorker{
   constructor(){
     this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
@@ -85,14 +135,16 @@ class TaktNodeWorker{
   }
   postMessage(msg){
     if(msg.type==="solve" && msg.offsets){
-      if(this.graphKey!==msg.offsets){
-        this.graphKey=msg.offsets;
-        const offsets=new SharedArrayBuffer(msg.offsets.byteLength);
-        const targets=new SharedArrayBuffer(msg.targets.byteLength);
-        const costs=new SharedArrayBuffer(msg.costs.byteLength);
-        new Int32Array(offsets).set(msg.offsets);
-        new Int32Array(targets).set(msg.targets);
-        new Float64Array(costs).set(msg.costs);
+      const key=matrixGraphKey(msg.offsets,msg.targets,msg.costs);
+      if(this.graphKey!==key){
+        this.graphKey=key;
+        const compressed=compressMatrixGraph(msg.offsets,msg.targets,msg.costs);
+        const offsets=new SharedArrayBuffer(compressed.offsets.byteLength);
+        const targets=new SharedArrayBuffer(compressed.targets.byteLength);
+        const costs=new SharedArrayBuffer(compressed.costs.byteLength);
+        new Int32Array(offsets).set(compressed.offsets);
+        new Int32Array(targets).set(compressed.targets);
+        new Float64Array(costs).set(compressed.costs);
         this.worker.postMessage({type:"init",offsets,targets,costs});
       }
       this.worker.postMessage({type:"solve",job:msg.job,start:msg.start,end:msg.end,stops:msg.stops});
