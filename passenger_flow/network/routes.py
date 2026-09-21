@@ -997,8 +997,10 @@ def _transfer_targets(
     stops_a = route_stop_sequences[seq_a]["stops"]
     if current_pos < 0 or current_pos >= len(stops_a):
         return
-    ta = stops_a[current_pos]
-    for seq_b, data_b in enumerate(route_stop_sequences):
+    for ta in stops_a:
+        if int(ta["position"]) <= current_pos:
+            continue
+        for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
                 continue
             best_tb: dict[str, Any] | None = None
