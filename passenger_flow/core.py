@@ -1452,7 +1452,6 @@ def run_passenger_flow(
         )
 
     # 3. OD-пары (sparse или dense)
-    total_trips = float(od_matrix.sum()) + sum(float(np.sum(layer.od_vals)) for layer in extra_layers)
     od_rows, od_cols, od_vals = _load_od_pairs(od_sparse, matrix, line)
 
     # 4. Тайминги маршрутов (headway/jitter/reliability)
@@ -1496,6 +1495,8 @@ def run_passenger_flow(
         base_layer = None if base_layer is None else np.asarray(base_layer, dtype=np.float64)
         car_layer = od[:, 3].astype(np.float64)[keep] if od.shape[1] >= 4 else None
         extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer))
+
+    total_trips = float(od_matrix.sum()) + sum(float(np.sum(layer.od_vals)) for layer in extra_layers)
 
     car_multiplier_inputs = [(od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources))]
     car_multiplier_inputs.extend((layer.od_vals, layer.out, layer.ret) for layer in extra_layers)
