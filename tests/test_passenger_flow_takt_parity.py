@@ -1228,12 +1228,15 @@ def test_flow_report_denominator_uses_periodized_directional_demand() -> None:
     from passenger_flow.base.models import PeriodFlow
 
     base_od_trips = 916_174.0
-    period_flows = (
-        PeriodFlow("early", "04-06", 64_091.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("am", "06-09", 604_275.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("mid", "09-15", 347_445.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("pm", "15-19", 594_513.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("eve", "19-24", 219_676.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    from passenger_flow.base.takt import TAKT_PERIODS
+    period_flows = tuple(
+        PeriodFlow(
+            p.key,
+            p.label,
+            base_od_trips * (p.out + p.ret),
+            0.0, 0.0, 0.0, 0.0, 0.0,
+        )
+        for p in TAKT_PERIODS
     )
 
     assert math.isclose(
