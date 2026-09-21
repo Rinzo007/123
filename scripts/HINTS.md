@@ -160,7 +160,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P2-E Crowding/reliability** | 🟢 | `Fr → unev → Rr` участвует в first-leg, а transfer-leg использует `hs×ti` без double-count. Остаток — per-leg alternative branching из JS `co()`. |
 | **P3 Differential** | 🟡 | Comparator/golden готовы, SHA расчётного bundle теперь pinned; остаётся реальный browser-exported JS snapshot против Python на одинаковом входе. |
 | **P4 Performance** | ✅ | Spatial transfer index, O(1) ride timing и memoized ride-edge costs кэшируются внутри assignment pass; добавлен воспроизводимый full-OD benchmark и parity regression для cache path. |
-| **P5 Hardening** | 🟢 | Входные данные и route graph валидируются; остаётся CI/packaging/runtime verification. |
+| **P5 Hardening** | ✅ | Входы, зоны и route graph валидируются до spatial/KD-tree операций; добавлены проверки timing/cache/headway metadata и regression coverage. Остаток — только CI/release gate. |
 | **P6 Release parity** | ⏳ | Зафиксировать golden city cases, versioned bundle provenance и release gate на differential parity. |
 
 Последовательность дальнейших работ:
@@ -472,12 +472,17 @@ alternative branching; кэш не пересекает MSA-итерации, г
 
 ## P5 — production hardening
 
-Публичные числовые параметры `run_passenger_flow` проверяются на конечность
-и допустимый диапазон до построения маршрутов. `NaN/Inf` больше не проходят
-через сравнения вида `x <= 0`.
+Проверка выполняется до spatial операций и assignment: OD, sparse OD, числовые
+параметры, периоды, mode-choice, baseT/car-baseT, координаты зон и route graph.
 
-Подготовленный route graph дополнительно проверяет координаты остановок,
-формат и монотонность `cum_t_s` и корректность `cycle_run_s`.
+Route sequence дополнительно проверяет конечные lon/lat и последовательные
+позиции остановок, положительные access/speed, неотрицательный dwell,
+монотонное cumulative timing, closed-route cycle time, согласованность
+open/open_pre, размер и значения cached segment_time_s и конечные
+неотрицательные headways.
+
+Это предотвращает падения внутри cKDTree/routing и превращает повреждённые
+входные данные в детерминированный PassengerFlowError.
 
 Дополнительно проверяется `od_sparse`: размерность должна совпадать с числом
 зон, а `data` — содержать только конечные неотрицательные значения.
