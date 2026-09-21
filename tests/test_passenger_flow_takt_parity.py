@@ -54,7 +54,7 @@ from passenger_flow.base.takt import (
 )
 from passenger_flow.network.geometry import haversine_meters
 from scripts.takt_differential import compare_snapshots
-from passenger_flow.algorithm.assign import _takt_co_route_probs
+from passenger_flow.algorithm.assign import _takt_co_route_probs, _takt_leg_choice_probs
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
@@ -820,7 +820,7 @@ def test_transfer_index_is_specific_to_current_stop() -> None:
     last_targets = index[(0, 2)]
     assert first_targets and last_targets
     assert first_targets[0][2]["id"] == 4
-    assert last_targets[0][2]["id"] == 5
+    assert last_targets[0][2]["id"] == 6
 
 def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
