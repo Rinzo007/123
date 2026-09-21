@@ -39,8 +39,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/takt-p6-release-parity.yml
       - name: Install passenger_flow runtime dependencies
-        run: python -m pip install numpy scipy networkx shapely pytest
+        run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
       - name: Generate real city Python golden
         run: python scripts/takt_city_python_snapshot.py --city=${{ matrix.city }}
       - name: Check city golden schema
@@ -52,8 +54,6 @@ jobs:
             tests/fixtures/cities/${{ matrix.city }}/takt_python_snapshot.json \
             --section parity \
             --max-diffs 80
-      - name: Run parity regression suite
-        run: python -m pytest -q tests/test_passenger_flow_takt_parity.py
       - name: Upload city goldens
         uses: actions/upload-artifact@v4
         with:
@@ -61,6 +61,21 @@ jobs:
           path: tests/fixtures/cities/${{ matrix.city }}
           if-no-files-found: error
           retention-days: 7
+
+  regression:
+    name: Parity regression suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/takt-p6-release-parity.yml
+      - name: Install passenger_flow runtime dependencies
+        run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
+      - name: Run parity regression suite
+        run: python -m pytest -q tests/test_passenger_flow_takt_parity.py
 
   record:
     name: Record verified city goldens
