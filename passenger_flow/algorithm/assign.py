@@ -319,9 +319,9 @@ def _journey_crowd_extra(
             selected = _route_segment_indices(route_sequences[seq_idx], a, b)
             if not selected or seq_headway_min is None or seq_idx not in seq_headway_min:
                 continue
-            first_seg, forward = selected[0]
+            crowd_seg, forward = selected[-1 if leg_no > 0 else 0]
             loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
+            lf = max(1.0, float(loads.get((seq_idx, crowd_seg), 0.0)))
             if leg_no == 0:
                 if include_first_leg_wait:
                     wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
