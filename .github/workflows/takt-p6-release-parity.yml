@@ -3,53 +3,55 @@ name: Takt P6 release parity gate
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   parity:
-    name: Canonical Takt differential
+    name: Canonical Takt city parity
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-
       - name: Verify pinned Takt bundle and city input pins
         run: python scripts/takt_release_gate.py
-
-      - name: Execute Takt bundle
+      - name: Generate real city JS goldens
         env:
           TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
-        run: node scripts/takt_browser_snapshot.js tests/fixtures/takt_browser_snapshot.generated.json
-
+        run: node scripts/takt_city_browser_snapshot.js
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install passenger_flow runtime dependencies
-        run: python -m pip install numpy scipy
-
-      - name: Execute Python passenger_flow
-        run: python scripts/takt_python_snapshot.py tests/fixtures/takt_python_snapshot.generated.json
-
-      - name: Compare JS and Python
+        run: python -m pip install numpy scipy pytest
+      - name: Generate real city Python goldens
+        run: python scripts/takt_city_python_snapshot.py
+      - name: Check city golden schemas
+        run: python scripts/takt_release_gate.py --check-city-schemas
+      - name: Compare real city parity
         run: |
-          python scripts/takt_differential.py \
-            tests/fixtures/takt_browser_snapshot.generated.json \
-            tests/fixtures/takt_python_snapshot.generated.json \
-            --section differential \
-            --max-diffs 50
-
-      - name: Run regression suite
+          for city in amsterdam-v8 berlin-v5 hong-kong-v6; do
+            echo "=== $city ==="
+            python scripts/takt_differential.py               tests/fixtures/cities/$city/takt_browser_snapshot.json               tests/fixtures/cities/$city/takt_python_snapshot.json               --section parity               --max-diffs 80
+          done
+      - name: Run parity regression suite
         run: python -m pytest -q tests/test_passenger_flow_takt_parity.py
+      - name: Commit generated city goldens
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message != 'test: record Takt city golden snapshots'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/fixtures/cities
+          git diff --cached --quiet || git commit -m "test: record Takt city golden snapshots"
+          git push
 
   release:
     name: Release-only fail-closed gate
@@ -57,16 +59,9 @@ jobs:
     needs: parity
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install passenger_flow runtime dependencies
-        run: python -m pip install numpy scipy
-
-      - name: Require all city-level golden snapshots
-        run: python scripts/takt_release_gate.py --require-city-snapshots
+      - run: python -m pip install numpy scipy pytest
+      - run: python scripts/takt_release_gate.py --require-city-snapshots --check-city-schemas
