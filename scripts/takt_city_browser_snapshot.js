@@ -131,13 +131,52 @@ function getBs(){
  vm.runInNewContext(b.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+b.slice(i),s,{filename:bundlePath,displayErrors:true});
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
 }
+function coarseCell(point){
+ const lon=Number(point[0]),lat=Number(point[1]);
+ return Math.floor(lon/0.01)+":"+Math.floor(lat/0.0062);
+}
 function build(c){
  const d=load(path.join(ROOT,c.demand)),m=load(path.join(ROOT,c.model)),b=load(path.join(ROOT,c.baseline)),p=load(path.join(ROOT,c.purposes));
- const lines=(b.lines||[]).map(x=>({...x,headways:Array.from(x.headways||[10,10,10,10,10],Number)}));
- const geoms=lines.map(x=>{const st=x.stops||[];const cum=x.segLen?.length?[0,...x.segLen.reduce((a,v)=>[...a,a[a.length-1]+Number(v)],[])]:[0,...st.slice(1).reduce((a,v,i)=>[...a,a[a.length-1]+hav(st[i],v)],[])];return{stops:st,cum,cumT:x.cumT?.map(Number)||null,segLen:x.segLen?.map(Number)||cum.slice(1).map((v,i)=>v-cum[i]),segCostMul:x.segCostMul||null}});
- const base=(p.commuteBaseT||[]).map(decodeF32);
- const layers=(p.layers||[]).map(x=>{const q=decodeF32(x.od);const rows=[];for(let i=0;i<x.n;i++)rows.push([q[i*4],q[i*4+1],q[i*4+2],q[i*4+3]]);return{od:rows,out:x.out,ret:x.ret,baseT:(x.baseT||[]).map(decodeF32),n:x.n}});
- return{city:{pts:d.pts,od:d.od,model:m},lines,geoms,base:base.length===5?base:undefined,layers};
+ const s=c.golden_scenario||{};
+ const maxOd=Number(s.max_od_pairs||Infinity),maxPurpose=Number(s.max_purpose_od_pairs||Infinity),maxLines=Number(s.max_lines||Infinity);
+ const originalOd=d.od||[];
+ const rankedOd=originalOd.map((row,index)=>({row,index})).filter(x=>Number(x.row[2])>0)
+   .sort((a,z)=>Number(z.row[2])-Number(a.row[2])||a.index-z.index);
+ const selectedOdItems=rankedOd.slice(0,maxOd);
+ const selectedOd=selectedOdItems.map(x=>x.row);
+ const endpointCells=new Set();
+ for(const item of selectedOdItems){
+   const a=d.pts?.[Number(item.row[0])],z=d.pts?.[Number(item.row[1])];
+   if(a)endpointCells.add(coarseCell(a));
+   if(z)endpointCells.add(coarseCell(z));
+ }
+ const rankedLines=(b.lines||[]).map((line,index)=>{
+   const cells=new Set((line.stops||[]).map(coarseCell));
+   let coverage=0;for(const cell of cells)if(endpointCells.has(cell))coverage++;
+   return{line,index,coverage,id:String(line.id??"")};
+ }).sort((a,z)=>z.coverage-a.coverage||a.id.localeCompare(z.id)||a.index-z.index);
+ const keepLines=new Set(rankedLines.slice(0,maxLines).map(x=>x.index));
+ const lines=(b.lines||[]).map(x=>({...x,headways:Array.from(x.headways||[10,10,10,10,10],Number)}))
+   .filter((_,i)=>keepLines.has(i));
+ const base=(p.commuteBaseT||[]).map(decodeF32).map(arr=>selectedOdItems.map(item=>arr[item.index]));
+ const layers=(p.layers||[]).map(x=>{
+   const q=decodeF32(x.od),rows=[];for(let i=0;i<x.n;i++)rows.push([q[i*4],q[i*4+1],q[i*4+2],q[i*4+3]]);
+   const keep=rows.map((row,index)=>({row,index})).filter(x=>Number(x.row[2])>0)
+     .sort((a,z)=>Number(z.row[2])-Number(a.row[2])||a.index-z.index).slice(0,maxPurpose);
+   const rawBase=(x.baseT||[]).map(decodeF32);
+   return{od:keep.map(x=>x.row),out:x.out,ret:x.ret,baseT:rawBase.map(arr=>keep.map(item=>arr[item.index])),n:keep.length};
+ });
+ const geoms=lines.map(x=>{
+   const st=x.stops||[];
+   const cum=x.segLen?.length?[0,...x.segLen.reduce((a,v)=>[...a,a[a.length-1]+Number(v)],[])]:[0,...st.slice(1).reduce((a,v,i)=>[...a,a[a.length-1]+hav(st[i],v)],[])];
+   return{stops:st,cum,cumT:x.cumT?.map(Number)||null,segLen:x.segLen?.map(Number)||cum.slice(1).map((v,i)=>v-cum[i]),segCostMul:x.segCostMul||null};
+ });
+ return{
+   city:{pts:d.pts,od:selectedOd,model:m},
+   lines,geoms,base,layers,
+   scenario:{maxOd,maxPurpose,maxLines,originalOdPairs:originalOd.length,selectedOdPairs:selectedOd.length,
+     originalPurposeOdPairs:(p.layers||[]).reduce((n,x)=>n+Number(x.n||0),0),originalLines:(b.lines||[]).length,selectedLines:lines.length}
+ };
 }
 function clean(x){
   return {
@@ -166,7 +205,7 @@ async function runOne(Bs,man,c){
  const full=clean(r),modes=r.modeSplit||{};
  const total=Number(r.ridersPerDay||0)+0; // scalar fields are already canonical rounded in the JS engine
  return {reference:{engine:"Takt web bundle",bundle:man.bundle.source,city:c.name,version:c.version,inputs:c.git_blob_sha},
- scenario:{demandLayer:"city demand.json",purposeLayers:q.layers.length,odPairs:q.city.od.length,zones:q.city.pts.length,lines:q.lines.length},
+ scenario:{demandLayer:"city demand.json",purposeLayers:q.layers.length,odPairs:q.city.od.length,zones:q.city.pts.length,lines:q.lines.length,...q.scenario},
  parity:{ridersPerDay:Number(r.ridersPerDay||0),capitalCostM:Number(r.capitalCostM||0),revenueDay:Number(r.revenueDay||0),opexDay:Number(r.opexDay||0),
    modeSplit:{transit:Number(modes.transit||0),car:Number(modes.car||0),walk:Number(modes.walk||0),rest:Number(modes.rest||0)},
    transferTrips:Number(r.transferTrips||0),coveredCommuters:Number(r.coveredCommuters||0),totalCommuters:Number(r.totalCommuters||0),
