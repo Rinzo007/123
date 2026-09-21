@@ -671,6 +671,8 @@ def _assign_od(
         destination_stops = _line_access_stops(
             zone_nearest.get(zj, []), route_sequences
         )
+        if period_index == 0 and (origin_stops or destination_stops):
+            totals.covered_commuters += raw_trips
         if not origin_stops or not destination_stops:
             if period_index == 0:
                 totals.no_route_by_origin[zi] += raw_trips
@@ -782,7 +784,6 @@ def _assign_od(
             continue
 
         if period_index == 0:
-            totals.covered_commuters += raw_trips
             totals.covered_by_origin[zi] += raw_trips
         totals.journey_origin_trips[zi] += raw_trips * float(out_factor)
         totals.journey_origin_journeys[zi] += transit_trips * float(out_factor)
