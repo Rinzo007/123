@@ -76,44 +76,7 @@ parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type===
 `
 
 
-function compressMatrixGraph(offsets0,targets0,costs0){
-  const sourceCount=offsets0.length-1;
-  const stops=(sourceCount-1)>>1;
-  if(stops<2)return{offsets:offsets0,targets:targets0,costs:costs0};
-  const outOffsets=new Int32Array(sourceCount+1);
-  const targetParts=[];
-  const costParts=[];
-  let total=0;
-  for(let src=0;src<sourceCount;src++){
-    outOffsets[src]=total;
-    const from=offsets0[src],to=offsets0[src+1];
-    if(src>=stops){
-      for(let k=from;k<to;k++){targetParts.push(targets0[k]);costParts.push(costs0[k]);total++;}
-      continue;
-    }
-    // Same-line edges form a complete metric graph. Since the edge cost is
-    // additive along the line (plus non-negative dwell), every removed edge
-    // is dominated by a path through adjacent stops. Keep the two cheapest
-    // same-line neighbors; transfer edges never originate from this half.
-    let bestA=-1,bestB=-1,costA=Infinity,costB=Infinity;
-    for(let k=from;k<to;k++){
-      const target=targets0[k];
-      if(target<stops)continue;
-      const cost=costs0[k];
-      if(cost<costA || (cost===costA && target<bestA)){
-        bestB=bestA;costB=costA;bestA=target;costA=cost;
-      }else if(cost<costB || (cost===costB && target<bestB)){
-        bestB=target;costB=cost;
-      }
-    }
-    if(bestA>=0){targetParts.push(bestA);costParts.push(costA);total++;}
-    if(bestB>=0 && bestB!==bestA){targetParts.push(bestB);costParts.push(costB);total++;}
-  }
-  outOffsets[sourceCount]=total;
-  const targets=new Int32Array(total),costs=new Float64Array(total);
-  for(let i=0;i<total;i++){targets[i]=targetParts[i];costs[i]=costParts[i];}
-  return{offsets:outOffsets,targets,costs};
-}
+function compressMatrixGraph(offsets,targets,costs){ return {offsets,targets,costs}; }
 function matrixGraphKey(offsets,targets,costs){
   const sample=(arr)=>{
     let h=2166136261>>>0,step=Math.max(1,Math.floor(arr.length/32));
@@ -165,7 +128,9 @@ function getBs(){
  Uint8Array,Uint16Array,Uint32Array,Int32Array,Float32Array,Float64Array,DataView,ArrayBuffer,SharedArrayBuffer,BigInt64Array,BigUint64Array,Math,Date,JSON,
  Map,Set,WeakMap,WeakSet,Promise,Error,TypeError,RangeError,Symbol,Reflect,Object,Array,Number,String,Boolean,RegExp,parseInt,parseFloat,isFinite,isNaN,Worker:TaktNodeWorker,navigator:{hardwareConcurrency:10},
  atob:globalThis.atob,btoa:globalThis.btoa};s.globalThis=s;s.location={hostname:"localhost",href:"http://localhost/"};s.self={location:s.location,addEventListener(){},postMessage(){}};
- vm.runInNewContext(b.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+b.slice(i),s,{filename:bundlePath,displayErrors:true});
+ const matrixMarker="ee=T.reduce((_,D)=>_+D.length,0);const N=await Ba(I,T,j);";
+ const instrumented=b.includes(matrixMarker)?b.replace(matrixMarker,"ee=T.reduce((_,D)=>_+D.length,0);console.log('TAKT_MATRIX_START',I,ee);const N=await Ba(I,T,j);console.log('TAKT_MATRIX_DONE',I);"):b;
+ vm.runInNewContext(instrumented.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+instrumented.slice(i),s,{filename:bundlePath,displayErrors:true});
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
 }
 function build(c){
@@ -199,7 +164,7 @@ function clean(x){
   };
 }
 async function runOne(Bs,man,c){
- const q=build(c),r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
+ const q=build(c); console.log("TAKT_ASSIGN_START",c.name,q.city.pts.length,q.city.od.length,q.lines.length,q.layers.length); const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12}); console.log("TAKT_ASSIGN_DONE",c.name);
  const full=clean(r),modes=r.modeSplit||{};
  const total=Number(r.ridersPerDay||0)+0; // scalar fields are already canonical rounded in the JS engine
  return {reference:{engine:"Takt web bundle",bundle:man.bundle.source,city:c.name,version:c.version,inputs:c.git_blob_sha},
