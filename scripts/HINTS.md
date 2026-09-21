@@ -463,7 +463,12 @@ Python snapshot в одинаковой JSON-схеме и запустить:
 Transfer spatial index создаётся один раз на `_AssignContext` и повторно
 используется во всех OD-парах и MSA-итерациях. `_route_ride_time_min`
 вычисляется O(1) через `cum_t_s/open_pre`, без прохода по промежуточным
-сегментам.
+сегментам. Стоимость `_ride_edge_time_min` memoized в пределах одного
+assignment pass и повторно используется между `build_journeys` и Takt `co()`
+alternative branching; кэш не пересекает MSA-итерации, где меняется crowd state.
+
+Для воспроизводимого full-assignment профиля:
+`python scripts/bench_passenger_flow.py --profile`.
 
 ## P5 — production hardening
 
