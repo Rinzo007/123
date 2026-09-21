@@ -124,7 +124,28 @@ function build(c){
  const layers=(p.layers||[]).map(x=>{const q=decodeF32(x.od);const rows=[];for(let i=0;i<x.n;i++)rows.push([q[i*4],q[i*4+1],q[i*4+2],q[i*4+3]]);return{od:rows,out:x.out,ret:x.ret,baseT:(x.baseT||[]).map(decodeF32),n:x.n}});
  return{city:{pts:d.pts,od:d.od,model:m},lines,geoms,base:base.length===5?base:undefined,layers};
 }
-function clean(x){const out=JSON.parse(JSON.stringify(x));delete out.computeMs;delete out.profile;delete out.diag;return out}
+function clean(x){
+  return {
+    lines: x.lines || [],
+    modeSplit: x.modeSplit || {transit:0,car:0,walk:0,rest:0},
+    satisfaction: x.satisfaction || null,
+    ridersPerDay: Number(x.ridersPerDay || 0),
+    transferTrips: Number(x.transferTrips || 0),
+    interchanges: x.interchanges || [],
+    trackCapacity: x.trackCapacity || [],
+    coveredCommuters: Number(x.coveredCommuters || 0),
+    totalCommuters: Number(x.totalCommuters || 0),
+    capitalCostM: Number(x.capitalCostM || 0),
+    revenueDay: Number(x.revenueDay || 0),
+    opexDay: Number(x.opexDay || 0),
+    servedByPoint: x.servedByPoint || [],
+    journeyOrigins: x.journeyOrigins || null,
+    missedByPoint: x.missedByPoint || [],
+    noRouteByPoint: x.noRouteByPoint || [],
+    coveredPoint: x.coveredPoint || [],
+    equilibrium: x.equilibrium || null,
+  };
+}
 async function runOne(Bs,man,c){
  const q=build(c),r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
  const full=clean(r),modes=r.modeSplit||{};
