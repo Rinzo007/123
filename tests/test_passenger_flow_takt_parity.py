@@ -1275,3 +1275,30 @@ def test_run_passenger_flow_reuses_prepared_context() -> None:
     )
     assert result.routes_served == 0
     assert result.total_trips == 0.0
+
+
+def test_p6_city_release_manifest_is_pinned() -> None:
+    from scripts.takt_release_gate import validate_city_manifest
+
+    manifest = json.loads(
+        (Path(__file__).parent / "fixtures" / "takt_release_city_cases.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    names = validate_city_manifest(manifest, Path(__file__).resolve().parents[1])
+    assert names == ["amsterdam-v8", "berlin-v5", "hong-kong-v6"]
+
+
+def test_p6_release_gate_rejects_changed_bundle(tmp_path: Path) -> None:
+    from scripts.takt_release_gate import ReleaseGateError, verify_bundle_provenance
+
+    reference = json.loads(
+        (Path(__file__).parent / "fixtures" / "takt_reference_snapshot.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bundle = tmp_path / "bundle.js"
+    bundle.write_bytes(b"changed")
+    reference["reference"]["source"] = "bundle.js"
+    with pytest.raises(ReleaseGateError):
+        verify_bundle_provenance(reference, tmp_path)
