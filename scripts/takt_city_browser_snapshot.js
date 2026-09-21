@@ -129,8 +129,12 @@ function getBs(){
  Map,Set,WeakMap,WeakSet,Promise,Error,TypeError,RangeError,Symbol,Reflect,Object,Array,Number,String,Boolean,RegExp,parseInt,parseFloat,isFinite,isNaN,Worker:TaktNodeWorker,navigator:{hardwareConcurrency:10},
  atob:globalThis.atob,btoa:globalThis.btoa};s.globalThis=s;s.location={hostname:"localhost",href:"http://localhost/"};s.self={location:s.location,addEventListener(){},postMessage(){}};
  const matrixMarker="ee=T.reduce((_,D)=>_+D.length,0);const N=await Ba(I,T,j);";
- const instrumented=b.includes(matrixMarker)?b.replace(matrixMarker,"ee=T.reduce((_,D)=>_+D.length,0);console.log('TAKT_MATRIX_START',I,ee);const N=await Ba(I,T,j);console.log('TAKT_MATRIX_DONE',I);"):b;
- vm.runInNewContext(instrumented.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+instrumented.slice(i),s,{filename:bundlePath,displayErrors:true});
+ const instrumented=b.includes(matrixMarker)?b.replace(
+   matrixMarker,
+   "ee=T.reduce((_,D)=>_+D.length,0);console.log('TAKT_MATRIX_START',I,ee);const N=await Ba(I,T,j);console.log('TAKT_MATRIX_DONE',I);"
+ ):b;
+ const end=instrumented.lastIndexOf(m);
+ vm.runInNewContext(instrumented.slice(0,end)+"\nglobalThis.__TAKT_Bs=Bs;\n"+instrumented.slice(end),s,{filename:bundlePath,displayErrors:true});
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
 }
 function build(c){
