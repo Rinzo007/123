@@ -64,7 +64,7 @@ def snap(man,c):
  routes,raw,od,base,base_car,layers,z,src,model,pts=build(c);prep=prepare_passenger_flow(routes,z)
  result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=od,
    periods=TAKT_PERIODS,headway_min=10.0,mode_choice=mk(model),transfer_penalty_calc="takt",
-   stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=20,msa_gap=.01,
+   stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=6,msa_gap=.01,
    prepared=prep,demand_layers=layers,capex_factor=float(model.get('capex',{}).get('costFactor',1.0)))
  d=result.takt_diagnostics or {}
  total=result.raw_assigned_trips+result.raw_car_trips+result.raw_walk_trips+result.raw_two_wheel_trips+result.raw_rest_trips
