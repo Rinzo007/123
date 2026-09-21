@@ -128,13 +128,7 @@ function getBs(){
  Uint8Array,Uint16Array,Uint32Array,Int32Array,Float32Array,Float64Array,DataView,ArrayBuffer,SharedArrayBuffer,BigInt64Array,BigUint64Array,Math,Date,JSON,
  Map,Set,WeakMap,WeakSet,Promise,Error,TypeError,RangeError,Symbol,Reflect,Object,Array,Number,String,Boolean,RegExp,parseInt,parseFloat,isFinite,isNaN,Worker:TaktNodeWorker,navigator:{hardwareConcurrency:10},
  atob:globalThis.atob,btoa:globalThis.btoa};s.globalThis=s;s.location={hostname:"localhost",href:"http://localhost/"};s.self={location:s.location,addEventListener(){},postMessage(){}};
- const matrixMarker="ee=T.reduce((_,D)=>_+D.length,0);const N=await Ba(I,T,j);";
- const instrumented=b.includes(matrixMarker)?b.replace(
-   matrixMarker,
-   "ee=T.reduce((_,D)=>_+D.length,0);console.log('TAKT_MATRIX_START',I,ee);const N=await Ba(I,T,j);console.log('TAKT_MATRIX_DONE',I);"
- ):b;
- const end=instrumented.lastIndexOf(m);
- vm.runInNewContext(instrumented.slice(0,end)+"\nglobalThis.__TAKT_Bs=Bs;\n"+instrumented.slice(end),s,{filename:bundlePath,displayErrors:true});
+ vm.runInNewContext(b.slice(0,i)+"\nglobalThis.__TAKT_Bs=Bs;\n"+b.slice(i),s,{filename:bundlePath,displayErrors:true});
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
 }
 function build(c){
@@ -168,7 +162,7 @@ function clean(x){
   };
 }
 async function runOne(Bs,man,c){
- const q=build(c); console.log("TAKT_ASSIGN_START",c.name,q.city.pts.length,q.city.od.length,q.lines.length,q.layers.length); const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12}); console.log("TAKT_ASSIGN_DONE",c.name);
+ const q=build(c),r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
  const full=clean(r),modes=r.modeSplit||{};
  const total=Number(r.ridersPerDay||0)+0; // scalar fields are already canonical rounded in the JS engine
  return {reference:{engine:"Takt web bundle",bundle:man.bundle.source,city:c.name,version:c.version,inputs:c.git_blob_sha},
