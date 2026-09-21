@@ -692,11 +692,7 @@ def _direct_journeys(
         # Takt co() adds the first-leg waiting separately during route-set
         # choice. Keep direct journey time as ride/access only when a
         # headway is available, otherwise preserve the legacy wait behavior.
-        wait_min = (
-            0.0
-            if headway is not None
-            else _boarding_wait_min(None, wait_time_min, wait_calc)
-        )
+        wait_min = _boarding_wait_min(headway, wait_time_min, wait_calc)
         journeys.append(
             JourneyAlternative(
                 ride_min + walk_to_stop_min + wait_min,
@@ -998,8 +994,11 @@ def _transfer_targets(
     остановка каждой другой линии в пределах радиуса пересадки. Направление
     внутри последовательности линии не ограничивается индексом остановки.
     """
-    for ta in route_stop_sequences[seq_a]["stops"]:
-        for seq_b, data_b in enumerate(route_stop_sequences):
+    stops_a = route_stop_sequences[seq_a]["stops"]
+    if current_pos < 0 or current_pos >= len(stops_a):
+        return
+    ta = stops_a[current_pos]
+    for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
                 continue
             best_tb: dict[str, Any] | None = None
