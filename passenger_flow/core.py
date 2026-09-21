@@ -1142,7 +1142,6 @@ def _run_period(
     period: Period | None,
     *,
     layer_contexts: Sequence[tuple[_AssignContext, float, float]] | None = None,
-    *,
     period_index: int,
     period_hours: float,
     wait_crowding_per_100_min: float,
