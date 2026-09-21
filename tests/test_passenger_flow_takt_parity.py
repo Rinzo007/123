@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sys
 import types
 from pathlib import Path
@@ -66,6 +67,16 @@ from passenger_flow.network.routes import (
     build_journeys,
     _build_route_stop_sequence,
 )
+
+
+def _repo_root() -> Path:
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    candidates = [Path(workspace)] if workspace else []
+    candidates.extend([Path.cwd(), Path(__file__).resolve().parents[1]])
+    for root in candidates:
+        if root and (root / "scripts" / "bd956ff0a1875604740f.js").is_file():
+            return root
+    return Path.cwd()
 
 
 FIXTURE = json.loads(
@@ -328,7 +339,7 @@ def test_takt_reference_bundle_provenance_is_pinned() -> None:
     )
     rel = reference["reference"]["source"]
     expected = reference["reference"]["bundle_git_blob_sha"]
-    path = Path(__file__).resolve().parents[1] / rel
+    path = _repo_root() / rel
     data = path.read_bytes()
     actual = hashlib.sha1(
         f"blob {len(data)}\0".encode("ascii") + data
@@ -347,11 +358,12 @@ def test_python_snapshot_matches_canonical_takt_reference() -> None:
     vals = np.asarray([1000.0, 1000.0], dtype=np.float64)
     snapshot = {
         "reference": reference["reference"],
+        "tolerance": reference["tolerance"],
         "wait_seconds": waits,
         "fare_eur": fares,
         "hold_probability": _takt_hold_prob(60.0, 90.0),
-        "route_probabilities": _takt_route_probs(np.asarray([600.0, 900.0])),
-        "mode_shares": _takt_mode_shares(ModeChoiceConfig(), 5000.0, 1200.0, 1.2),
+        "route_probabilities": _takt_route_probs(np.asarray([600.0, 900.0])).tolist(),
+        "mode_shares": list(_takt_mode_shares(ModeChoiceConfig(), 5000.0, 1200.0, 1.2)),
         "car_period_multipliers": list(_takt_car_period_multipliers(rows, cols, vals, TAKT_PERIODS)),
         "msa_gap_example": _takt_msa_gap({1: 10.0}, {1: 15.0}, {(1, 0): 2.0}, {(1, 0): 3.0}, {(1, 0): 4.0}, {(1, 0): 5.0}, {(1, 0): 6.0}, {(1, 0): 8.0}),
     }
@@ -1310,7 +1322,7 @@ def test_p6_city_release_manifest_is_pinned() -> None:
             encoding="utf-8"
         )
     )
-    names = validate_city_manifest(manifest, Path(__file__).resolve().parents[1])
+    names = validate_city_manifest(manifest, _repo_root())
     assert names == ["amsterdam-v8", "berlin-v5", "hong-kong-v6"]
 
 
