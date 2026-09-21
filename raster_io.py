@@ -3,7 +3,7 @@ import logging
 import warnings
 from typing import Any
 
-from .errors import MissingDependencyError
+from errors import MissingDependencyError
 
 logger = logging.getLogger("wikiroutes.gis.common")
 
