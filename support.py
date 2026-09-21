@@ -5,7 +5,7 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from .compat import stop_lat, stop_lon, stop_name
+from compat import stop_lat, stop_lon, stop_name
 
 __all__ = [
     "SOURCE_LABELS",
