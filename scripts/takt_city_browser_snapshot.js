@@ -167,22 +167,39 @@ function buildMatrixTargetCSR(q){
    lineRefs.push(rr);
  }
  const zoneCache=new Map();
+ const stopGrid=new Map();
+ const GRID_LON=0.01,GRID_LAT=0.0062,GRID_RADIUS=3;
+ for(let li=0;li<lines.length;li++){
+   const line=lines[li],stops=line.stops||[],rr=lineRefs[li];
+   if(stops.length<2)continue;
+   for(let si=0;si<stops.length;si++){
+     const g=rr[si];if(g<0)continue;
+     const p=stops[si],gx=Math.floor(Number(p[0])/GRID_LON),gy=Math.floor(Number(p[1])/GRID_LAT);
+     const key=gx+":"+gy;
+     let bucket=stopGrid.get(key);if(!bucket)stopGrid.set(key,bucket=[]);
+     bucket.push([li,si,g]);
+   }
+ }
  function candidates(zi){
    if(zoneCache.has(zi))return zoneCache.get(zi);
    const point=pts[zi],out=[];
    if(!point){zoneCache.set(zi,out);return out;}
-   for(let li=0;li<lines.length;li++){
-     const line=lines[li],stops=line.stops||[],rr=lineRefs[li];
-     if(stops.length<2)continue;
-     const access=MODE_ACCESS_M[String(line.mode||"bus").toLowerCase()]??1500;
-     let best=-1,bestD=Infinity;
-     for(let si=0;si<stops.length;si++){
-       const g=rr[si];if(g<0)continue;
-       const d=hav(point,stops[si]);
-       if(d<bestD||(d===bestD&&g<best)){bestD=d;best=g;}
+   const gx=Math.floor(Number(point[0])/GRID_LON),gy=Math.floor(Number(point[1])/GRID_LAT);
+   const bestByLine=new Map();
+   for(let dx=-GRID_RADIUS;dx<=GRID_RADIUS;dx++)for(let dy=-GRID_RADIUS;dy<=GRID_RADIUS;dy++){
+     const bucket=stopGrid.get((gx+dx)+":"+(gy+dy));
+     if(!bucket)continue;
+     for(const [li,si,g] of bucket){
+       const line=lines[li];
+       const access=MODE_ACCESS_M[String(line.mode||"bus").toLowerCase()]??1500;
+       const d=hav(point,line.stops[si]);
+       if(d>access+1e-9)continue;
+       const prev=bestByLine.get(li);
+       if(!prev||d<prev.d||(d===prev.d&&g<prev.g))bestByLine.set(li,{g,d});
      }
-     if(best>=0&&bestD<=access+1e-9)out.push(best);
    }
+   for(const [li,best] of bestByLine)out.push(best.g);
+   out.sort((a,b)=>a-b);
    zoneCache.set(zi,out);return out;
  }
  const rows=[];
