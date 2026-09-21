@@ -447,6 +447,35 @@ def test_cached_ride_edge_cost_is_identical_to_uncached() -> None:
     assert cache == {(0, 0, 2): expected}
 
 
+def test_build_journeys_shared_ride_cache_preserves_results() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    kwargs = dict(
+        stop_time_min=0.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=0.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=1,
+        transfer_penalty_calc="fixed",
+        seq_headway_min=None,
+        seq_jitter_s=None,
+        wait_calc="takt",
+        transfer_index={},
+    )
+    uncached = build_journeys([(0, 0, 0)], [(0, 2, 2)], [seq], **kwargs)
+    cache: dict[tuple[int, int, int], float] = {}
+    cached = build_journeys(
+        [(0, 0, 0)],
+        [(0, 2, 2)],
+        [seq],
+        ride_edge_cache=cache,
+        **kwargs,
+    )
+    assert cached == uncached
+    assert cache
+
+
 def test_base_t_rest_alternative_is_present_when_base_time_exists() -> None:
     got = _takt_mode_shares(
         ModeChoiceConfig(),
