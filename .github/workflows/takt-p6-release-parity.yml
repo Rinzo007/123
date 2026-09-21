@@ -1,0 +1,72 @@
+name: Takt P6 release parity gate
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  parity:
+    name: Canonical Takt differential
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Verify pinned Takt bundle and city input pins
+        run: python scripts/takt_release_gate.py
+
+      - name: Execute Takt bundle
+        env:
+          TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
+        run: node scripts/takt_browser_snapshot.js tests/fixtures/takt_browser_snapshot.generated.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install passenger_flow runtime dependencies
+        run: python -m pip install numpy scipy
+
+      - name: Execute Python passenger_flow
+        run: python scripts/takt_python_snapshot.py tests/fixtures/takt_python_snapshot.generated.json
+
+      - name: Compare JS and Python
+        run: |
+          python scripts/takt_differential.py \
+            tests/fixtures/takt_browser_snapshot.generated.json \
+            tests/fixtures/takt_python_snapshot.generated.json \
+            --section differential \
+            --max-diffs 50
+
+      - name: Run regression suite
+        run: python -m pytest -q tests/test_passenger_flow_takt_parity.py
+
+  release:
+    name: Release-only fail-closed gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install passenger_flow runtime dependencies
+        run: python -m pip install numpy scipy
+
+      - name: Require all city-level golden snapshots
+        run: python scripts/takt_release_gate.py --require-city-snapshots
