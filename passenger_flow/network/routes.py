@@ -1348,6 +1348,7 @@ def build_journeys(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     od_distance_m: float | None = None,
     road_time_s: float | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> list[_Journey]:
     """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
     max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
