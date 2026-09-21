@@ -26,6 +26,7 @@ from ..network.routes import (
     _route_segment_indices,
     _scheduled_transfer_wait_min,
     _leg_alternatives,
+    _cached_ride_edge_time_min,
     build_journeys,
 )
 from .mode_choice import (
@@ -473,6 +474,7 @@ def _takt_leg_choice_probs(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]],
     stop_time_min: float,
     transfer_radius_m: float,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> tuple[tuple[tuple[int, int, int], ...], np.ndarray]:
     """JS co(): normalized inverse-Rr weights for one journey leg."""
     candidates: list[tuple[int, int, int]] = [journey.legs[leg_index]]
@@ -481,6 +483,7 @@ def _takt_leg_choice_probs(
             journey, leg_index, route_sequences, transfer_index,
             stop_time_min=stop_time_min, crowd_state=crowd_state,
             transfer_radius_m=transfer_radius_m,
+            ride_edge_cache=ride_edge_cache,
         ))
     seg_forward = crowd_state.get("seg_forward", {}) if crowd_state else {}
     seg_reverse = crowd_state.get("seg_reverse", {}) if crowd_state else {}
@@ -532,6 +535,7 @@ def _accumulate_transit_journeys(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     stop_time_min: float = 0.0,
     transfer_radius_m: float = 800.0,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> None:
     """Journey share plus JS-style co() branching independently per leg."""
     journey_probs = _takt_co_route_probs(
@@ -556,6 +560,7 @@ def _accumulate_transit_journeys(
                 transfer_index=transfer_index,
                 stop_time_min=stop_time_min,
                 transfer_radius_m=transfer_radius_m,
+                ride_edge_cache=ride_edge_cache,
             )
             for ci, leg in enumerate(candidates):
                 leg_trips = journey_trips * float(leg_probs[ci])
@@ -600,6 +605,7 @@ def _assign_od(
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
+    ride_edge_cache: dict[tuple[int, int, int], float] = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
@@ -662,6 +668,7 @@ def _assign_od(
             transfer_index=transfer_index,
             od_distance_m=_od_distance_meters(zones, zi, zj),
             road_time_s=road_time_s,
+            ride_edge_cache=ride_edge_cache,
         )
         if not journeys:
             _apply_car_only_modes(
@@ -744,6 +751,7 @@ def _assign_od(
             transfer_index=transfer_index,
             stop_time_min=stop_time_min,
             transfer_radius_m=transfer_radius_m,
+            ride_edge_cache=ride_edge_cache,
         )
 
     return totals.as_dict()
