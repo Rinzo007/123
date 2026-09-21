@@ -133,9 +133,13 @@ def prepare_passenger_flow(
     stop_search_radius_m: float = 1500.0,
 ) -> PreparedPassengerFlow:
     """Предвычисляет неизменяемую часть пассажиропотока для повторных OD-запусков."""
-    if stop_search_radius_m <= 0.0:
-        raise PassengerFlowError("stop_search_radius_m должен быть положительным")
+    _finite_number(
+        "stop_search_radius_m",
+        stop_search_radius_m,
+        positive=True,
+    )
     route_sequences = _build_route_stop_sequence(routes)
+    _validate_route_sequences(route_sequences)
     if route_sequences:
         stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
         zone_nearest = _bind_zones_to_stops(
@@ -444,39 +448,145 @@ def _validate_flow_inputs(
 
 
 def _validate_route_sequences(route_sequences: Sequence[Mapping[str, Any]]) -> None:
-    """Проверяет подготовленный route graph до запуска OD assignment."""
+    """Проверяет подготовленный route graph до индексации и assignment."""
     for seq_i, seq in enumerate(route_sequences):
         stops = seq.get("stops")
         if not isinstance(stops, list) or not stops:
             raise PassengerFlowError(f"route sequence {seq_i} не содержит остановок")
+        positions: list[int] = []
         for stop_i, stop in enumerate(stops):
             try:
                 lat = float(stop["lat"])
                 lon = float(stop["lon"])
+                pos = int(stop["position"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise PassengerFlowError(
-                    f"route sequence {seq_i}: остановка {stop_i} имеет некорректные координаты"
+                    f"route sequence {seq_i}: остановка {stop_i} имеет некорректные поля"
                 ) from exc
-            if not math.isfinite(lat) or not math.isfinite(lon) or abs(lat) > 90.0 or abs(lon) > 180.0:
+            if (
+                not math.isfinite(lat)
+                or not math.isfinite(lon)
+                or abs(lat) > 90.0
+                or abs(lon) > 180.0
+            ):
                 raise PassengerFlowError(
                     f"route sequence {seq_i}: остановка {stop_i} имеет некорректные координаты"
                 )
+            positions.append(pos)
+        if positions != list(range(len(stops))):
+            raise PassengerFlowError(
+                f"route sequence {seq_i}: position остановок должен быть 0..n-1"
+            )
+
+        for name, value, nonnegative, positive in (
+            ("access_m", seq.get("access_m"), True, True),
+            ("dwell_s", seq.get("dwell_s"), True, False),
+            ("speed_kmh", seq.get("speed_kmh"), False, True),
+        ):
+            if value is None:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: отсутствует {name}"
+                )
+            _finite_number(
+                f"route sequence {seq_i}.{name}",
+                float(value),
+                nonnegative=nonnegative,
+                positive=positive,
+            )
+
         cum = seq.get("cum_t_s")
         if cum is not None:
             try:
                 values = [float(v) for v in cum]
             except (TypeError, ValueError) as exc:
-                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s имеет некорректный формат") from exc
-            if len(values) != len(stops) or not all(math.isfinite(v) for v in values):
-                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s имеет некорректное значение")
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: cum_t_s имеет некорректный формат"
+                ) from exc
+            if (
+                len(values) != len(stops)
+                or not all(math.isfinite(v) and v >= 0.0 for v in values)
+            ):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: cum_t_s имеет некорректное значение"
+                )
             if any(values[i + 1] < values[i] for i in range(len(values) - 1)):
-                raise PassengerFlowError(f"route sequence {seq_i}: cum_t_s должен быть неубывающим")
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: cum_t_s должен быть неубывающим"
+                )
         cycle = seq.get("cycle_run_s")
         if cycle is not None:
             cycle_value = float(cycle)
             if not math.isfinite(cycle_value) or cycle_value < 0.0:
                 raise PassengerFlowError(
                     f"route sequence {seq_i}: cycle_run_s должен быть конечным и неотрицательным"
+                )
+            if seq.get("closed") and cum and cycle_value < float(cum[-1]):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: cycle_run_s не может быть меньше cum_t_s[-1]"
+                )
+
+        open_values = seq.get("open")
+        if open_values is not None:
+            if len(open_values) != len(stops) or any(
+                not isinstance(value, (bool, np.bool_)) for value in open_values
+            ):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: open должен содержать bool для каждой остановки"
+                )
+        open_pre = seq.get("open_pre")
+        if open_pre is not None:
+            if len(open_pre) != len(stops) + 1:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: open_pre имеет неверный размер"
+                )
+            try:
+                prefix = [int(v) for v in open_pre]
+            except (TypeError, ValueError) as exc:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: open_pre имеет некорректный формат"
+                ) from exc
+            if prefix[0] != 0 or any(
+                prefix[i + 1] < prefix[i] for i in range(len(prefix) - 1)
+            ):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: open_pre должен быть неубывающим prefix-count"
+                )
+            if open_values is not None and any(
+                prefix[i + 1] - prefix[i] != int(bool(open_values[i]))
+                for i in range(len(stops))
+            ):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: open_pre не соответствует open"
+                )
+
+        segment_time_s = seq.get("segment_time_s")
+        if segment_time_s is not None:
+            expected = len(stops) if seq.get("closed") else max(0, len(stops) - 1)
+            try:
+                segment_times = [float(v) for v in segment_time_s]
+            except (TypeError, ValueError) as exc:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: segment_time_s имеет некорректный формат"
+                ) from exc
+            if (
+                len(segment_times) != expected
+                or not all(math.isfinite(v) and v >= 0.0 for v in segment_times)
+            ):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: segment_time_s имеет неверную длину или значения"
+                )
+
+        headways = seq.get("headways")
+        if headways is not None:
+            try:
+                headway_values = [float(v) for v in headways]
+            except (TypeError, ValueError) as exc:
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: headways имеет некорректный формат"
+                ) from exc
+            if any(not math.isfinite(v) or v < 0.0 for v in headway_values):
+                raise PassengerFlowError(
+                    f"route sequence {seq_i}: headways должны быть конечными и неотрицательными"
                 )
 
 def _build_stop_index(
@@ -1106,6 +1216,7 @@ def run_passenger_flow(
     else:
         prepared_transfer_index = None
         route_sequences = _build_route_stop_sequence(routes)
+        _validate_route_sequences(route_sequences)
         if route_sequences:
             stop_coords, stop_tree, flat_map = _build_stop_index(route_sequences)
             zone_nearest = _bind_zones_to_stops(
@@ -1113,8 +1224,6 @@ def run_passenger_flow(
             )
         else:
             zone_nearest = {zi: [] for zi in range(len(zones))}
-
-    _validate_route_sequences(route_sequences)
 
     if not route_sequences:
         line("  Маршруты с остановками не найдены")
