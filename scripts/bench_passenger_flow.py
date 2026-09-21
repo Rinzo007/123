@@ -182,9 +182,10 @@ def main() -> int:
     )
     assign_times = []
     assignment_result = None
-    for _ in range(max(1, args.repeats)):
+    repeats = max(1, args.repeats)
+    for repeat_no in range(repeats):
         start = time.perf_counter()
-        if args.profile:
+        if args.profile and repeat_no == 0:
             profiler = cProfile.Profile()
             assignment_result = profiler.runcall(run_full_assignment, *case)
             profiler.create_stats()
