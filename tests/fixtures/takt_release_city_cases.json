@@ -21,9 +21,9 @@
       "js_snapshot": "tests/fixtures/cities/amsterdam-v8/takt_browser_snapshot.json",
       "python_snapshot": "tests/fixtures/cities/amsterdam-v8/takt_python_snapshot.json",
       "golden_scenario": {
-        "max_od_pairs": 4000,
-        "max_purpose_od_pairs": 2500,
-        "max_lines": 100,
+        "max_od_pairs": 3000,
+        "max_purpose_od_pairs": 1500,
+        "max_lines": 60,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     },
@@ -43,9 +43,9 @@
       "js_snapshot": "tests/fixtures/cities/berlin-v5/takt_browser_snapshot.json",
       "python_snapshot": "tests/fixtures/cities/berlin-v5/takt_python_snapshot.json",
       "golden_scenario": {
-        "max_od_pairs": 4000,
-        "max_purpose_od_pairs": 2500,
-        "max_lines": 100,
+        "max_od_pairs": 3000,
+        "max_purpose_od_pairs": 1500,
+        "max_lines": 60,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     },
@@ -65,9 +65,9 @@
       "js_snapshot": "tests/fixtures/cities/hong-kong-v6/takt_browser_snapshot.json",
       "python_snapshot": "tests/fixtures/cities/hong-kong-v6/takt_python_snapshot.json",
       "golden_scenario": {
-        "max_od_pairs": 4000,
-        "max_purpose_od_pairs": 2500,
-        "max_lines": 100,
+        "max_od_pairs": 3000,
+        "max_purpose_od_pairs": 1500,
+        "max_lines": 60,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     }
