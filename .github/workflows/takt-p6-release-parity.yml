@@ -17,6 +17,7 @@ permissions:
 jobs:
   city-parity:
     name: Canonical Takt city parity
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -29,47 +30,17 @@ jobs:
           node-version: "24"
       - name: Verify pinned Takt bundle and city input pins
         run: python scripts/takt_release_gate.py
-      - name: Start real city JS golden
+      - name: Generate real city JS golden
         env:
           TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
-        run: |
-          rm -f /tmp/takt-js.done /tmp/takt-js.status /tmp/takt-js.log
-          nohup bash -lc 'node scripts/takt_city_browser_snapshot.js --city=${{ matrix.city }} > /tmp/takt-js.log 2>&1; echo $? > /tmp/takt-js.status; touch /tmp/takt-js.done' >/dev/null 2>&1 &
-      - name: Wait for real city JS golden
-        run: |
-          for i in $(seq 1 720); do
-            if test -f /tmp/takt-js.done; then
-              cat /tmp/takt-js.log
-              test "$(cat /tmp/takt-js.status)" = 0
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Takt JS golden did not finish within 12 minutes"
-          cat /tmp/takt-js.log || true
-          exit 1
+        run: node scripts/takt_city_browser_snapshot.js --city=${{ matrix.city }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install passenger_flow runtime dependencies
         run: python -m pip install numpy scipy pytest
-      - name: Start real city Python golden
-        run: |
-          rm -f /tmp/takt-py.done /tmp/takt-py.status /tmp/takt-py.log
-          nohup bash -lc 'python scripts/takt_city_python_snapshot.py --city=${{ matrix.city }} > /tmp/takt-py.log 2>&1; echo $? > /tmp/takt-py.status; touch /tmp/takt-py.done' >/dev/null 2>&1 &
-      - name: Wait for real city Python golden
-        run: |
-          for i in $(seq 1 600); do
-            if test -f /tmp/takt-py.done; then
-              cat /tmp/takt-py.log
-              test "$(cat /tmp/takt-py.status)" = 0
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Takt Python golden did not finish within 10 minutes"
-          cat /tmp/takt-py.log || true
-          exit 1
+      - name: Generate real city Python golden
+        run: python scripts/takt_city_python_snapshot.py --city=${{ matrix.city }}
       - name: Check city golden schema
         run: python scripts/takt_release_gate.py --check-city-schemas
       - name: Compare real city parity
