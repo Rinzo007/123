@@ -23,7 +23,7 @@
       "golden_scenario": {
         "max_od_pairs": 4000,
         "max_purpose_od_pairs": 2500,
-        "max_lines": 300,
+        "max_lines": 100,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     },
@@ -45,7 +45,7 @@
       "golden_scenario": {
         "max_od_pairs": 4000,
         "max_purpose_od_pairs": 2500,
-        "max_lines": 300,
+        "max_lines": 100,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     },
@@ -67,7 +67,7 @@
       "golden_scenario": {
         "max_od_pairs": 4000,
         "max_purpose_od_pairs": 2500,
-        "max_lines": 300,
+        "max_lines": 100,
         "selection": "top trips descending; ties by original row index; lines ranked by coarse endpoint-cell coverage then id"
       }
     }
