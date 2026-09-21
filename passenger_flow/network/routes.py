@@ -1282,7 +1282,11 @@ def _enumerate_journeys(
         # so reaching a downstream transfer stop does not require walking the
         # line one physical segment at a time.
         n = len(seq.get("stops") or [])
-        open_flags = seq.get("open", [True] * n)
+        open_flags = list(seq.get("open") or ())
+        if len(open_flags) < n:
+            open_flags.extend([True] * (n - len(open_flags)))
+        elif len(open_flags) > n:
+            open_flags = open_flags[:n]
         for next_pos in (i for i in range(n) if i != pos and open_flags[i]):
             ride = _cached_ride_edge_time_min(
                 route_stop_sequences,
