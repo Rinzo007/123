@@ -76,8 +76,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
       - name: Run parity regression suite
         run: |
-          cd tests
-          PYTHONPATH=.. python -m pytest -q --rootdir=. --ignore=../__init__.py test_passenger_flow_takt_parity.py
+          tmp_dir=$(mktemp -d)
+          cp tests/test_passenger_flow_takt_parity.py "$tmp_dir/test_passenger_flow_takt_parity.py"
+          cp -R tests/fixtures "$tmp_dir/fixtures"
+          PYTHONPATH="$GITHUB_WORKSPACE:$tmp_dir" python -m pytest -q --rootdir="$tmp_dir" "$tmp_dir/test_passenger_flow_takt_parity.py"
 
   record:
     name: Record verified city goldens
