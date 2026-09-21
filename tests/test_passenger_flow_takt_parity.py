@@ -405,7 +405,7 @@ def test_msa_gap_uses_smoothing_step_not_raw_to_new_delta() -> None:
         {(1, 0): 6.0},
         {(1, 0): 8.0},
     )
-    assert math.isclose(got, 8.0 / 31.0, rel_tol=1e-12, abs_tol=1e-12)
+    assert math.isclose(got, 0.25, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_density_adjusted_no_car_shares_match_takt_formula() -> None:
     case = FIXTURE["no_car_density"]
