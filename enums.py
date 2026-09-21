@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from .support import TYPE_LABELS, type_label
+from support import TYPE_LABELS, type_label
 
 __all__ = [
     "TYPE_LABELS",
