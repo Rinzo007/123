@@ -98,7 +98,7 @@ def validate_city_manifest(manifest: dict[str, Any], repo_root: Path) -> list[st
             raise ReleaseGateError(f"duplicate city case {name!r}")
         names.add(name)
 
-        for field in ("version", "model", "demand", "baseline", "purposes"):
+        for field in ("model", "demand", "baseline", "purposes"):
             rel = _require_case_field(case, field, name)
             path = repo_root / rel
             if not path.is_file():
