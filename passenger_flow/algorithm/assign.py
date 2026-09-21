@@ -209,6 +209,7 @@ def _apply_car_only_modes(
     zones: Zones,
     zi: int,
     zj: int,
+    od_meters: float | None = None,
     no_car_share: float | None = None,
     rest_s: float | None = None,
     car_period_multiplier: float = 1.0,
@@ -221,7 +222,8 @@ def _apply_car_only_modes(
     """
     if mode is None:
         return
-    od_meters = _od_distance_meters(zones, zi, zj)
+    if od_meters is None:
+        od_meters = _od_distance_meters(zones, zi, zj)
     _transit, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares(
         mode,
         od_meters,
@@ -631,6 +633,7 @@ def _assign_od(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     car_period_multiplier: float = 1.0,
     car_base_time_s: np.ndarray | None = None,
+    od_distances_m: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -664,6 +667,7 @@ def _assign_od(
         totals.period_total += trips
         road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
         car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
+        od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
         origin_stops = _line_access_stops(
             zone_nearest.get(zi, []), route_sequences
@@ -683,6 +687,7 @@ def _assign_od(
                 zones=zones,
                 zi=zi,
                 zj=zj,
+                od_meters=od_meters,
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
@@ -709,7 +714,7 @@ def _assign_od(
             wait_calc=wait_calc,
             crowd_state=crowd_state,
             transfer_index=transfer_index,
-            od_distance_m=_od_distance_meters(zones, zi, zj),
+            od_distance_m=od_meters,
             road_time_s=road_time_s,
             ride_edge_cache=ride_edge_cache,
         )
@@ -768,7 +773,7 @@ def _assign_od(
                 totals,
                 mode=mode,
                 trips=trips,
-                od_meters=_od_distance_meters(zones, zi, zj),
+                od_meters=od_meters,
                 transit_s=transit_cost_s,
                 base_time_s=road_time_s,
                 no_car_share=(
