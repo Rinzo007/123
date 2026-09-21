@@ -186,7 +186,7 @@ def _leg_alternatives(
     prev_stop = route_sequences[prev_seq]["stops"][prev_b]
     base_dest = route_sequences[base_seq]["stops"][base_b]
     base_ride = _cached_ride_edge_time_min(
-        route_stop_sequences,
+        route_sequences,
         base_seq,
         base_a,
         base_b,
@@ -233,7 +233,7 @@ def _leg_alternatives(
                 continue
             seen_positions.add(alt_pos)
             alt_ride = _cached_ride_edge_time_min(
-                route_stop_sequences,
+                route_sequences,
                 alt_seq,
                 alt_board_pos,
                 alt_pos,
