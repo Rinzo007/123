@@ -1499,7 +1499,8 @@ def run_passenger_flow(
 
     # 6. Контекст и общие аккумуляторы
     period_sources: tuple[Period | None, ...] = tuple(periods) or (None,)
-    primary_distances = _precompute_od_distances(zones, od_rows, od_cols)\n    primary_layer = _DemandLayer(od_rows, od_cols, od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources), base_time_s, car_base_time_s, primary_distances)
+    primary_distances = _precompute_od_distances(zones, od_rows, od_cols)
+    primary_layer = _DemandLayer(od_rows, od_cols, od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources), base_time_s, car_base_time_s, primary_distances)
     extra_layers: list[_DemandLayer] = []
     for layer_index, layer in enumerate(demand_layers or ()):
         od = np.asarray(layer.get("od"), dtype=np.float64)
@@ -1519,7 +1520,8 @@ def run_passenger_flow(
         base_layer = layer.get("base_time_s")
         base_layer = None if base_layer is None else np.asarray(base_layer, dtype=np.float64)
         car_layer = od[:, 3].astype(np.float64)[keep] if od.shape[1] >= 4 else None
-        distances = _precompute_od_distances(zones, rows, cols)\n        extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer, distances))
+        distances = _precompute_od_distances(zones, rows, cols)
+        extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer, distances))
 
     total_trips = float(od_matrix.sum()) + sum(float(np.sum(layer.od_vals)) for layer in extra_layers)
 
