@@ -120,7 +120,10 @@ function compressMatrixGraph(offsets0,targets0,costs0,targetCSR){
      const srcLine=lineOfStop[node];
      for(let k=from;k<to;k++){
        const target=targets0[k];
-       if(target<I)continue;
+       if(target<I){
+         targetParts.push(target);costParts.push(costs0[k]);total++;
+         continue;
+       }
        const dst=target-I;
        if(lineOfStop[dst]!==srcLine||!important[dst])continue;
        targetParts.push(target);costParts.push(costs0[k]);total++;
