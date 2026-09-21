@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Protocol
 
-from .constants import LAT_SHIFT, LON_SHIFT, STRAIGHT_EPS
-from .enums import RouteType
-from .geometry import geometry_diameter_km, polyline_km
-from .type_defs import Coordinate
+from constants import LAT_SHIFT, LON_SHIFT, STRAIGHT_EPS
+from enums import RouteType
+from geometry import geometry_diameter_km, polyline_km
+from type_defs import Coordinate
 
 __all__ = [
     "BBox",
