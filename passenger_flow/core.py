@@ -42,6 +42,7 @@ from .algorithm.wait import (
     _expected_wait_min,
     _reliability_min,
     _run_msa_period,
+    _takt_msa_gap,
 )
 from .algorithm.mode_choice import (
     _takt_car_period_multiplier,
@@ -875,6 +876,17 @@ def _empty_accumulator() -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class _DemandLayer:
+    """Внутренний слой спроса в формате Takt: sparse OD + out/ret + baseT."""
+    od_rows: np.ndarray
+    od_cols: np.ndarray
+    od_vals: np.ndarray
+    out: tuple[float, ...]
+    ret: tuple[float, ...]
+    base_time_s: np.ndarray | None = None
+    car_base_time_s: np.ndarray | None = None
+
+@dataclass(frozen=True)
 class _AssignContext:
     """Общие аргументы проходов ``_assign_od``/``_run_msa_period``.
 
@@ -908,6 +920,37 @@ class _AssignContext:
     vehicle_specs: Mapping[str, VehicleSpec] | None
     car_period_multipliers: tuple[float, ...]
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
+
+    def for_layer(self, layer: _DemandLayer) -> "_AssignContext":
+        """Создаёт контекст с тем же графом, но с OD конкретного слоя."""
+        return _AssignContext(
+            od_rows=layer.od_rows,
+            od_cols=layer.od_cols,
+            od_vals=layer.od_vals,
+            zone_nearest=self.zone_nearest,
+            route_sequences=self.route_sequences,
+            stop_time_min=self.stop_time_min,
+            wait_base=self.wait_base,
+            walk_to_stop_min=self.walk_to_stop_min,
+            transfer_penalty_min=self.transfer_penalty_min,
+            transfer_wait_min=self.transfer_wait_min,
+            transfer_radius_m=self.transfer_radius_m,
+            max_transfers=self.max_transfers,
+            transfer_penalty_calc=self.transfer_penalty_calc,
+            logit_temp=self.logit_temp,
+            mode_choice=self.mode_choice,
+            zones=self.zones,
+            no_car_shares=self.no_car_shares,
+            base_time_s=layer.base_time_s,
+            car_base_time_s=layer.car_base_time_s,
+            seq_headway_min=self.seq_headway_min,
+            seq_jitter_s=self.seq_jitter_s,
+            seq_headway_periods=self.seq_headway_periods,
+            wait_calc=self.wait_calc,
+            vehicle_specs=self.vehicle_specs,
+            car_period_multipliers=self.car_period_multipliers,
+            transfer_index=self.transfer_index,
+        )
 
     def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
         headway = (
@@ -1005,6 +1048,87 @@ class _AssignContext:
 # ===== Один период =====
 
 
+def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Сливает агрегаты нескольких demand-слоёв одного периода."""
+    merged = _empty_accumulator()
+    for item in items:
+        _merge_pass_aggregates(merged, item)
+    return merged
+
+
+def _assign_layer_contexts(
+    contexts: Sequence[tuple[_AssignContext, float, float]],
+    period_index: int,
+    wait_extra: Mapping[int, float] | None,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+) -> dict[str, Any]:
+    return _merge_period_aggregates([
+        ctx.assign(
+            out_factor=out_factor,
+            ret_factor=ret_factor,
+            wait_extra=wait_extra,
+            period_index=period_index,
+            crowd_state=crowd_state,
+        )
+        for ctx, out_factor, ret_factor in contexts
+    ])
+
+
+def _run_msa_period_layers(
+    contexts: Sequence[tuple[_AssignContext, float, float]],
+    *,
+    wait_crowding_per_100_min: float,
+    reliability_extra: Mapping[int, float] | None,
+    max_iterations: int,
+    gap_tol: float,
+    period_index: int,
+    period_hours: float,
+) -> tuple[dict[str, Any], int, float]:
+    smoothed: dict[int, float] = {}
+    prev_smoothed: dict[int, float] = {}
+    smoothed_seg_forward: dict[tuple[int, int], float] = {}
+    smoothed_seg_reverse: dict[tuple[int, int], float] = {}
+    smoothed_stop: dict[tuple[int, int], float] = {}
+    wait_extra = dict(reliability_extra) if reliability_extra else None
+    crowd_state = None
+    agg: dict[str, Any] = _empty_accumulator()
+    final_gap = gap_tol
+    for iteration in range(1, max_iterations + 1):
+        agg = _assign_layer_contexts(
+            contexts,
+            period_index=period_index,
+            wait_extra=wait_extra,
+            crowd_state=crowd_state,
+        )
+        raw = agg["route_totals"]
+        alpha = 1.0 / iteration
+        rids = sorted(set(raw) | set(smoothed))
+        for rid in rids:
+            smoothed[rid] = (1.0-alpha)*smoothed.get(rid,0.0) + alpha*raw.get(rid,0.0)
+        previous_seg_forward = dict(smoothed_seg_forward)
+        previous_seg_reverse = dict(smoothed_seg_reverse)
+        previous_stop = dict(smoothed_stop)
+        for key in set(agg.get("seg_forward_totals", {})) | set(smoothed_seg_forward):
+            smoothed_seg_forward[key]=(1-alpha)*smoothed_seg_forward.get(key,0.0)+alpha*agg.get("seg_forward_totals",{}).get(key,0.0)
+        for key in set(agg.get("seg_reverse_totals", {})) | set(smoothed_seg_reverse):
+            smoothed_seg_reverse[key]=(1-alpha)*smoothed_seg_reverse.get(key,0.0)+alpha*agg.get("seg_reverse_totals",{}).get(key,0.0)
+        for key in set(agg.get("seq_stop_totals", {})) | set(smoothed_stop):
+            smoothed_stop[key]=(1-alpha)*smoothed_stop.get(key,0.0)+alpha*agg.get("seq_stop_totals",{}).get(key,0.0)
+        agg["seg_forward_totals"]=smoothed_seg_forward
+        agg["seg_reverse_totals"]=smoothed_seg_reverse
+        agg["seq_stop_totals"]=smoothed_stop
+        crowd_state=_build_crowd_state(
+            contexts[0][0].route_sequences, smoothed_seg_forward, smoothed_seg_reverse,
+            smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
+            period_hours, period_index=period_index,
+        )
+        final_gap=_takt_msa_gap(prev_smoothed, smoothed, previous_seg_forward, smoothed_seg_forward, previous_seg_reverse, smoothed_seg_reverse, previous_stop, smoothed_stop)
+        prev_smoothed=dict(smoothed)
+        if iteration>1 and final_gap<=gap_tol:
+            break
+    return agg, iteration, final_gap
+
+
 def _assigned_demand_trips(
     period_flows: Sequence[PeriodFlow],
     fallback_interzonal_trips: float,
@@ -1016,6 +1140,8 @@ def _assigned_demand_trips(
 def _run_period(
     ctx: _AssignContext,
     period: Period | None,
+    *,
+    layer_contexts: Sequence[tuple[_AssignContext, float, float]] | None = None,
     *,
     period_index: int,
     period_hours: float,
@@ -1033,6 +1159,34 @@ def _run_period(
     """
     out_factor = period.out if period is not None else 1.0
     ret_factor = period.ret if period is not None else 1.0
+    contexts = list(layer_contexts or ((ctx, out_factor, ret_factor),))
+
+    if len(contexts) > 1 and wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
+        pass_agg, msa_iters, msa_final_gap = _run_msa_period_layers(
+            contexts,
+            wait_crowding_per_100_min=wait_crowding_per_100_min,
+            reliability_extra=reliability_extra,
+            max_iterations=msa_max_iterations,
+            gap_tol=msa_gap,
+            period_index=period_index,
+            period_hours=period_hours,
+        )
+        pass_agg["_msa_iterations"] = msa_iters
+        pass_agg["_msa_gap"] = msa_final_gap
+        line(
+            f"  MSA {period.key if period else 'общий'}: "
+            f"{msa_iters} итераций, разрыв {msa_final_gap*100:.2f}%"
+        )
+        return pass_agg
+    if len(contexts) > 1:
+        if wait_crowding_per_100_min > 0:
+            pass_one = _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra)
+            crowd_state = _build_crowd_state(
+                ctx.route_sequences, pass_one.get("seg_forward_totals", {}), pass_one.get("seg_reverse_totals", {}),
+                pass_one.get("seq_stop_totals", {}), ctx.seq_headway_min, ctx.vehicle_specs, period_hours, period_index=period_index,
+            )
+            return _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra, crowd_state=crowd_state)
+        return _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra)
 
     if wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
         pass_agg, msa_iters, msa_final_gap = ctx.msa(
@@ -1121,6 +1275,7 @@ def run_passenger_flow(
     msa_max_iterations: int | None = _DEFAULT_MSA_MAX_ITERATIONS,
     msa_gap: float = _DEFAULT_MSA_GAP,
     prepared: PreparedPassengerFlow | None = None,
+    demand_layers: Sequence[Mapping[str, Any]] | None = None,
 ) -> FlowResult:
     """Выполняет расчёт пассажиропотока на маршрутах и остановках.
 
@@ -1298,7 +1453,7 @@ def run_passenger_flow(
         )
 
     # 3. OD-пары (sparse или dense)
-    total_trips = float(od_matrix.sum())
+    total_trips = float(od_matrix.sum()) + sum(float(np.sum(layer.od_vals)) for layer in extra_layers)
     od_rows, od_cols, od_vals = _load_od_pairs(od_sparse, matrix, line)
 
     # 4. Тайминги маршрутов (headway/jitter/reliability)
@@ -1321,9 +1476,36 @@ def run_passenger_flow(
 
     # 6. Контекст и общие аккумуляторы
     period_sources: tuple[Period | None, ...] = tuple(periods) or (None,)
-    car_period_multipliers = _takt_car_period_multipliers(
-        od_rows, od_cols, od_vals, period_sources
-    )
+    primary_layer = _DemandLayer(od_rows, od_cols, od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources), base_time_s, car_base_time_s)
+    extra_layers: list[_DemandLayer] = []
+    for layer_index, layer in enumerate(demand_layers or ()):
+        od = np.asarray(layer.get("od"), dtype=np.float64)
+        if od.ndim != 2 or od.shape[1] < 3 or od.shape[0] == 0:
+            raise PassengerFlowError(f"demand_layers[{layer_index}].od должен иметь форму (N, >=3)")
+        if np.any(od[:, :2] < 0) or np.any(od[:, :2] >= n_zones):
+            raise PassengerFlowError(f"demand_layers[{layer_index}].od содержит индексы зон вне диапазона")
+        rows = od[:, 0].astype(np.int64)
+        cols = od[:, 1].astype(np.int64)
+        vals = od[:, 2].astype(np.float64)
+        keep = vals > 0.0
+        rows, cols, vals = rows[keep], cols[keep], vals[keep]
+        out = tuple(float(x) for x in layer.get("out", ()))
+        ret = tuple(float(x) for x in layer.get("ret", ()))
+        if len(out) < len(period_sources) or len(ret) < len(period_sources):
+            raise PassengerFlowError(f"demand_layers[{layer_index}] требует out/ret по каждому периоду")
+        base_layer = layer.get("base_time_s")
+        base_layer = None if base_layer is None else np.asarray(base_layer, dtype=np.float64)
+        car_layer = od[:, 3].astype(np.float64)[keep] if od.shape[1] >= 4 else None
+        extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer))
+
+    car_multiplier_inputs = [(od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources))]
+    car_multiplier_inputs.extend((layer.od_vals, layer.out, layer.ret) for layer in extra_layers)
+    demand_period_counts = []
+    period_hours = [_TAKT_PERIOD_HOURS.get(p.key, 24.0) if p is not None else 24.0 for p in period_sources]
+    for pi, hours in enumerate(period_hours):
+        demand_period_counts.append(sum(float(np.sum(vals)) * (outs[pi] + rets[pi]) for vals, outs, rets in car_multiplier_inputs))
+    avg = sum(demand_period_counts) / max(sum(period_hours), 1e-12)
+    car_period_multipliers = tuple(min(1.8, 1.0 + 0.6 * max(0.0, (count / max(period_hours[i], 1e-12)) / max(avg, 1e-12) - 1.0)) for i, count in enumerate(demand_period_counts))
     ctx = _AssignContext(
         od_rows=od_rows,
         od_cols=od_cols,
@@ -1370,9 +1552,17 @@ def run_passenger_flow(
             if period is not None
             else 24.0
         )
+        layer_ctxs = [(ctx, float(period.out if period is not None else 1.0), float(period.ret if period is not None else 1.0))]
+        for layer in extra_layers:
+            layer_ctxs.append((
+                ctx.for_layer(layer),
+                float(layer.out[period_index] if period_index < len(layer.out) else 0.0),
+                float(layer.ret[period_index] if period_index < len(layer.ret) else 0.0),
+            ))
         pass_agg = _run_period(
             ctx,
             period,
+            layer_contexts=layer_ctxs,
             period_index=period_index,
             period_hours=period_hours,
             wait_crowding_per_100_min=wait_crowding_per_100_min,
