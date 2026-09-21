@@ -112,13 +112,13 @@ def snap(man,c):
     "excessPassengerKm":lr.excess_passenger_km,"severePassengerKm":lr.severe_passenger_km,"extremePassengerKm":lr.extreme_passenger_km})
  full={"ridersPerDay":parity["ridersPerDay"],"transferTrips":parity["transferTrips"],"coveredCommuters":parity["coveredCommuters"],
   "totalCommuters":parity["totalCommuters"],"capitalCostM":parity["capitalCostM"],"revenueDay":parity["revenueDay"],"opexDay":parity["opexDay"],
-  "modeSplit":parity["modeSplit"],"satisfaction":parity["satisfaction"],"interchanges":d.get("interchanges",[]),"trackCapacity":track_capacity(list(prep.route_sequences)),
+  "modeSplit":parity["modeSplit"],"satisfaction":d.get("satisfaction",{}),"interchanges":d.get("interchanges",[]),"trackCapacity":track_capacity(list(prep.route_sequences)),
   "coveredPoint":d.get("coveredPoint",[]),"servedByPoint":d.get("servedByPoint",[]),"missedByPoint":d.get("missedByPoint",[]),
   "noRouteByPoint":d.get("noRouteByPoint",[]),"journeyOrigins":d.get("journeyOrigins",{}),"equilibrium":parity["equilibrium"],"lines":lines,
   "periods":[{"key":p.key,"label":p.label,"totalTrips":p.total_trips,"assignedTrips":p.assigned_trips,"carTrips":p.car_trips,"walkTrips":p.walk_trips,"twoWheelTrips":p.two_wheel_trips,"restTrips":p.rest_trips} for p in result.period_flows],
   "stops":[{"name":s.name,"lat":s.lat,"lon":s.lon,"boardings":s.boardings,"alightings":s.alightings,"totalFlow":s.total_flow,"routes":list(s.routes)} for s in result.stop_flows]}
  return {"reference":{"engine":"passenger_flow Python","bundle":man["bundle"]["source"],"city":c["name"],"version":c["version"],"inputs":c["git_blob_sha"]},
-   "scenario":{"demandLayer":"primary OD","purposeLayers":len(layers),"odPairs":int(od.nnz),"zones":len(z),"lines":len(routes),**scenario},"parity":parity,"result":full}
+   "scenario":{"demandLayer":"primary OD","purposeLayers":len(layers),"odPairs":int(scenario["selectedOdPairs"]),"zones":len(z),"lines":len(routes),**scenario},"parity":parity,"result":full}
 def main():
  ap=argparse.ArgumentParser();ap.add_argument("--city");ap.add_argument("--output-dir",type=Path,default=ROOT/"tests/fixtures/cities");a=ap.parse_args()
  man=load(MANIFEST);cases=man["city_cases"];cases=[next(x for x in cases if x["name"]==a.city)] if a.city else cases
