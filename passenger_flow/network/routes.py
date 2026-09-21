@@ -1188,8 +1188,29 @@ def _enumerate_journeys(
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
     transfer_index = transfer_index or _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
-    def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+    downstream_transfer_cache: dict[
+        tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
+    ] = {}
+
+    def cached_transfer_targets(
+        seq_idx: int, pos: int
+    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
+
+    def cached_downstream_transfer_targets(
+        seq_idx: int, pos: int
+    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+        key = (int(seq_idx), int(pos))
+        cached = downstream_transfer_cache.get(key)
+        if cached is not None:
+            return cached
+        n = len(route_stop_sequences[seq_idx].get("stops") or [])
+        entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+        for source_pos in range(max(0, int(pos)), n):
+            entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+        cached = tuple(entries)
+        downstream_transfer_cache[key] = cached
+        return cached
 
     for item in origins:
         seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
@@ -1277,47 +1298,15 @@ def _enumerate_journeys(
                         )
                     )
 
-        # Takt's `we` graph connects every pair of open stops on one
-        # sequence. The edge is evaluated through the shared ride-time cache,
-        # so reaching a downstream transfer stop does not require walking the
-        # line one physical segment at a time.
-        n = len(seq.get("stops") or [])
-        open_flags = list(seq.get("open") or ())
-        if len(open_flags) < n:
-            open_flags.extend([True] * (n - len(open_flags)))
-        elif len(open_flags) > n:
-            open_flags = open_flags[:n]
-        for next_pos in (i for i in range(n) if i != pos and open_flags[i]):
-            ride = _cached_ride_edge_time_min(
-                route_stop_sequences,
-                seq_idx,
-                pos,
-                next_pos,
-                stop_time_min=stop_time_min,
-                crowd_state=crowd_state,
-                cache=ride_edge_cache,
-            )
-            if ride <= 0.0:
-                ride = abs(next_pos - pos) * stop_time_min
-            new_cost = cost + ride
-            nkey = (seq_idx, next_pos, transfers, leg_start, used)
-            if new_cost + 1e-12 < best.get(nkey, math.inf):
-                best[nkey] = new_cost
-                heapq.heappush(
-                    heap,
-                    (
-                        new_cost,
-                        seq_idx,
-                        next_pos,
-                        transfers,
-                        leg_start,
-                        legs,
-                        used,
-                    ),
-                )
-
         if transfers >= max_legs - 1:
             continue
+
+        # Takt's `we` graph connects open stops on one sequence, but the
+        # subsequent transfer expansion only needs states at actual transfer
+        # source stops. Jump directly to every transfer source at or after the
+        # current position using the shared ride-time edge cache. This preserves
+        # the reachable transfer set without materializing O(n²) same-line states.
+        for seq_b, ta, tb in cached_downstream_transfer_targets(seq_idx, pos):            continue
 
         # _transfer_targets() already expands from the current position
         # to every downstream source stop and retains the nearest target stop
