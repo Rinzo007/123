@@ -192,6 +192,39 @@ def test_zone_validation_rejects_non_finite_or_out_of_range_coordinates() -> Non
         _validate_zones(BadBounds())
 
 
+def test_run_rejects_invalid_route_before_spatial_index_build() -> None:
+    from types import SimpleNamespace
+
+    from passenger_flow.core import run_passenger_flow
+
+    stops = [
+        SimpleNamespace(id=1, name="A", latitude=52.0, longitude=4.0),
+        SimpleNamespace(id=2, name="B", latitude=float("nan"), longitude=4.01),
+    ]
+    direction = SimpleNamespace(name="D", stops=stops)
+    route = SimpleNamespace(
+        ok=True,
+        route_id=901,
+        name="broken",
+        route_type="bus",
+        directions=[direction],
+        headways=[10.0, 10.0, 10.0, 10.0, 10.0],
+    )
+
+    class ZonesStub:
+        xy = np.asarray([[4.0, 52.0]], dtype=np.float64)
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(PassengerFlowError):
+        run_passenger_flow(
+            [route],
+            np.zeros((1, 1), dtype=np.float64),
+            ZonesStub(),
+        )
+
+
 def test_route_sequence_validation_rejects_invalid_geometry() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["stops"][1]["lat"] = float("nan")
