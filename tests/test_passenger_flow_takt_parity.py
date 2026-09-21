@@ -1,4 +1,5 @@
 """Golden/regression checks for the Takt-compatible passenger-flow core."""
+# P6 synchronization: keep CI execution tied to the latest parity fixes.
 
 from __future__ import annotations
 
