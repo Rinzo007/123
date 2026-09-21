@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 else:
     RouteLike = Any
     Zones = Any
-from .algorithm.assign import _assign_od
+from .algorithm.assign import _assign_od, _od_distance_meters
 from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
