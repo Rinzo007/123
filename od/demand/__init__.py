@@ -13,6 +13,7 @@ from .takt import (
     load_takt_purposes,
     write_takt_demand,
     write_takt_purposes,
+    write_takt_purposes_bundle,
     zone_weights_from_streets,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "load_takt_purposes",
     "write_takt_demand",
     "write_takt_purposes",
+    "write_takt_purposes_bundle",
     "zone_weights_from_streets",
 ]
