@@ -161,7 +161,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P3 Differential** | 🟡 | Comparator/golden готовы, SHA расчётного bundle теперь pinned; остаётся реальный browser-exported JS snapshot против Python на одинаковом входе. |
 | **P4 Performance** | ✅ | Spatial transfer index, O(1) ride timing и memoized ride-edge costs кэшируются внутри assignment pass; добавлен воспроизводимый full-OD benchmark и parity regression для cache path. |
 | **P5 Hardening** | ✅ | Входы, зоны и route graph валидируются до spatial/KD-tree операций; добавлены проверки timing/cache/headway metadata и regression coverage. Остаток — только CI/release gate. |
-| **P6 Release parity** | ⏳ | Зафиксировать golden city cases, versioned bundle provenance и release gate на differential parity. |
+| **P6 Release parity** | 🟡 | P6 gate и workflow добавлены: pinned bundle + SHA входов Amsterdam v8 / Berlin v5 / Hong Kong v6 проверяются; canonical JS↔Python differential остаётся блокирующим. Полные city-level JS/Python goldens требуются для tag-релиза и сейчас являются явным fail-closed blocker. |
 
 Последовательность дальнейших работ:
 
@@ -486,3 +486,19 @@ open/open_pre, размер и значения cached segment_time_s и кон�
 
 Дополнительно проверяется `od_sparse`: размерность должна совпадать с числом
 зон, а `data` — содержать только конечные неотрицательные значения.
+
+## P6 — release parity gate
+
+`scripts/takt_release_gate.py` проверяет Git-blob SHA расчётного Takt bundle и
+фиксированные city inputs для Amsterdam v8, Berlin v5 и Hong Kong v6. Это
+защищает release parity от незаметной подмены reference bundle или исходных
+городских данных.
+
+`.github/workflows/takt-p6-release-parity.yml` запускает canonical browser
+snapshot, Python `passenger_flow`, differential comparator и parity regression.
+Для git tags `v*` добавляется fail-closed проверка: без трёх city-level
+JS/Python golden snapshots релиз не проходит.
+
+City snapshots пока не подменяются синтетическими значениями: manifest
+фиксирует реальные входные наборы и их provenance, а отсутствие итоговых
+city-level snapshots остаётся честным блокирующим условием release gate.
