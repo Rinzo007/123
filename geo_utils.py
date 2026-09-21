@@ -8,8 +8,8 @@ from typing import Any
 
 from shapely.errors import GEOSException
 
-from .errors import MissingDependencyError
-from .models import RouteData
+from errors import MissingDependencyError
+from models import RouteData
 
 logger = logging.getLogger("wikiroutes.gis.common")
 
