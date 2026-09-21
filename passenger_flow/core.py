@@ -453,12 +453,12 @@ def _validate_flow_inputs(
         base_time_s,
         n_zones,
         len(periods) if periods else 1,
-        int(matrix.nnz if sparse.issparse(matrix) else np.count_nonzero(matrix > 0.0)),
+        int(np.count_nonzero(np.asarray(matrix.data) > 0.0)) if sparse.issparse(matrix) else int(np.count_nonzero(matrix > 0.0)),
     )
     _validate_car_base_time(
         car_base_time_s,
         n_zones,
-        int(np.count_nonzero(matrix > 0.0)),
+        int(np.count_nonzero(np.asarray(matrix.data) > 0.0)) if sparse.issparse(matrix) else int(np.count_nonzero(matrix > 0.0)),
     )
     _validate_sparse_od(od_sparse, n_zones)
     _validate_transfer_args(max_transfers, transfer_radius_m)
