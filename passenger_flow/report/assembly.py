@@ -259,6 +259,7 @@ def assemble_flow_result(
     rest_trips: float = 0.0,
     period_flows: tuple[PeriodFlow, ...] = (),
     line_results: tuple[LineResult, ...] = (),
+    takt_diagnostics: dict[str, Any] | None = None,
 ) -> FlowResult:
     """Собирает маршруты и остановки с потоками в ``FlowResult``."""
     route_flows = _build_route_flows(
@@ -301,4 +302,5 @@ def assemble_flow_result(
         raw_rest_trips=float(rest_trips),
         raw_revenue_day=float(raw_revenue_day),
         raw_opex_day=float(raw_opex_day),
+        takt_diagnostics=dict(takt_diagnostics or {}),
     )
