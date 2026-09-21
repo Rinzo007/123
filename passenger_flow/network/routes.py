@@ -1306,18 +1306,13 @@ def _enumerate_journeys(
         # source stops. Jump directly to every transfer source at or after the
         # current position using the shared ride-time edge cache. This preserves
         # the reachable transfer set without materializing O(n²) same-line states.
-        for seq_b, ta, tb in cached_downstream_transfer_targets(seq_idx, pos):            continue
-
-        # _transfer_targets() already expands from the current position
-        # to every downstream source stop and retains the nearest target stop
-        # per target line. Do not rescan those source stops here.
-        for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
+        for seq_b, ta, tb in cached_downstream_transfer_targets(seq_idx, pos):
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _cached_ride_edge_time_min(
                 route_stop_sequences,
                 seq_idx,
-                pos,
+                leg_start,
                 ta_pos,
                 stop_time_min=stop_time_min,
                 crowd_state=crowd_state,
