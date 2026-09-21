@@ -1384,7 +1384,12 @@ def run_passenger_flow(
 
     n_zones = len(zones)
     _validate_zones(zones)
-    matrix = od_matrix.tocsr().astype(np.float64) if sparse.issparse(od_matrix) else np.asarray(od_matrix, dtype=np.float64)
+    if sparse.issparse(od_matrix):
+        matrix = od_matrix.tocsr()
+        if matrix.dtype != np.float64:
+            matrix = matrix.astype(np.float64)
+    else:
+        matrix = np.asarray(od_matrix, dtype=np.float64)
     population_arr: np.ndarray | None = None
     if population is not None:
         population_arr = np.asarray(population, dtype=np.float64)
