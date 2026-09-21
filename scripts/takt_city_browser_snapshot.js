@@ -228,9 +228,11 @@ function buildMatrixTargetCSR(q){
  return{offsets,nodes,stops:I,lineOfStop:Int32Array.from(lineOfStop)};
 }
 
+const MATRIX_WORKERS=new Set();
 class TaktNodeWorker{
   constructor(){
     this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
+    MATRIX_WORKERS.add(this);
     this.onmessage=null;this.onerror=null;this.graphSource=null;
     this.worker.on("message",data=>{if(this.onmessage)this.onmessage({data});});
     this.worker.on("error",err=>{if(this.onerror)this.onerror(err);});
@@ -258,7 +260,15 @@ class TaktNodeWorker{
     }
     this.worker.postMessage(msg);
   }
-  terminate(){return this.worker.terminate();}
+  terminate(){
+    MATRIX_WORKERS.delete(this);
+    return this.worker.terminate();
+  }
+}
+async function terminateMatrixWorkers(){
+  const workers=Array.from(MATRIX_WORKERS);
+  MATRIX_WORKERS.clear();
+  await Promise.all(workers.map(w=>w.worker.terminate()));
 }
 let MATRIX_CURRENT_CITY=null;
 const ROOT=path.resolve(__dirname,".."),MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
@@ -345,7 +355,9 @@ function clean(x){
   };
 }
 async function runOne(Bs,man,c){
- const q=build(c); MATRIX_CURRENT_CITY=q; const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
+ const q=build(c); MATRIX_CURRENT_CITY=q;
+ try{
+ const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
  const full=clean(r),modes=r.modeSplit||{};
  const total=Number(r.ridersPerDay||0)+0; // scalar fields are already canonical rounded in the JS engine
  return {reference:{engine:"Takt web bundle",bundle:man.bundle.source,city:c.name,version:c.version,inputs:c.git_blob_sha},
@@ -356,6 +368,10 @@ async function runOne(Bs,man,c){
    satisfactionScore:Number(r.satisfaction?.score||0),satisfactionTotalTrips:Number(r.satisfaction?.totalTrips||0),equilibrium:r.equilibrium||null,
    lineSummary:(r.lines||[]).map(x=>({id:x.id,mode:x.mode,ridersPerDay:Number(x.ridersPerDay||0),fleet:Number(x.fleet||0),revenueDay:Number(x.revenueDay||0),opexDay:Number(x.opexDay||0),peakLoadFactor:Number(x.peakLoadFactor||0)}))},
  result:full}
+ }finally{
+   await terminateMatrixWorkers();
+   MATRIX_CURRENT_CITY=null;
+ }
 }
 async function main(){
  const man=load(MANIFEST),arg=process.argv.find(x=>x.startsWith("--city="));
