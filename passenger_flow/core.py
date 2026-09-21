@@ -159,7 +159,10 @@ def prepare_passenger_flow(
 
 
 def _finite_number(name: str, value: float, *, nonnegative: bool = False, positive: bool = False) -> None:
-    value = float(value)
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise PassengerFlowError(f"{name} должен быть конечным числом") from exc
     if not math.isfinite(value):
         raise PassengerFlowError(f"{name} должен быть конечным числом")
     if positive and value <= 0.0:
@@ -278,29 +281,26 @@ def _validate_periods(periods: Sequence[Period]) -> None:
 
 
 def _validate_mode_choice(mode_choice: ModeChoiceConfig) -> None:
-    if not 0.0 <= mode_choice.car_no_car_share <= 1.0:
+    _finite_number("car_no_car_share", mode_choice.car_no_car_share, nonnegative=True)
+    if not 0.0 <= float(mode_choice.car_no_car_share) <= 1.0:
         raise PassengerFlowError(
             "car_no_car_share должен быть в диапазоне [0, 1]"
         )
-    _finite_number("car_no_car_share", mode_choice.car_no_car_share)
     _finite_number("car_no_car_factor", mode_choice.car_no_car_factor, nonnegative=True)
     _finite_number("car_speed_kmh", mode_choice.car_speed_kmh, positive=True)
     _finite_number("walk_speed_mps", mode_choice.walk_speed_mps, positive=True)
     _finite_number("vot_per_eur_s", mode_choice.vot_per_eur_s, positive=True)
-    if not 0.0 <= mode_choice.car_no_car_share <= 1.0:
+    if not 0.0 <= float(mode_choice.car_no_car_share) <= 1.0:
         raise PassengerFlowError(
             "car_no_car_share должен быть в диапазоне [0, 1]"
         )
-    if not 0.0 <= mode_choice.two_wheel_share <= 1.0:
+    _finite_number("two_wheel_share", mode_choice.two_wheel_share, nonnegative=True)
+    if not 0.0 <= float(mode_choice.two_wheel_share) <= 1.0:
         raise PassengerFlowError(
             "two_wheel_share должен быть в диапазоне [0, 1]"
         )
     _finite_number("two_wheel_speed_mps", mode_choice.two_wheel_speed_mps, positive=True)
     _finite_number("two_wheel_reach_m", mode_choice.two_wheel_reach_m, nonnegative=True)
-    if not 0.0 <= mode_choice.two_wheel_share <= 1.0:
-        raise PassengerFlowError(
-            "two_wheel_share должен быть в диапазоне [0, 1]"
-        )
     for name, value in (
         ("car_parking_min", mode_choice.car_parking_min),
         ("car_cost_per_km_eur", mode_choice.car_cost_per_km_eur),
