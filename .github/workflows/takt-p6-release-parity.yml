@@ -25,7 +25,9 @@ jobs:
       - name: Generate real city JS goldens
         env:
           TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
-        run: node scripts/takt_city_browser_snapshot.js
+        run: |
+          printf '%s\n' amsterdam-v8 berlin-v5 hong-kong-v6 |
+            xargs -n1 -P3 -I{} node scripts/takt_city_browser_snapshot.js --city={}
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
