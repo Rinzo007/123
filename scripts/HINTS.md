@@ -159,7 +159,7 @@ load factor ≈ пассажиры на участке / доступная вм
 | **P2-D Economics** | 🟢 | Fare/CAPEX/row metadata и exact period fleet/OPEX с occupancy factor перенесены. Остаточный gap — полный `La()` polyline/onTrack CAPEX reuse. |
 | **P2-E Crowding/reliability** | 🟢 | `Fr → unev → Rr` участвует в first-leg, а transfer-leg использует `hs×ti` без double-count. Остаток — per-leg alternative branching из JS `co()`. |
 | **P3 Differential** | 🟡 | Comparator/golden готовы, SHA расчётного bundle теперь pinned; остаётся реальный browser-exported JS snapshot против Python на одинаковом входе. |
-| **P4 Performance** | 🟡 | Spatial transfer index и O(1) ride timing кэшированы; следующий шаг — профиль полного OD assignment и устранение повторных edge-cost расчётов без изменения результатов. |
+| **P4 Performance** | ✅ | Spatial transfer index, O(1) ride timing и memoized ride-edge costs кэшируются внутри assignment pass; добавлен воспроизводимый full-OD benchmark и parity regression для cache path. |
 | **P5 Hardening** | 🟢 | Входные данные и route graph валидируются; остаётся CI/packaging/runtime verification. |
 | **P6 Release parity** | ⏳ | Зафиксировать golden city cases, versioned bundle provenance и release gate на differential parity. |
 
