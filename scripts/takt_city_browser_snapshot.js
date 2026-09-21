@@ -16,7 +16,7 @@ function getBs(){
  if(typeof s.__TAKT_Bs!=="function")throw Error("Takt Bs() not exported"); return s.__TAKT_Bs;
 }
 function build(c){
- const d=load(ROOT+c.demand),m=load(ROOT+c.model),b=load(ROOT+c.baseline),p=load(ROOT+c.purposes);
+ const d=load(path.join(ROOT,c.demand)),m=load(path.join(ROOT,c.model)),b=load(path.join(ROOT,c.baseline)),p=load(path.join(ROOT,c.purposes));
  const lines=(b.lines||[]).map(x=>({...x,headways:Array.from(x.headways||[10,10,10,10,10],Number)}));
  const geoms=lines.map(x=>{const st=x.stops||[];const cum=x.segLen?.length?[0,...x.segLen.reduce((a,v)=>[...a,a[a.length-1]+Number(v)],[])]:[0,...st.slice(1).reduce((a,v,i)=>[...a,a[a.length-1]+hav(st[i],v)],[])];return{stops:st,cum,cumT:x.cumT?.map(Number)||null,segLen:x.segLen?.map(Number)||cum.slice(1).map((v,i)=>v-cum[i]),segCostMul:x.segCostMul||null}});
  const base=(p.commuteBaseT||[]).map(decodeF32);
