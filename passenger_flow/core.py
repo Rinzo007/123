@@ -875,6 +875,22 @@ def _empty_accumulator() -> dict[str, Any]:
 # ===== Контекст прохода (общие аргументы для _assign_od/_run_msa_period) =====
 
 
+def _precompute_od_distances(
+    zones: Zones,
+    rows: np.ndarray,
+    cols: np.ndarray,
+) -> np.ndarray:
+    """Precompute immutable OD distances once instead of per MSA iteration."""
+    return np.fromiter(
+        (
+            _od_distance_meters(zones, int(zi), int(zj))
+            for zi, zj in zip(rows, cols)
+        ),
+        dtype=np.float64,
+        count=len(rows),
+    )
+
+
 @dataclass(frozen=True)
 class _DemandLayer:
     """Внутренний слой спроса в формате Takt: sparse OD + out/ret + baseT."""
@@ -885,6 +901,7 @@ class _DemandLayer:
     ret: tuple[float, ...]
     base_time_s: np.ndarray | None = None
     car_base_time_s: np.ndarray | None = None
+    od_distances_m: np.ndarray | None = None
 
 @dataclass(frozen=True)
 class _AssignContext:
@@ -913,6 +930,7 @@ class _AssignContext:
     no_car_shares: np.ndarray | None
     base_time_s: np.ndarray | None
     car_base_time_s: np.ndarray | None
+    od_distances_m: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
     seq_headway_periods: tuple[Mapping[int, float] | None, ...]
@@ -943,6 +961,7 @@ class _AssignContext:
             no_car_shares=self.no_car_shares,
             base_time_s=layer.base_time_s,
             car_base_time_s=layer.car_base_time_s,
+            od_distances_m=layer.od_distances_m,
             seq_headway_min=self.seq_headway_min,
             seq_jitter_s=self.seq_jitter_s,
             seq_headway_periods=self.seq_headway_periods,
@@ -975,6 +994,7 @@ class _AssignContext:
             "no_car_shares": self.no_car_shares,
             "base_time_s": self.base_time_s,
             "car_base_time_s": self.car_base_time_s,
+            "od_distances_m": self.od_distances_m,
             "seq_headway_min": headway,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
