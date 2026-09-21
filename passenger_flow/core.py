@@ -35,7 +35,7 @@ else:
     RouteLike = Any
     Zones = Any
 from .algorithm.assign import _assign_od
-from .algorithm.kpis import _build_line_kpis
+from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
     _build_wait_extra,
@@ -1655,6 +1655,28 @@ def run_passenger_flow(
             "periods": [{"trips": int(round(float(v))), "walkS": walk_s} for v in item.get("periods", [0.0] * 5)],
         })
     scalar_total = max(float(sum(p.total_trips for p in period_flows)), 1e-12)
+    sections, _ = _atomic_infrastructure_sections(route_sequences)
+    track_capacity = []
+    for (key, seq_ids) in sorted(sections.items()):
+        route_type, a_key, b_key = key
+        if route_type == "bus" or len(seq_ids) < 2:
+            continue
+        try:
+            ax, ay = (int(v) for v in a_key.split(",", 1))
+            bx, by = (int(v) for v in b_key.split(",", 1))
+        except ValueError:
+            continue
+        tph = 0.0
+        for seq_idx in sorted(seq_ids):
+            for h in route_sequences[seq_idx].get("headways") or ():
+                if float(h) > 0.0:
+                    tph += 60.0 / float(h)
+        track_capacity.append({
+            "coords": [[ax / 100000.0, ay / 100000.0], [bx / 100000.0, by / 100000.0]],
+            "lines": [int(route_sequences[i]["route_id"]) for i in sorted(seq_ids)],
+            "tph": tph,
+            "limit": float(vehicle_spec_for_route_type(route_type).track_tph),
+        })
     takt_diagnostics = {
         "satisfaction": {
             "score": float(merged_assigned / scalar_total),
@@ -1666,7 +1688,7 @@ def run_passenger_flow(
             "exact": False,
         },
         "interchanges": interchanges,
-        "trackCapacity": [],
+        "trackCapacity": track_capacity,
         "coveredCommuters": float(accum.get("covered_commuters", 0.0)),
         "totalCommuters": float(accum.get("total_commuters", 0.0)),
         "servedByPoint": served_by_point.tolist(),
