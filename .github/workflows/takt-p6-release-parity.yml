@@ -77,7 +77,7 @@ jobs:
       - name: Run parity regression suite
         run: |
           cd tests
-          PYTHONPATH=.. python -m pytest -q --rootdir=. test_passenger_flow_takt_parity.py
+          PYTHONPATH=.. python -m pytest -q --rootdir=. --ignore=../__init__.py test_passenger_flow_takt_parity.py
 
   record:
     name: Record verified city goldens
