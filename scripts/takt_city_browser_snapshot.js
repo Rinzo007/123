@@ -231,15 +231,14 @@ function buildMatrixTargetCSR(q){
 class TaktNodeWorker{
   constructor(){
     this.worker=new NodeWorker(MATRIX_WORKER_SOURCE,{eval:true});
-    this.onmessage=null;this.onerror=null;this.graphKey=null;
+    this.onmessage=null;this.onerror=null;this.graphSource=null;
     this.worker.on("message",data=>{if(this.onmessage)this.onmessage({data});});
     this.worker.on("error",err=>{if(this.onerror)this.onerror(err);});
   }
   postMessage(msg){
     if(msg.type==="solve" && msg.offsets){
-      const key=matrixGraphKey(msg.offsets,msg.targets,msg.costs);
-      if(this.graphKey!==key){
-        this.graphKey=key;
+      if(this.graphSource!==msg.offsets){
+        this.graphSource=msg.offsets;
         const targetCSR=buildMatrixTargetCSR(MATRIX_CURRENT_CITY||{});
         const compressed=compressMatrixGraph(msg.offsets,msg.targets,msg.costs,targetCSR);
         const targetOffsets=new SharedArrayBuffer(targetCSR.offsets.byteLength);
