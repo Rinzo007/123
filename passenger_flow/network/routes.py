@@ -1284,44 +1284,44 @@ def _enumerate_journeys(
         if transfers >= max_legs - 1:
             continue
 
-        # Takt's same-line graph allows transfer at any downstream stop
-        # reachable from the current position. Keep this expansion lazy.
-        for source_pos in range(pos, len(seq.get("stops") or [])):
-            for seq_b, ta, tb in cached_transfer_targets(seq_idx, source_pos):
-                ta_pos = int(ta["position"])
-                tb_pos = int(tb["position"])
-                ride_to_transfer = _cached_ride_edge_time_min(
-                    route_stop_sequences,
-                    seq_idx,
-                    pos,
-                    ta_pos,
-                    stop_time_min=stop_time_min,
-                    crowd_state=crowd_state,
-                    cache=ride_edge_cache,
-                )
-                transfer_wait = _transfer_wait_min(
-                    seq_idx, seq_b, ta, tb,
-                    stop_time_min=stop_time_min,
-                    wait_time_min=wait_time_min,
-                    transfer_wait_min=transfer_wait_min,
-                    seq_headway_min=seq_headway_min,
-                    seq_jitter_s=seq_jitter_s,
-                    route_stop_sequences=route_stop_sequences,
-                )
-                penalty = _transfer_penalty(
-                    ta, tb,
-                    transfer_penalty_min=transfer_penalty_min,
-                    transfer_penalty_calc=transfer_penalty_calc,
-                )
-                closed_legs = legs + ((seq_idx, leg_start, ta_pos),)
-                new_cost = cost + ride_to_transfer + penalty + transfer_wait
-                nkey = (seq_b, tb_pos, transfers + 1, tb_pos, used | {seq_b})
-                if new_cost + 1e-12 < best.get(nkey, math.inf):
-                    best[nkey] = new_cost
-                    heapq.heappush(heap, (
-                        new_cost, seq_b, tb_pos, transfers + 1, tb_pos,
-                        closed_legs, used | {seq_b}
-                    ))
+        # _transfer_targets() already expands from the current position
+        # to every downstream source stop and retains the nearest target stop
+        # per target line. Do not rescan those source stops here.
+        for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
+            ta_pos = int(ta["position"])
+            tb_pos = int(tb["position"])
+            ride_to_transfer = _cached_ride_edge_time_min(
+                route_stop_sequences,
+                seq_idx,
+                pos,
+                ta_pos,
+                stop_time_min=stop_time_min,
+                crowd_state=crowd_state,
+                cache=ride_edge_cache,
+            )
+            transfer_wait = _transfer_wait_min(
+                seq_idx, seq_b, ta, tb,
+                stop_time_min=stop_time_min,
+                wait_time_min=wait_time_min,
+                transfer_wait_min=transfer_wait_min,
+                seq_headway_min=seq_headway_min,
+                seq_jitter_s=seq_jitter_s,
+                route_stop_sequences=route_stop_sequences,
+            )
+            penalty = _transfer_penalty(
+                ta, tb,
+                transfer_penalty_min=transfer_penalty_min,
+                transfer_penalty_calc=transfer_penalty_calc,
+            )
+            closed_legs = legs + ((seq_idx, leg_start, ta_pos),)
+            new_cost = cost + ride_to_transfer + penalty + transfer_wait
+            nkey = (seq_b, tb_pos, transfers + 1, tb_pos, used | {seq_b})
+            if new_cost + 1e-12 < best.get(nkey, math.inf):
+                best[nkey] = new_cost
+                heapq.heappush(heap, (
+                    new_cost, seq_b, tb_pos, transfers + 1, tb_pos,
+                    closed_legs, used | {seq_b}
+                ))
 
     return _dedupe_journeys(
         journeys, max_alternatives, route_stop_sequences
