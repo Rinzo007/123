@@ -1,5 +1,5 @@
 """Общие GIS-утилиты: источники файлов, растры, UTM и Shapely 2."""
-from .geo_utils import (
+from geo_utils import (
     resolve_sources,
     route_geo_sig,
     shapely_stack,
