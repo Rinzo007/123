@@ -1408,7 +1408,7 @@ def run_passenger_flow(
     merged_rest = accum["rest_trips"]
     merged_revenue = accum["fare_revenue"]
 
-    intrazonal_trips = float(np.sum(np.diag(od_matrix)))
+    intrazonal_trips = float(od_matrix.diagonal().sum() if sparse.issparse(od_matrix) else np.trace(od_matrix))
     line_results: tuple[LineResult, ...] = ()
     if headway_min is not None:
         line_results = tuple(
