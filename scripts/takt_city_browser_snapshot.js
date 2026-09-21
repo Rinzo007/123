@@ -104,11 +104,15 @@ function compressMatrixGraph(offsets0,targets0,costs0,targetCSR){
  if(I<1200)return{offsets:offsets0,targets:targets0,costs:costs0};
  const lineOfStop=targetCSR.lineOfStop;
  const important=new Uint8Array(I);
+ const sourceImportant=new Uint8Array(I);
  for(let k=0;k<targetCSR.nodes.length;k++)important[targetCSR.nodes[k]-I]=1;
+ for(let src=0;src<I;src++){
+   if(targetCSR.offsets[src+1]>targetCSR.offsets[src])sourceImportant[src]=1;
+ }
  for(let stop=0;stop<I;stop++){
    const node=I+stop;
    for(let k=offsets0[node];k<offsets0[node+1];k++){
-     if(targets0[k]<I){important[stop]=1;break;}
+     if(targets0[k]<I){important[stop]=1;sourceImportant[stop]=1;break;}
    }
  }
  const outOffsets=new Int32Array(I*2+1);
@@ -117,6 +121,7 @@ function compressMatrixGraph(offsets0,targets0,costs0,targetCSR){
    outOffsets[node]=total;
    const from=offsets0[node],to=offsets0[node+1];
    if(node<I){
+     if(!sourceImportant[node])continue;
      const srcLine=lineOfStop[node];
      for(let k=from;k<to;k++){
        const target=targets0[k];
