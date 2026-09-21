@@ -203,10 +203,10 @@ def _leg_alternatives(
         else None
     )
     alternatives: list[tuple[float, tuple[int, int, int]]] = []
-    for alt_seq, alt_board, _alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
+    for alt_seq, _source_stop, alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
         if alt_seq == base_seq:
             continue
-        alt_board_pos = int(alt_board["position"])
+        alt_board_pos = int(alt_target["position"])
         alt_candidates: list[tuple[int, float]] = []
         if next_seq is not None and next_stop is not None:
             for pos, stop in enumerate(route_sequences[alt_seq].get("stops") or []):
