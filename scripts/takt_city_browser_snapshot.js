@@ -85,7 +85,17 @@ function solve(msg){
   }
   parentPort.postMessage({type:"solved",job,start,times,previous});
 }
-parentPort.on("message",msg=>{if(msg.type==="init")graph=msg;else if(msg.type==="solve")solve({...msg,...graph});});
+parentPort.on("message",msg=>{
+ if(msg.type==="init"){
+   graph={
+     offsets:msg.offsets instanceof SharedArrayBuffer?new Int32Array(msg.offsets):msg.offsets,
+     targets:msg.targets instanceof SharedArrayBuffer?new Int32Array(msg.targets):msg.targets,
+     costs:msg.costs instanceof SharedArrayBuffer?new Float64Array(msg.costs):msg.costs,
+     targetOffsets:msg.targetOffsets instanceof SharedArrayBuffer?new Int32Array(msg.targetOffsets):msg.targetOffsets,
+     targetNodes:msg.targetNodes instanceof SharedArrayBuffer?new Int32Array(msg.targetNodes):msg.targetNodes,
+   };
+ }else if(msg.type==="solve")solve({...msg,...graph});
+});
 `
 
 
