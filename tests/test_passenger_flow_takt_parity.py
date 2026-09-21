@@ -153,6 +153,45 @@ def test_flow_input_validation_rejects_non_finite_scalars() -> None:
         _validate_flow_inputs(np.zeros((1, 1)), 1, transfer_radius_m=float("inf"), **{k: v for k, v in kwargs.items() if k != "transfer_radius_m"})
 
 
+def test_route_sequence_validation_rejects_invalid_runtime_fields() -> None:
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["speed_kmh"] = float("nan")
+    with pytest.raises(PassengerFlowError):
+        _validate_route_sequences([seq])
+
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["open_pre"] = [0, 1]
+    with pytest.raises(PassengerFlowError):
+        _validate_route_sequences([seq])
+
+    seq = _synthetic_sequence([1, 2, 3])
+    seq["segment_time_s"] = (60.0,)
+    with pytest.raises(PassengerFlowError):
+        _validate_route_sequences([seq])
+
+
+def test_zone_validation_rejects_non_finite_or_out_of_range_coordinates() -> None:
+    from passenger_flow.core import _validate_zones
+
+    class ZonesStub:
+        xy = np.asarray([[float("nan"), 52.0]], dtype=np.float64)
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(PassengerFlowError):
+        _validate_zones(ZonesStub())
+
+    class BadBounds:
+        xy = np.asarray([[181.0, 52.0]], dtype=np.float64)
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(PassengerFlowError):
+        _validate_zones(BadBounds())
+
+
 def test_route_sequence_validation_rejects_invalid_geometry() -> None:
     seq = _synthetic_sequence([1, 2, 3])
     seq["stops"][1]["lat"] = float("nan")
