@@ -167,6 +167,25 @@ def _finite_number(name: str, value: float, *, nonnegative: bool = False, positi
     if nonnegative and value < 0.0:
         raise PassengerFlowError(f"{name} не может быть отрицательным")
 
+def _validate_zones(zones: Zones) -> None:
+    """Проверяет координатную сетку зон до любых spatial операций."""
+    try:
+        xy = np.asarray(zones.xy, dtype=np.float64)
+        n_zones = len(zones)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise PassengerFlowError("zones должны содержать координаты xy") from exc
+    if xy.shape != (n_zones, 2):
+        raise PassengerFlowError(
+            f"zones.xy имеет размер {xy.shape}, ожидается {(n_zones, 2)}"
+        )
+    if not np.isfinite(xy).all():
+        raise PassengerFlowError("zones.xy должен содержать конечные координаты")
+    lon = xy[:, 0]
+    lat = xy[:, 1]
+    if np.any(np.abs(lon) > 180.0) or np.any(np.abs(lat) > 90.0):
+        raise PassengerFlowError("zones.xy содержит координаты вне диапазона lon/lat")
+
+
 def _validate_od_matrix(matrix: np.ndarray, n_zones: int) -> None:
     if matrix.shape != (n_zones, n_zones):
         raise PassengerFlowError(
@@ -1148,6 +1167,7 @@ def run_passenger_flow(
     line("\n[Flow] Расчёт пассажиропотока...")
 
     n_zones = len(zones)
+    _validate_zones(zones)
     matrix = np.asarray(od_matrix, dtype=np.float64)
     population_arr: np.ndarray | None = None
     if population is not None:
