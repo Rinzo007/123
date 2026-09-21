@@ -568,6 +568,17 @@ def _accumulate_transit_journeys(
         journey_trips = transit_trips * journey_probs[ji]
         if journey_trips <= 0.0:
             continue
+        if len(journey.legs) > 1:
+            totals.transfer_trips += journey_trips * (len(journey.legs) - 1)
+            for left, right in zip(journey.legs, journey.legs[1:]):
+                key = (int(left[0]), int(left[2]), int(right[0]), int(right[1]))
+                item = totals.interchanges.get(key)
+                if item is None:
+                    item = {"trips": 0.0, "periods": [0.0] * 5}
+                    totals.interchanges[key] = item
+                item["trips"] += journey_trips
+                if 0 <= period_index < 5:
+                    item["periods"][period_index] += journey_trips
         for leg_index in range(len(journey.legs)):
             candidates, leg_probs = _takt_leg_choice_probs(
                 journey, leg_index, route_sequences,
