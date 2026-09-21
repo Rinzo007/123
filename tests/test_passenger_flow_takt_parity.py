@@ -590,6 +590,19 @@ def test_multi_leg_search_reaches_four_legs() -> None:
         _synthetic_sequence([5, 6, 7]),
         _synthetic_sequence([7, 8, 9]),
     ]
+    # Keep only the intended adjacent-line transfer stops inside 800 m.
+    for idx, (shift, stops) in enumerate((
+        (0.000, (0.000, 0.001, 0.002)),
+        (0.002, (0.000, 0.008, 0.009)),
+        (0.011, (0.000, 0.008, 0.009)),
+        (0.020, (0.000, 0.008, 0.009)),
+    )):
+        for stop, dx in zip(seqs[idx]["stops"], stops):
+            stop["lon"] = 4.0 + shift + dx
+    # Align the transfer endpoints exactly.
+    seqs[1]["stops"][0]["lon"] = seqs[0]["stops"][2]["lon"]
+    seqs[2]["stops"][0]["lon"] = seqs[1]["stops"][2]["lon"]
+    seqs[3]["stops"][0]["lon"] = seqs[2]["stops"][2]["lon"]
     origins = [(0, 0, 0)]
     destinations = [(3, 2, 2)]
     journeys = build_journeys(
@@ -839,7 +852,7 @@ def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     for key, ids in by_origin.items():
         assert len(ids) == 1, key
     assert set(line for _ta_pos, line in by_origin) == {1, 2}
-    assert 4 in [ids[0] for (pos, line), ids in by_origin.items() if line == 1 and pos == 1]
+    assert 5 in [ids[0] for (pos, line), ids in by_origin.items() if line == 1 and pos == 1]
 
 
 def test_journey_crowding_uses_selected_directional_load() -> None:
