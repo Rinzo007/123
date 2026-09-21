@@ -176,6 +176,7 @@ def _leg_alternatives(
     stop_time_min: float,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     transfer_radius_m: float,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> tuple[tuple[int, int, int], ...]:
     """JS ei(): альтернативы конкретной ножки с сохранением следующего leg-state."""
     if leg_index <= 0 or leg_index >= len(journey.legs):
@@ -184,9 +185,14 @@ def _leg_alternatives(
     base_seq, base_a, base_b = journey.legs[leg_index]
     prev_stop = route_sequences[prev_seq]["stops"][prev_b]
     base_dest = route_sequences[base_seq]["stops"][base_b]
-    base_ride = _ride_edge_time_min(
-        route_sequences[base_seq], base_a, base_b,
-        stop_time_min=stop_time_min, crowd_state=crowd_state
+    base_ride = _cached_ride_edge_time_min(
+        route_stop_sequences,
+        base_seq,
+        base_a,
+        base_b,
+        stop_time_min=stop_time_min,
+        crowd_state=crowd_state,
+        cache=ride_edge_cache,
     )
     next_leg = journey.legs[leg_index + 1] if leg_index + 1 < len(journey.legs) else None
     next_seq = next_leg[0] if next_leg is not None else None
@@ -226,9 +232,14 @@ def _leg_alternatives(
             if alt_pos == alt_board_pos or alt_pos in seen_positions:
                 continue
             seen_positions.add(alt_pos)
-            alt_ride = _ride_edge_time_min(
-                route_sequences[alt_seq], alt_board_pos, alt_pos,
-                stop_time_min=stop_time_min, crowd_state=crowd_state
+            alt_ride = _cached_ride_edge_time_min(
+                route_stop_sequences,
+                alt_seq,
+                alt_board_pos,
+                alt_pos,
+                stop_time_min=stop_time_min,
+                crowd_state=crowd_state,
+                cache=ride_edge_cache,
             )
             if alt_ride <= base_ride * 1.25 + 2.0:
                 alternatives.append((
@@ -348,6 +359,39 @@ def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
         + float(seq["cum_t_s"][position])
         + float(seq["dwell_s"]) * dwell_before
     )
+
+
+def _cached_ride_edge_time_min(
+    route_sequences: list[dict[str, Any]],
+    seq_idx: int,
+    orig_pos: int,
+    dest_pos: int,
+    *,
+    stop_time_min: float,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    cache: dict[tuple[int, int, int], float] | None,
+) -> float:
+    """Стоимость edge с memoization для одного фиксированного crowd state."""
+    if cache is None:
+        return _ride_edge_time_min(
+            route_sequences[seq_idx],
+            orig_pos,
+            dest_pos,
+            stop_time_min=stop_time_min,
+            crowd_state=crowd_state,
+        )
+    key = (int(seq_idx), int(orig_pos), int(dest_pos))
+    value = cache.get(key)
+    if value is None:
+        value = _ride_edge_time_min(
+            route_sequences[seq_idx],
+            orig_pos,
+            dest_pos,
+            stop_time_min=stop_time_min,
+            crowd_state=crowd_state,
+        )
+        cache[key] = float(value)
+    return float(value)
 
 
 def _ride_edge_time_min(
@@ -1097,6 +1141,7 @@ def _enumerate_journeys(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     od_distance_m: float | None = None,
     road_time_s: float | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> list[_Journey]:
     """Детерминированный shortest-path поиск по состояниям stop/line.
 
@@ -1170,10 +1215,14 @@ def _enumerate_journeys(
         for d_pos in destination_by_seq.get(seq_idx, ()):
             if d_pos == pos and not legs and d_pos == leg_start:
                 continue
-            ride = _ride_edge_time_min(
-                seq, leg_start, d_pos,
+            ride = _cached_ride_edge_time_min(
+                route_stop_sequences,
+                seq_idx,
+                leg_start,
+                d_pos,
                 stop_time_min=stop_time_min,
                 crowd_state=crowd_state,
+                cache=ride_edge_cache,
             )
             final_legs = legs + ((seq_idx, leg_start, d_pos),)
             if not final_legs:
@@ -1239,10 +1288,14 @@ def _enumerate_journeys(
         for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
-            ride_to_transfer = _ride_edge_time_min(
-                seq, leg_start, ta_pos,
+            ride_to_transfer = _cached_ride_edge_time_min(
+                route_stop_sequences,
+                seq_idx,
+                leg_start,
+                ta_pos,
                 stop_time_min=stop_time_min,
                 crowd_state=crowd_state,
+                cache=ride_edge_cache,
             )
             transfer_wait = _transfer_wait_min(
                 seq_idx, seq_b, ta, tb,
@@ -1318,5 +1371,6 @@ def build_journeys(
         transfer_index=transfer_index,
         od_distance_m=od_distance_m,
         road_time_s=road_time_s,
+        ride_edge_cache=ride_edge_cache,
     )
 
