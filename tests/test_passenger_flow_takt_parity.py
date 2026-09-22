@@ -38,7 +38,7 @@ from passenger_flow.algorithm.kpis import (
     _geometry_reuse_edges,
     _geometry_segment_edges,
 )
-from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
+from passenger_flow.core import _resolve_p6_process_workers, _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
@@ -1462,3 +1462,11 @@ def test_p6_release_gate_rejects_changed_bundle(tmp_path: Path) -> None:
     reference["reference"]["source"] = "bundle.js"
     with pytest.raises(ReleaseGateError):
         verify_bundle_provenance(reference, tmp_path)
+
+
+def test_p6_process_worker_count_respects_context_count(monkeypatch):
+    """Число процессов P6 не превышает число независимых demand-слоёв."""
+    monkeypatch.setenv("TAKT_P6_PROCESSES", "8")
+    assert _resolve_p6_process_workers(3) == 3
+    assert _resolve_p6_process_workers(1) == 1
+
