@@ -1109,12 +1109,48 @@ def _transfer_targets(
 
 
 class _TransferEdgeIndex(dict):
-    """Словарь transfer-рёбер плюс индекс позиций источников пересадки."""
-    __slots__ = ("source_positions",)
+    """Словарь transfer-рёбер плюс индекс позиций источников пересадки.
+
+    Также хранит общий ограниченный кэш suffix-выборок: один и тот же набор
+    downstream transfer targets теперь строится один раз для всей сети, а не
+    заново для каждого OD.
+    """
+    __slots__ = ("source_positions", "downstream_cache")
+    _MAX_DOWNSTREAM_CACHE = 32768
 
     def __init__(self, *args: Any, source_positions: Mapping[int, tuple[int, ...]] | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.source_positions = dict(source_positions or {})
+        self.downstream_cache: dict[
+            tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
+        ] = {}
+
+    def downstream_targets(
+        self,
+        route_stop_sequences: list[dict[str, Any]],
+        seq_idx: int,
+        pos: int,
+    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+        key = (int(seq_idx), int(pos))
+        cached = self.downstream_cache.get(key)
+        if cached is not None:
+            return cached
+
+        entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+        positions = self.source_positions.get(int(seq_idx))
+        if positions is not None:
+            start = bisect_left(positions, int(pos))
+            for source_pos in positions[start:]:
+                entries.extend(self.get((seq_idx, source_pos), ()))
+        else:
+            n = len(route_stop_sequences[seq_idx].get("stops") or [])
+            for source_pos in range(max(0, int(pos)), n):
+                entries.extend(self.get((seq_idx, source_pos), ()))
+
+        result = tuple(entries)
+        if len(self.downstream_cache) < self._MAX_DOWNSTREAM_CACHE:
+            self.downstream_cache[key] = result
+        return result
 
 
 def _build_transfer_edge_index(
@@ -1266,7 +1302,12 @@ def _enumerate_journeys(
     # После отказа от полного same-line графа всегда выполняется pos == leg_start;
     # повторное использование линии разрешено.
     heap: list[tuple[float, int, int, int, tuple[tuple[int, int, int], ...]]] = []
-    best: dict[tuple[int, int, int], float] = {}
+    best: dict[int, float] = {}
+    best_key_stride = max(
+        (len(seq.get("stops") or []) for seq in route_stop_sequences),
+        default=0,
+    ) + 1
+    best_transfer_stride = max_legs
     first_wait_by_seq: dict[int, float] = {}
     access_by_stop: dict[tuple[int, int], float] = {}
     origin_has_distance = False
@@ -1283,43 +1324,18 @@ def _enumerate_journeys(
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
     transfer_index = transfer_index or _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
-    downstream_transfer_cache: dict[
-        tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
-    ] = {}
-
     def cached_transfer_targets(
         seq_idx: int, pos: int
     ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
 
-    source_positions = getattr(transfer_index, "source_positions", None)
-    
-    def cached_downstream_transfer_targets(
-        seq_idx: int, pos: int
-    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
-        key = (int(seq_idx), int(pos))
-        cached = downstream_transfer_cache.get(key)
-        if cached is not None:
-            return cached
-        entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
-        if source_positions is not None:
-            positions = source_positions.get(int(seq_idx), ())
-            start = bisect_left(positions, int(pos))
-            for source_pos in positions[start:]:
-                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
-        else:
-            n = len(route_stop_sequences[seq_idx].get("stops") or [])
-            for source_pos in range(max(0, int(pos)), n):
-                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
-        cached = tuple(entries)
-        downstream_transfer_cache[key] = cached
-        return cached
-
     for item in origins:
         seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
-        key = (seq_idx, int(orig_pos), 0)
+        key = (
+            (int(seq_idx) * best_key_stride + int(orig_pos)) * best_transfer_stride
+        )
         state = (0.0, seq_idx, int(orig_pos), 0, tuple())
         prior = best.get(key)
         if prior is None:
@@ -1331,7 +1347,10 @@ def _enumerate_journeys(
 
     while heap:
         cost, seq_idx, pos, transfers, legs = heapq.heappop(heap)
-        key = (seq_idx, pos, transfers)
+        key = (
+            (int(seq_idx) * best_key_stride + int(pos)) * best_transfer_stride
+            + int(transfers)
+        )
         if cost > best.get(key, math.inf) + 1e-9:
             continue
         seq = route_stop_sequences[seq_idx]
@@ -1409,7 +1428,25 @@ def _enumerate_journeys(
         # source stops. Jump directly to every transfer source at or after the
         # current position using the shared ride-time edge cache. This preserves
         # the reachable transfer set without materializing O(n²) same-line states.
-        for seq_b, ta, tb in cached_downstream_transfer_targets(seq_idx, pos):
+        if hasattr(transfer_index, "downstream_targets"):
+            downstream_targets = transfer_index.downstream_targets(
+                route_stop_sequences, seq_idx, pos
+            )
+        else:
+            positions = getattr(transfer_index, "source_positions", None)
+            entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+            if positions is not None:
+                source_positions = positions.get(int(seq_idx), ())
+                start = bisect_left(source_positions, int(pos))
+                for source_pos in source_positions[start:]:
+                    entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+            else:
+                n = len(route_stop_sequences[seq_idx].get("stops") or [])
+                for source_pos in range(max(0, int(pos)), n):
+                    entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+            downstream_targets = tuple(entries)
+
+        for seq_b, ta, tb in downstream_targets:
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _cached_ride_edge_time_min(
