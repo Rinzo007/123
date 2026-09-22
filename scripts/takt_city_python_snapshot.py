@@ -111,7 +111,9 @@ def snap(man,c):
    f"msa={float(perf.get('msa_s',0.0)):.3f}s "
    f"crowd_state={float(perf.get('crowd_state_s',0.0)):.3f}s "
    f"journey_calls={int(perf.get('journey_calls',0.0))} "
-   f"access_cache_misses={int(perf.get('access_cache_misses',0.0))}"
+   f"journey_cache_hits={int(perf.get('journey_cache_hits',0.0))} "
+   f"access_cache_misses={int(perf.get('access_cache_misses',0.0))} "
+   f"transfer_suffix_cache={len(getattr(prep.transfer_index,'downstream_cache',{}))}"
   )
  total=result.raw_assigned_trips+result.raw_car_trips+result.raw_walk_trips+result.raw_two_wheel_trips+result.raw_rest_trips
  lines=[]
