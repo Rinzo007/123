@@ -920,8 +920,16 @@ def test_transfer_index_precomputes_line_target_candidates() -> None:
     a = _synthetic_sequence([1, 2, 3, 4])
     b = _synthetic_sequence([5, 6, 7, 8])
     c = _synthetic_sequence([9, 10, 11, 12])
+    for pos, stop in enumerate(b["stops"]):
+        stop["lat"] = 52.02 + pos * 0.02
+        stop["lon"] = 4.02 + pos * 0.02
+    for pos, stop in enumerate(c["stops"]):
+        stop["lat"] = 52.02 + pos * 0.02
+        stop["lon"] = 4.02 + pos * 0.02
     b["stops"][0]["lat"] = a["stops"][1]["lat"] + 0.0001
+    b["stops"][0]["lon"] = a["stops"][1]["lon"] + 0.0001
     c["stops"][1]["lat"] = a["stops"][2]["lat"] + 0.0001
+    c["stops"][1]["lon"] = a["stops"][2]["lon"] + 0.0001
     index = _build_transfer_edge_index([a, b, c], 800.0)
 
     got = index.targets_to_line(0, 1)
