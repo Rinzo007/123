@@ -361,6 +361,20 @@ def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
     )
 
 
+def _base_ride_edge_time_min(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+    *,
+    stop_time_min: float,
+) -> float:
+    """Базовая стоимость line-state edge без динамической загрузки."""
+    ride = _route_ride_time_min(seq, orig_pos, dest_pos)
+    if ride <= 0.0 and orig_pos != dest_pos:
+        ride = abs(dest_pos - orig_pos) * stop_time_min
+    return max(0.0, ride)
+
+
 def _cached_ride_edge_time_min(
     route_sequences: list[dict[str, Any]],
     seq_idx: int,
@@ -371,27 +385,35 @@ def _cached_ride_edge_time_min(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     cache: dict[tuple[int, int, int], float] | None,
 ) -> float:
-    """Стоимость edge с memoization для одного фиксированного crowd state."""
+    """Стоимость edge с кэшем только статической базовой части."""
+    seq = route_sequences[seq_idx]
     if cache is None:
         return _ride_edge_time_min(
-            route_sequences[seq_idx],
+            seq,
             orig_pos,
             dest_pos,
             stop_time_min=stop_time_min,
             crowd_state=crowd_state,
         )
     key = (int(seq_idx), int(orig_pos), int(dest_pos))
-    value = cache.get(key)
-    if value is None:
-        value = _ride_edge_time_min(
-            route_sequences[seq_idx],
+    ride = cache.get(key)
+    if ride is None:
+        ride = _base_ride_edge_time_min(
+            seq,
             orig_pos,
             dest_pos,
             stop_time_min=stop_time_min,
-            crowd_state=crowd_state,
         )
-        cache[key] = float(value)
-    return float(value)
+        cache[key] = float(ride)
+    if not crowd_state or orig_pos == dest_pos:
+        return float(ride)
+    return _ride_edge_time_min(
+        seq,
+        orig_pos,
+        dest_pos,
+        stop_time_min=stop_time_min,
+        crowd_state=crowd_state,
+    )
 
 
 def _ride_edge_time_min(
@@ -403,22 +425,23 @@ def _ride_edge_time_min(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
 ) -> float:
     """Стоимость line-state edge: базовое C плюс crowd/dwell feedback."""
-    ride = _route_ride_time_min(seq, orig_pos, dest_pos)
-    if ride <= 0.0 and orig_pos != dest_pos:
-        ride = abs(dest_pos - orig_pos) * stop_time_min
+    ride = _base_ride_edge_time_min(
+        seq,
+        orig_pos,
+        dest_pos,
+        stop_time_min=stop_time_min,
+    )
     if not crowd_state or orig_pos == dest_pos:
-        return max(0.0, ride)
+        return ride
     seg_forward = crowd_state.get("seg_forward", {})
     seg_reverse = crowd_state.get("seg_reverse", {})
     extra_s = 0.0
     selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
-    prev_stop = orig_pos
     for seg_i, is_forward in selected_segments:
         loads = seg_forward if is_forward else seg_reverse
         load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
         if load > 0.0:
             extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
-        prev_stop = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i % len(seq["stops"])
     return max(0.0, ride + extra_s / 60.0)
 
 def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
