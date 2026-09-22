@@ -9,7 +9,8 @@ def test_transfer_index_shares_downstream_suffix_cache() -> None:
     b["stops"][1]["lat"] = a["stops"][3]["lat"] + 0.0001
     index = _build_transfer_edge_index([a, b], 800.0)
 
-    first = index.downstream_targets([a, b], 0, 0)    second = index.downstream_targets([a, b], 0, 0)
+    first = index.downstream_targets([a, b], 0, 0)
+    second = index.downstream_targets([a, b], 0, 0)
 
     assert first == second
     assert len(index.downstream_cache) == 1
