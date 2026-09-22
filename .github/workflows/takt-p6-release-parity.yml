@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        city: [amsterdam-v8, berlin-v5, hong-kong-v6]
+        city: [berlin-v5]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
