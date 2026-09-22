@@ -87,9 +87,11 @@ def _build_crowd_state(
     period_index: int = 0,
 ) -> dict[str, dict[tuple[int, int], float]]:
     """Строит segment/stop feedback в том же пространстве, что JS Fr()."""
-    state: dict[str, dict[tuple[int, int], float]] = {
+    state: dict[str, Any] = {
         "seg_forward": {},
         "seg_reverse": {},
+        "seg_forward_prefix": {},
+        "seg_reverse_prefix": {},
         "stop_extra": {},
         "unreliability": {},
     }
@@ -123,6 +125,32 @@ def _build_crowd_state(
             state["seg_reverse"][(seq_idx, seg_idx)] = max(
                 r / denom, 0.0
             )
+
+        segment_time = seq.get("segment_time_s") or ()
+        forward_prefix = [0.0]
+        reverse_prefix = [0.0]
+        for seg_idx in range(seg_count):
+            f_load = float(state["seg_forward"].get((seq_idx, seg_idx), 0.0))
+            r_load = float(state["seg_reverse"].get((seq_idx, seg_idx), 0.0))
+            seg_time_s = (
+                float(segment_time[seg_idx])
+                if seg_idx < len(segment_time)
+                else 0.0
+            )
+            f_extra = (
+                seg_time_s * (_takt_crowding_ride_mult(f_load) - 1.0)
+                if f_load > 0.0
+                else 0.0
+            )
+            r_extra = (
+                seg_time_s * (_takt_crowding_ride_mult(r_load) - 1.0)
+                if r_load > 0.0
+                else 0.0
+            )
+            forward_prefix.append(forward_prefix[-1] + f_extra)
+            reverse_prefix.append(reverse_prefix[-1] + r_extra)
+        state["seg_forward_prefix"][seq_idx] = tuple(forward_prefix)
+        state["seg_reverse_prefix"][seq_idx] = tuple(reverse_prefix)
 
         direction_factor = (
             2.0 if not seq.get("closed") or seq.get("both_ways") else 1.0
