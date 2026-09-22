@@ -634,6 +634,7 @@ def _assign_od(
     car_period_multiplier: float = 1.0,
     car_base_time_s: np.ndarray | None = None,
     od_distances_m: np.ndarray | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -643,7 +644,9 @@ def _assign_od(
     totals.no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.journey_origin_trips = np.zeros(n_zones, dtype=np.float64)
     totals.journey_origin_journeys = np.zeros(n_zones, dtype=np.float64)
-    ride_edge_cache: dict[tuple[int, int, int], float] = {}
+    if ride_edge_cache is None:
+        ride_edge_cache = {}
+    access_cache: dict[int, list[tuple[int, int, int, float]]] = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
@@ -669,12 +672,18 @@ def _assign_od(
         car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
         od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
-        origin_stops = _line_access_stops(
-            zone_nearest.get(zi, []), route_sequences
-        )
-        destination_stops = _line_access_stops(
-            zone_nearest.get(zj, []), route_sequences
-        )
+        origin_stops = access_cache.get(zi)
+        if origin_stops is None:
+            origin_stops = _line_access_stops(
+                zone_nearest.get(zi, []), route_sequences
+            )
+            access_cache[zi] = origin_stops
+        destination_stops = access_cache.get(zj)
+        if destination_stops is None:
+            destination_stops = _line_access_stops(
+                zone_nearest.get(zj, []), route_sequences
+            )
+            access_cache[zj] = destination_stops
         if period_index == 0 and (origin_stops or destination_stops):
             totals.covered_commuters += raw_trips
         if not origin_stops or not destination_stops:
