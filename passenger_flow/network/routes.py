@@ -1338,7 +1338,7 @@ def _enumerate_journeys(
 
         # Terminate at every destination stop reachable on this line.
         for d_pos in destination_by_seq.get(seq_idx, ()):
-            if d_pos == pos and not legs and d_pos == leg_start:
+            if d_pos == pos and not legs:
                 continue
             ride = _cached_ride_edge_time_min(
                 route_stop_sequences,
@@ -1349,7 +1349,7 @@ def _enumerate_journeys(
                 crowd_state=crowd_state,
                 cache=ride_edge_cache,
             )
-            final_legs = legs + ((seq_idx, leg_start, d_pos),)
+            final_legs = legs + ((seq_idx, pos, d_pos),)
             if not final_legs:
                 continue
             first_seq = final_legs[0][0]
@@ -1435,7 +1435,7 @@ def _enumerate_journeys(
                 transfer_penalty_min=transfer_penalty_min,
                 transfer_penalty_calc=transfer_penalty_calc,
             )
-            closed_legs = legs + ((seq_idx, leg_start, ta_pos),)
+            closed_legs = legs + ((seq_idx, pos, ta_pos),)
             new_cost = cost + ride_to_transfer + penalty + transfer_wait
             nkey = (seq_b, tb_pos, transfers + 1)
             if new_cost + 1e-12 < best.get(nkey, math.inf):
