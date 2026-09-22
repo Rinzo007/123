@@ -647,6 +647,7 @@ def _assign_od(
     pair_base_time_s: np.ndarray | None = None,
     pair_car_base_time_s: np.ndarray | None = None,
     journey_cache_token: Any = None,
+    pair_slice: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     assign_started = perf_counter() if perf_stats is not None else 0.0
@@ -658,6 +659,9 @@ def _assign_od(
 
     totals = _OdTotals()
     n_zones = len(zones)
+    start_idx, end_idx = pair_slice if pair_slice is not None else (0, len(od_rows))
+    start_idx = max(0, min(int(start_idx), len(od_rows)))
+    end_idx = max(start_idx, min(int(end_idx), len(od_rows)))
     totals.total_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.covered_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
@@ -670,7 +674,7 @@ def _assign_od(
     if journey_cache is None:
         journey_cache = {}
 
-    for idx in range(len(od_rows)):
+    for idx in range(start_idx, end_idx):
         zi = int(od_rows[idx])
         zj = int(od_cols[idx])
         raw_trips = float(od_vals[idx])
