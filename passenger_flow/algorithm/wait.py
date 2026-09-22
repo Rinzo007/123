@@ -295,10 +295,9 @@ def _msa_smooth_vector(
         pos = smoothed.index.get(key)
         if pos is not None:
             scratch[pos] = float(value)
-    previous = smoothed.values.copy()
-    smoothed.values *= 1.0 - alpha
-    smoothed.values += alpha * scratch
-    numerator = float(np.abs(smoothed.values - previous).sum())
+    delta = alpha * (scratch - smoothed.values)
+    smoothed.values += delta
+    numerator = float(np.abs(delta).sum())
     total = float(smoothed.values.sum())
     return numerator, total
 
