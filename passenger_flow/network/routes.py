@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import heapq
+from time import perf_counter
 import math
 from bisect import bisect_left
 from collections.abc import Iterator, Mapping
@@ -1510,10 +1511,12 @@ def build_journeys(
     od_distance_m: float | None = None,
     road_time_s: float | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+    perf_stats: dict[str, float] | None = None,
 ) -> list[_Journey]:
     """Возвращает до трёх вариантов поездки с максимумом четырёх ножек."""
+    started = perf_counter() if perf_stats is not None else 0.0
     max_legs = min(_TAKT_MAX_LEGS, max(1, int(max_transfers) + 1))
-    return _enumerate_journeys(
+    result = _enumerate_journeys(
         origins,
         destinations,
         route_stop_sequences,
@@ -1535,4 +1538,9 @@ def build_journeys(
         road_time_s=road_time_s,
         ride_edge_cache=ride_edge_cache,
     )
+    if perf_stats is not None:
+        perf_stats.setdefault("journeys_s", 0.0)
+        perf_stats["journeys_s"] += perf_counter() - started
+        perf_stats["journey_calls"] = perf_stats.get("journey_calls", 0.0) + 1.0
+    return result
 
