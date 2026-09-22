@@ -1,0 +1,57 @@
+name: Takt P6 one-city performance check
+
+on:
+  push:
+    branches: [p6-one-city-berlin-current]
+
+concurrency:
+  group: takt-p6-one-city-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  berlin:
+    name: Berlin-v5 P6 performance and parity
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Verify pinned Takt bundle and city input pins
+        run: python scripts/takt_release_gate.py
+
+      - name: Generate real city JS golden
+        env:
+          TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
+        run: node scripts/takt_city_browser_snapshot.js --city=berlin-v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/takt-p6-one-city.yml
+
+      - name: Install passenger_flow runtime dependencies
+        run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
+
+      - name: Generate Berlin Python snapshot with performance profile
+        run: python scripts/takt_city_python_snapshot.py --city=berlin-v5
+
+      - name: Check city golden schema
+        run: python scripts/takt_release_gate.py --check-city-schemas
+
+      - name: Compare Berlin parity
+        run: |
+          python scripts/takt_differential.py \
+            tests/fixtures/cities/berlin-v5/takt_browser_snapshot.json \
+            tests/fixtures/cities/berlin-v5/takt_python_snapshot.json \
+            --section parity \
+            --max-diffs 80
