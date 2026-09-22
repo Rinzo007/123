@@ -21,7 +21,8 @@ from __future__ import annotations
 from collections import defaultdict
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
@@ -1097,22 +1098,61 @@ def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-_P6_DEFAULT_THREAD_WORKERS = max(1, min(4, os.cpu_count() or 1))
+_P6_DEFAULT_PROCESS_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
-def _resolve_p6_thread_workers(context_count: int) -> int:
-    """Определяет число потоков для независимых demand-слоёв P6."""
+def _resolve_p6_process_workers(context_count: int) -> int:
+    """Определяет число процессов для независимых demand-слоёв P6."""
     if context_count <= 1:
         return 1
-    raw = os.getenv("TAKT_P6_THREADS")
+    raw = os.getenv("TAKT_P6_PROCESSES")
     if raw:
         try:
             requested = int(raw)
         except ValueError:
-            requested = _P6_DEFAULT_THREAD_WORKERS
+            requested = _P6_DEFAULT_PROCESS_WORKERS
     else:
-        requested = _P6_DEFAULT_THREAD_WORKERS
+        requested = _P6_DEFAULT_PROCESS_WORKERS
     return max(1, min(context_count, requested))
+
+
+def _assign_layer_process(
+    task: tuple[
+        tuple[_AssignContext, float, float],
+        int,
+        Mapping[int, float] | None,
+        Mapping[str, Mapping[tuple[int, int], float]] | None,
+        dict[tuple[int, int, int], float] | None,
+        bool,
+    ],
+) -> tuple[
+    dict[str, Any],
+    dict[str, float],
+    dict[int, list[tuple[int, int, int, float]]],
+    dict[tuple[int, int, int], float],
+]:
+    """Worker одного demand-слоя; изменяемые кэши живут только в его процессе."""
+    item, period_index, wait_extra, crowd_state, ride_edge_cache, profile_timings = task
+    ctx, out_factor, ret_factor = item
+    local_perf: dict[str, float] | None = {} if profile_timings else None
+    local_access = dict(ctx.access_cache)
+    local_ride = (
+        dict(ride_edge_cache)
+        if ride_edge_cache is not None
+        else dict(ctx.ride_edge_cache)
+    )
+    result = ctx.assign(
+        out_factor=out_factor,
+        ret_factor=ret_factor,
+        wait_extra=wait_extra,
+        period_index=period_index,
+        crowd_state=crowd_state,
+        ride_edge_cache=local_ride,
+        access_cache=local_access,
+        perf_stats=local_perf,
+        journey_cache={},
+    )
+    return result, local_perf or {}, local_access, local_ride
 
 
 def _assign_layer_contexts(
@@ -1124,7 +1164,7 @@ def _assign_layer_contexts(
     perf_stats: dict[str, float] | None = None,
     journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
 ) -> dict[str, Any]:
-    """Выполняет независимые demand-слои последовательно или в пуле потоков."""
+    """Выполняет независимые demand-слои последовательно или отдельными процессами."""
     if len(contexts) <= 1:
         return _merge_period_aggregates([
             ctx.assign(
@@ -1140,7 +1180,7 @@ def _assign_layer_contexts(
             for ctx, out_factor, ret_factor in contexts
         ])
 
-    workers = _resolve_p6_thread_workers(len(contexts))
+    workers = _resolve_p6_process_workers(len(contexts))
     if workers <= 1:
         return _merge_period_aggregates([
             ctx.assign(
@@ -1156,31 +1196,20 @@ def _assign_layer_contexts(
             for ctx, out_factor, ret_factor in contexts
         ])
 
-    def _run_layer(
-        item: tuple[_AssignContext, float, float],
-    ) -> tuple[dict[str, Any], dict[str, float], dict[int, list[tuple[int, int, int, float]]], dict[tuple[int, int, int], float]]:
-        ctx, out_factor, ret_factor = item
-        local_perf: dict[str, float] | None = {} if perf_stats is not None else None
-        local_access = dict(ctx.access_cache)
-        local_ride = dict(ride_edge_cache) if ride_edge_cache is not None else dict(ctx.ride_edge_cache)
-        result = ctx.assign(
-            out_factor=out_factor,
-            ret_factor=ret_factor,
-            wait_extra=wait_extra,
-            period_index=period_index,
-            crowd_state=crowd_state,
-            ride_edge_cache=local_ride,
-            access_cache=local_access,
-            perf_stats=local_perf,
-            # Общий journey-cache защищён последовательным путём; в потоках
-            # локальные кэши устраняют гонки на записи.
-            journey_cache={},
+    tasks = [
+        (
+            item,
+            period_index,
+            wait_extra,
+            crowd_state,
+            ride_edge_cache,
+            perf_stats is not None,
         )
-        return result, local_perf or {}, local_access, local_ride
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_run_layer, item) for item in contexts]
-        completed = [future.result() for future in futures]
+        for item in contexts
+    ]
+    mp_context = mp.get_context(os.getenv("TAKT_P6_MP_START", "spawn"))
+    with ProcessPoolExecutor(max_workers=workers, mp_context=mp_context) as pool:
+        completed = list(pool.map(_assign_layer_process, tasks))
 
     results = [item[0] for item in completed]
     if perf_stats is not None:
@@ -1188,7 +1217,6 @@ def _assign_layer_contexts(
             for key, value in local.items():
                 perf_stats[key] = perf_stats.get(key, 0.0) + float(value)
 
-    # Обновляем общие кэши только после завершения потоков.
     if ride_edge_cache is not None:
         for item in completed:
             ride_edge_cache.update(item[3])
