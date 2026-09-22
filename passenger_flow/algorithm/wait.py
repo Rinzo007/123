@@ -221,28 +221,68 @@ def _takt_msa_gap(
     )
     return numerator / denominator
 
-def _msa_smooth_update(
-    smoothed: dict[Any, float],
-    raw: Mapping[Any, float],
+class _MsaLoadVector:
+    """Плотное MSA-хранилище для фиксированного набора (sequence, index)."""
+
+    __slots__ = ("keys", "index", "values", "_scratch")
+
+    def __init__(self, keys: tuple[tuple[int, int], ...]) -> None:
+        self.keys = keys
+        self.index = {key: i for i, key in enumerate(keys)}
+        self.values = np.zeros(len(keys), dtype=np.float64)
+        self._scratch = np.zeros(len(keys), dtype=np.float64)
+
+    def get(self, key: tuple[int, int], default: float = 0.0) -> float:
+        pos = self.index.get(key)
+        return float(self.values[pos]) if pos is not None else default
+
+    def items(self):
+        for key, value in zip(self.keys, self.values):
+            yield key, float(value)
+
+    def as_dict(self) -> dict[tuple[int, int], float]:
+        return {
+            key: float(value)
+            for key, value in zip(self.keys, self.values)
+            if float(value) != 0.0
+        }
+
+
+def _build_msa_load_vector(
+    route_sequences: list[dict[str, Any]],
+    *,
+    stops: bool,
+) -> _MsaLoadVector:
+    keys: list[tuple[int, int]] = []
+    for seq_idx, seq in enumerate(route_sequences):
+        count = len(seq.get("stops") or []) if stops else (
+            len(seq.get("stops") or [])
+            if seq.get("closed")
+            else max(0, len(seq.get("stops") or []) - 1)
+        )
+        keys.extend((seq_idx, i) for i in range(count))
+    return _MsaLoadVector(tuple(keys))
+
+
+def _msa_smooth_vector(
+    smoothed: _MsaLoadVector,
+    raw: Mapping[tuple[int, int], float],
     alpha: float,
 ) -> tuple[float, float]:
-    """Обновляет MSA-нагрузку и сразу возвращает |Δ| и новую сумму."""
-    numerator = 0.0
-    total = 0.0
-    for key in tuple(smoothed):
-        previous = float(smoothed[key])
-        current = (1.0 - alpha) * previous + alpha * float(raw.get(key, 0.0))
-        smoothed[key] = current
-        numerator += abs(current - previous)
-        total += current
+    """MSA-сглаживание в numpy без построения union/set."""
+    scratch = smoothed._scratch
+    scratch.fill(0.0)
     for key, value in raw.items():
-        if key in smoothed:
-            continue
-        current = alpha * float(value)
-        smoothed[key] = current
-        numerator += abs(current)
-        total += current
+        pos = smoothed.index.get(key)
+        if pos is not None:
+            scratch[pos] = float(value)
+    previous = smoothed.values.copy()
+    smoothed.values *= 1.0 - alpha
+    smoothed.values += alpha * scratch
+    numerator = float(np.abs(smoothed.values - previous).sum())
+    total = float(smoothed.values.sum())
     return numerator, total
+
 
 
 def _run_msa_period(
@@ -290,9 +330,9 @@ def _run_msa_period(
     ``1 / iteration``. Остановка при относительном разрыве нагрузок
     маршрутов не больше ``gap_tol`` (по мотивам MSA-цикла Takt, gap <= 1%).
     """
-    smoothed_seg_forward: dict[tuple[int, int], float] = {}
-    smoothed_seg_reverse: dict[tuple[int, int], float] = {}
-    smoothed_stop: dict[tuple[int, int], float] = {}
+    smoothed_seg_forward = _build_msa_load_vector(route_sequences, stops=False)
+    smoothed_seg_reverse = _build_msa_load_vector(route_sequences, stops=False)
+    smoothed_stop = _build_msa_load_vector(route_sequences, stops=True)
     wait_extra = dict(reliability_extra) if reliability_extra else None
     crowd_state = None
     agg: dict[str, Any] = {}
@@ -334,23 +374,16 @@ def _run_msa_period(
             ride_edge_cache=ride_edge_cache,
         )
         alpha = 1.0 / iteration
-        raw_seg_forward = agg.get("seg_forward_totals", {})
-        raw_seg_reverse = agg.get("seg_reverse_totals", {})
-        raw_stop = agg.get("seq_stop_totals", {})
         gap_num = 0.0
         gap_total = 0.0
-        num, total = _msa_smooth_update(smoothed_seg_forward, raw_seg_forward, alpha)
-        gap_num += num
-        gap_total += total
-        num, total = _msa_smooth_update(smoothed_seg_reverse, raw_seg_reverse, alpha)
-        gap_num += num
-        gap_total += total
-        num, total = _msa_smooth_update(smoothed_stop, raw_stop, alpha)
-        gap_num += num
-        gap_total += total
-        agg["seg_forward_totals"] = smoothed_seg_forward
-        agg["seg_reverse_totals"] = smoothed_seg_reverse
-        agg["seq_stop_totals"] = smoothed_stop
+        for target, source in (
+            (smoothed_seg_forward, agg.get("seg_forward_totals", {})),
+            (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
+            (smoothed_stop, agg.get("seq_stop_totals", {})),
+        ):
+            num, total = _msa_smooth_vector(target, source, alpha)
+            gap_num += num
+            gap_total += total
         crowd_state = _build_crowd_state(
             route_sequences,
             smoothed_seg_forward,
@@ -366,4 +399,7 @@ def _run_msa_period(
         if iteration > 1 and final_gap <= gap_tol:
             break
         wait_extra = dict(reliability_extra) if reliability_extra else None
+    agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
+    agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
+    agg["seq_stop_totals"] = smoothed_stop.as_dict()
     return agg, iteration, final_gap
