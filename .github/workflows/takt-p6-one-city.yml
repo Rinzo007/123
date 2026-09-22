@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}
-      TAKT_P6_PROCESSES: "4"
+      TAKT_P6_PROCESSES: "6"
     steps:
       - uses: actions/checkout@v4
 
