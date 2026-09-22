@@ -43,7 +43,8 @@ from .algorithm.wait import (
     _reliability_min,
     _run_msa_period,
     _takt_msa_gap,
-    _msa_smooth_update,
+    _build_msa_load_vector,
+    _msa_smooth_vector,
 )
 from .algorithm.mode_choice import (
     _takt_car_period_multiplier,
@@ -1116,9 +1117,9 @@ def _run_msa_period_layers(
     period_index: int,
     period_hours: float,
 ) -> tuple[dict[str, Any], int, float]:
-    smoothed_seg_forward: dict[tuple[int, int], float] = {}
-    smoothed_seg_reverse: dict[tuple[int, int], float] = {}
-    smoothed_stop: dict[tuple[int, int], float] = {}
+    smoothed_seg_forward = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
+    smoothed_seg_reverse = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
+    smoothed_stop = _build_msa_load_vector(contexts[0][0].route_sequences, stops=True)
     wait_extra = dict(reliability_extra) if reliability_extra else None
     crowd_state = None
     agg: dict[str, Any] = _empty_accumulator()
@@ -1140,12 +1141,10 @@ def _run_msa_period_layers(
             (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
             (smoothed_stop, agg.get("seq_stop_totals", {})),
         ):
-            num, total = _msa_smooth_update(target, source, alpha)
+            num, total = _msa_smooth_vector(target, source, alpha)
             gap_num += num
             gap_total += total
-        agg["seg_forward_totals"]=smoothed_seg_forward
-        agg["seg_reverse_totals"]=smoothed_seg_reverse
-        agg["seq_stop_totals"]=smoothed_stop
+
         crowd_state=_build_crowd_state(
             contexts[0][0].route_sequences, smoothed_seg_forward, smoothed_seg_reverse,
             smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
@@ -1155,6 +1154,9 @@ def _run_msa_period_layers(
         prev_smoothed=dict(smoothed)
         if iteration>1 and final_gap<=gap_tol:
             break
+    agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
+    agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
+    agg["seq_stop_totals"] = smoothed_stop.as_dict()
     return agg, iteration, final_gap
 
 
