@@ -946,6 +946,41 @@ class _AssignContext:
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
     access_cache: dict[int, list[tuple[int, int, int, float]]]
     ride_edge_cache: dict[tuple[int, int, int], float]
+    pair_base_time_cache: dict[int, np.ndarray | None]
+    pair_car_base_time_cache: dict[int, np.ndarray | None]
+
+
+    def _pair_base_time_vector(self, period_index: int) -> np.ndarray | None:
+        if period_index in self.pair_base_time_cache:
+            return self.pair_base_time_cache[period_index]
+        base = self.base_time_s
+        if base is None:
+            self.pair_base_time_cache[period_index] = None
+            return None
+        rows, cols = self.od_rows, self.od_cols
+        if base.ndim == 3:
+            values = np.asarray(base[period_index, rows, cols], dtype=np.float64)
+        elif base.ndim == 2 and base.shape[0] >= len(self.seq_headway_periods) and base.shape[0] != base.shape[1]:
+            values = np.asarray(base[period_index, :len(rows)], dtype=np.float64)
+        else:
+            values = np.asarray(base[rows, cols], dtype=np.float64)
+        self.pair_base_time_cache[period_index] = values
+        return values
+
+    def _pair_car_base_time_vector(self) -> np.ndarray | None:
+        key = 0
+        if key in self.pair_car_base_time_cache:
+            return self.pair_car_base_time_cache[key]
+        base = self.car_base_time_s
+        if base is None:
+            self.pair_car_base_time_cache[key] = None
+            return None
+        if base.ndim == 1:
+            values = np.asarray(base, dtype=np.float64)
+        else:
+            values = np.asarray(base[self.od_rows, self.od_cols], dtype=np.float64)
+        self.pair_car_base_time_cache[key] = values
+        return values
 
 
     def for_layer(self, layer: _DemandLayer) -> "_AssignContext":
@@ -980,6 +1015,8 @@ class _AssignContext:
             transfer_index=self.transfer_index,
             access_cache=self.access_cache,
             ride_edge_cache=self.ride_edge_cache,
+            pair_base_time_cache={},
+            pair_car_base_time_cache={},
         )
 
     def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
@@ -1024,11 +1061,16 @@ class _AssignContext:
         access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
         perf_stats: dict[str, float] | None = None,
         journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
+        pair_slice: tuple[int, int] | None = None,
+        journey_cache_token: Any = None,
     ) -> dict[str, Any]:
+        start, end = pair_slice or (0, len(self.od_rows))
+        pair_base_time_s = self._pair_base_time_vector(period_index)
+        pair_car_base_time_s = self._pair_car_base_time_vector()
         return _assign_od(
-            self.od_rows,
-            self.od_cols,
-            self.od_vals,
+            self.od_rows[start:end],
+            self.od_cols[start:end],
+            self.od_vals[start:end],
             self.zone_nearest,
             self.route_sequences,
             out_factor=out_factor,
@@ -1046,6 +1088,10 @@ class _AssignContext:
             access_cache=self.access_cache if access_cache is None else access_cache,
             perf_stats=perf_stats,
             journey_cache=journey_cache,
+            pair_base_time_s=None if pair_base_time_s is None else pair_base_time_s[start:end],
+            pair_car_base_time_s=None if pair_car_base_time_s is None else pair_car_base_time_s[start:end],
+            od_distances_m=None if self.od_distances_m is None else self.od_distances_m[start:end],
+            journey_cache_token=journey_cache_token,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
