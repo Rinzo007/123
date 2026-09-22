@@ -1144,7 +1144,7 @@ def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-_P6_DEFAULT_PROCESS_WORKERS = max(1, min(6, os.cpu_count() or 1))
+_P6_DEFAULT_PROCESS_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
 def _resolve_p6_process_workers(context_count: int) -> int:
