@@ -19,6 +19,7 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       TAKT_P6_PROCESSES: "6"
+      TAKT_P6_MP_START: "fork"
     steps:
       - uses: actions/checkout@v4
 
