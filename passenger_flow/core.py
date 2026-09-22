@@ -839,6 +839,7 @@ def _merge_pass_aggregates(
             if accum[name] is None:
                 accum[name] = np.zeros_like(array, dtype=np.float64)
             accum[name] += np.asarray(array, dtype=np.float64)
+    accum["period_total"] += pass_agg.get("period_total", 0.0)
     accum["assigned_trips"] += pass_agg["assigned_trips"]
     accum["car_trips"] += pass_agg["car_trips"]
     accum["walk_trips"] += pass_agg["walk_trips"]
@@ -856,6 +857,7 @@ def _empty_accumulator() -> dict[str, Any]:
         "two_wheel_trips": 0.0,
         "rest_trips": 0.0,
         "fare_revenue": 0.0,
+        "period_total": 0.0,
         "route_totals": defaultdict(float),
         "dir_totals": defaultdict(float),
         "stop_totals": defaultdict(_empty_stop_entry),
