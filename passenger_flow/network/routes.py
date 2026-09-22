@@ -427,13 +427,30 @@ def _cached_ride_edge_time_min(
         cache[key] = float(ride)
     if not crowd_state or orig_pos == dest_pos:
         return float(ride)
-    return _ride_edge_time_min(
-        seq,
-        orig_pos,
-        dest_pos,
-        stop_time_min=stop_time_min,
-        crowd_state=crowd_state,
+    return max(
+        0.0,
+        float(ride) + _crowd_extra_s(seq, orig_pos, dest_pos, crowd_state) / 60.0,
     )
+
+
+def _crowd_extra_s(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+) -> float:
+    """Динамическая надбавка за загрузку без повторного расчёта базового C."""
+    if not crowd_state or orig_pos == dest_pos:
+        return 0.0
+    seg_forward = crowd_state.get("seg_forward", {})
+    seg_reverse = crowd_state.get("seg_reverse", {})
+    extra_s = 0.0
+    for seg_i, is_forward in _route_segment_indices(seq, orig_pos, dest_pos):
+        loads = seg_forward if is_forward else seg_reverse
+        load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
+        if load > 0.0:
+            extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
+    return extra_s
 
 
 def _ride_edge_time_min(
@@ -451,18 +468,7 @@ def _ride_edge_time_min(
         dest_pos,
         stop_time_min=stop_time_min,
     )
-    if not crowd_state or orig_pos == dest_pos:
-        return ride
-    seg_forward = crowd_state.get("seg_forward", {})
-    seg_reverse = crowd_state.get("seg_reverse", {})
-    extra_s = 0.0
-    selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
-    for seg_i, is_forward in selected_segments:
-        loads = seg_forward if is_forward else seg_reverse
-        load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
-        if load > 0.0:
-            extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
-    return max(0.0, ride + extra_s / 60.0)
+    return max(0.0, ride + _crowd_extra_s(seq, orig_pos, dest_pos, crowd_state) / 60.0)
 
 def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
     """Ожидание на посадке: Takt Po при известном такте."""
