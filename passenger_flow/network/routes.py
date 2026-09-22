@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import heapq
 from time import perf_counter
+
+import numpy as np
 import math
 from bisect import bisect_left
 from collections.abc import Iterator, Mapping
@@ -1303,12 +1305,12 @@ def _enumerate_journeys(
     # После отказа от полного same-line графа всегда выполняется pos == leg_start;
     # повторное использование линии разрешено.
     heap: list[tuple[float, int, int, int, tuple[tuple[int, int, int], ...]]] = []
-    best: dict[int, float] = {}
-    best_key_stride = max(
-        (len(seq.get("stops") or []) for seq in route_stop_sequences),
-        default=0,
-    ) + 1
-    best_transfer_stride = max_legs
+    state_offsets: list[int] = []
+    total_states = 0
+    for seq in route_stop_sequences:
+        state_offsets.append(total_states)
+        total_states += len(seq.get("stops") or []) * max_legs
+    best = np.full(total_states, np.inf, dtype=np.float64)
     first_wait_by_seq: dict[int, float] = {}
     access_by_stop: dict[tuple[int, int], float] = {}
     origin_has_distance = False
@@ -1335,11 +1337,10 @@ def _enumerate_journeys(
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
         key = (
-            (int(seq_idx) * best_key_stride + int(orig_pos)) * best_transfer_stride
+            (state_offsets[int(seq_idx)] + int(orig_pos)) * max_legs
         )
         state = (0.0, seq_idx, int(orig_pos), 0, tuple())
-        prior = best.get(key)
-        if prior is None:
+        if best[key] != 0.0:
             best[key] = 0.0
             heapq.heappush(heap, state)
 
@@ -1349,10 +1350,10 @@ def _enumerate_journeys(
     while heap:
         cost, seq_idx, pos, transfers, legs = heapq.heappop(heap)
         key = (
-            (int(seq_idx) * best_key_stride + int(pos)) * best_transfer_stride
+            (state_offsets[int(seq_idx)] + int(pos)) * max_legs
             + int(transfers)
         )
-        if cost > best.get(key, math.inf) + 1e-9:
+        if cost > float(best[key]) + 1e-9:
             continue
         seq = route_stop_sequences[seq_idx]
 
@@ -1475,8 +1476,11 @@ def _enumerate_journeys(
             )
             closed_legs = legs + ((seq_idx, pos, ta_pos),)
             new_cost = cost + ride_to_transfer + penalty + transfer_wait
-            nkey = (seq_b, tb_pos, transfers + 1)
-            if new_cost + 1e-12 < best.get(nkey, math.inf):
+            nkey = (
+                (state_offsets[int(seq_b)] + int(tb_pos)) * max_legs
+                + transfers + 1
+            )
+            if new_cost + 1e-12 < float(best[nkey]):
                 best[nkey] = new_cost
                 heapq.heappush(heap, (
                     new_cost, seq_b, tb_pos, transfers + 1,
