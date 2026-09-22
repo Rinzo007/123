@@ -194,7 +194,7 @@ def _leg_alternatives(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]],
     *,
     stop_time_min: float,
-    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    crowd_state: Mapping[str, Any] | None,
     transfer_radius_m: float,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> tuple[tuple[int, int, int], ...]:
@@ -437,20 +437,52 @@ def _crowd_extra_s(
     seq: dict[str, Any],
     orig_pos: int,
     dest_pos: int,
-    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    crowd_state: Mapping[str, Any] | None,
 ) -> float:
-    """Динамическая надбавка за загрузку без повторного расчёта базового C."""
+    """Динамическая надбавка за загрузку через префиксные суммы."""
     if not crowd_state or orig_pos == dest_pos:
         return 0.0
-    seg_forward = crowd_state.get("seg_forward", {})
-    seg_reverse = crowd_state.get("seg_reverse", {})
-    extra_s = 0.0
-    for seg_i, is_forward in _route_segment_indices(seq, orig_pos, dest_pos):
-        loads = seg_forward if is_forward else seg_reverse
-        load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
-        if load > 0.0:
-            extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
-    return extra_s
+    seq_idx = int(seq.get("_seq_idx", -1))
+    selected = _route_segment_indices(seq, orig_pos, dest_pos)
+    if not selected:
+        return 0.0
+    is_forward = bool(selected[0][1])
+    prefixes = (
+        crowd_state.get("seg_forward_prefix", {})
+        if is_forward
+        else crowd_state.get("seg_reverse_prefix", {})
+    )
+    prefix = prefixes.get(seq_idx)
+    if prefix is None:
+        # Backwards-compatible fallback for externally supplied crowd states.
+        loads = (
+            crowd_state.get("seg_forward", {})
+            if is_forward
+            else crowd_state.get("seg_reverse", {})
+        )
+        return sum(
+            _segment_time_s(seq, seg_i)
+            * (_takt_crowding_ride_mult(float(loads.get((seq_idx, seg_i), 0.0))) - 1.0)
+            for seg_i, _ in selected
+            if float(loads.get((seq_idx, seg_i), 0.0)) > 0.0
+        )
+    n = len(seq["stops"])
+    if not seq.get("closed"):
+        lo, hi = (orig_pos, dest_pos) if is_forward else (dest_pos, orig_pos)
+        return max(0.0, float(prefix[hi]) - float(prefix[lo]))
+    if is_forward:
+        if dest_pos > orig_pos:
+            return max(0.0, float(prefix[dest_pos]) - float(prefix[orig_pos]))
+        return max(
+            0.0,
+            float(prefix[n]) - float(prefix[orig_pos]) + float(prefix[dest_pos]),
+        )
+    if dest_pos < orig_pos:
+        return max(0.0, float(prefix[orig_pos]) - float(prefix[dest_pos]))
+    return max(
+        0.0,
+        float(prefix[orig_pos]) + float(prefix[n]) - float(prefix[dest_pos]),
+    )
 
 
 def _ride_edge_time_min(
