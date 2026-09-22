@@ -22,6 +22,7 @@ from collections import defaultdict
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -1017,6 +1018,7 @@ class _AssignContext:
         period_index: int,
         crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
         ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+        perf_stats: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1037,6 +1039,7 @@ class _AssignContext:
             transfer_index=self.transfer_index,
             ride_edge_cache=ride_edge_cache or self.ride_edge_cache,
             access_cache=self.access_cache,
+            perf_stats=perf_stats,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1051,6 +1054,7 @@ class _AssignContext:
         gap_tol: float,
         period_index: int,
         period_hours: float,
+        perf_stats: dict[str, float] | None = None,
     ) -> tuple[dict[str, Any], int, float]:
         return _run_msa_period(
             self.od_rows,
@@ -1072,6 +1076,7 @@ class _AssignContext:
                 else 1.0
             ),
             ride_edge_cache=self.ride_edge_cache,
+            perf_stats=perf_stats,
             **self._common_kwargs(period_index),
         )
 
@@ -1093,6 +1098,7 @@ def _assign_layer_contexts(
     wait_extra: Mapping[int, float] | None,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+    perf_stats: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     return _merge_period_aggregates([
         ctx.assign(
@@ -1102,6 +1108,7 @@ def _assign_layer_contexts(
             period_index=period_index,
             crowd_state=crowd_state,
             ride_edge_cache=ride_edge_cache,
+            perf_stats=perf_stats,
         )
         for ctx, out_factor, ret_factor in contexts
     ])
@@ -1116,7 +1123,9 @@ def _run_msa_period_layers(
     gap_tol: float,
     period_index: int,
     period_hours: float,
+    perf_stats: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
+    msa_started = perf_counter() if perf_stats is not None else 0.0
     smoothed_seg_forward = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
     smoothed_seg_reverse = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
     smoothed_stop = _build_msa_load_vector(contexts[0][0].route_sequences, stops=True)
@@ -1132,6 +1141,7 @@ def _run_msa_period_layers(
             wait_extra=wait_extra,
             crowd_state=crowd_state,
             ride_edge_cache=ride_edge_cache,
+            perf_stats=perf_stats,
         )
         alpha = 1.0 / iteration
         gap_num = 0.0
@@ -1145,18 +1155,24 @@ def _run_msa_period_layers(
             gap_num += num
             gap_total += total
 
+        crowd_started = perf_counter() if perf_stats is not None else 0.0
         crowd_state=_build_crowd_state(
             contexts[0][0].route_sequences, smoothed_seg_forward, smoothed_seg_reverse,
             smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
             period_hours, period_index=period_index,
         )
+        if perf_stats is not None:
+            perf_stats.setdefault("crowd_state_s", 0.0)
+            perf_stats["crowd_state_s"] += perf_counter() - crowd_started
         final_gap = gap_num / max(gap_total, 1.0)
-        prev_smoothed=dict(smoothed)
         if iteration>1 and final_gap<=gap_tol:
             break
     agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
     agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
     agg["seq_stop_totals"] = smoothed_stop.as_dict()
+    if perf_stats is not None:
+        perf_stats.setdefault("msa_s", 0.0)
+        perf_stats["msa_s"] += perf_counter() - msa_started
     return agg, iteration, final_gap
 
 
@@ -1180,6 +1196,7 @@ def _run_period(
     msa_max_iterations: int | None,
     msa_gap: float,
     line: Any,
+    perf_stats: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Один проход (или MSA-серия) для одного периода.
 
@@ -1200,6 +1217,7 @@ def _run_period(
             gap_tol=msa_gap,
             period_index=period_index,
             period_hours=period_hours,
+            perf_stats=perf_stats,
         )
         pass_agg["_msa_iterations"] = msa_iters
         pass_agg["_msa_gap"] = msa_final_gap
@@ -1210,13 +1228,26 @@ def _run_period(
         return pass_agg
     if len(contexts) > 1:
         if wait_crowding_per_100_min > 0:
-            pass_one = _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra)
+            pass_one = _assign_layer_contexts(
+                contexts, period_index=period_index, wait_extra=reliability_extra,
+                perf_stats=perf_stats,
+            )
+            crowd_started = perf_counter() if perf_stats is not None else 0.0
             crowd_state = _build_crowd_state(
                 ctx.route_sequences, pass_one.get("seg_forward_totals", {}), pass_one.get("seg_reverse_totals", {}),
                 pass_one.get("seq_stop_totals", {}), ctx.seq_headway_min, ctx.vehicle_specs, period_hours, period_index=period_index,
             )
-            return _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra, crowd_state=crowd_state)
-        return _assign_layer_contexts(contexts, period_index=period_index, wait_extra=reliability_extra)
+            if perf_stats is not None:
+                perf_stats.setdefault("crowd_state_s", 0.0)
+                perf_stats["crowd_state_s"] += perf_counter() - crowd_started
+            return _assign_layer_contexts(
+                contexts, period_index=period_index, wait_extra=reliability_extra,
+                crowd_state=crowd_state, perf_stats=perf_stats,
+            )
+        return _assign_layer_contexts(
+            contexts, period_index=period_index, wait_extra=reliability_extra,
+            perf_stats=perf_stats,
+        )
 
     if wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
         pass_agg, msa_iters, msa_final_gap = ctx.msa(
@@ -1228,6 +1259,7 @@ def _run_period(
             gap_tol=msa_gap,
             period_index=period_index,
             period_hours=period_hours,
+            perf_stats=perf_stats,
         )
         line(
             f"  MSA {period.key if period else 'общий'}: "
@@ -1243,7 +1275,9 @@ def _run_period(
             ret_factor=ret_factor,
             wait_extra=reliability_extra,
             period_index=period_index,
+            perf_stats=perf_stats,
         )
+        crowd_started = perf_counter() if perf_stats is not None else 0.0
         crowd_state = _build_crowd_state(
             ctx.route_sequences,
             pass_one.get("seg_forward_totals", {}),
@@ -1253,12 +1287,16 @@ def _run_period(
             ctx.vehicle_specs,
             period_hours,
         )
+        if perf_stats is not None:
+            perf_stats.setdefault("crowd_state_s", 0.0)
+            perf_stats["crowd_state_s"] += perf_counter() - crowd_started
         return ctx.assign(
             out_factor=out_factor,
             ret_factor=ret_factor,
             wait_extra=reliability_extra,
             period_index=period_index,
             crowd_state=crowd_state,
+            perf_stats=perf_stats,
         )
 
     return ctx.assign(
@@ -1266,6 +1304,7 @@ def _run_period(
         ret_factor=ret_factor,
         wait_extra=reliability_extra,
         period_index=period_index,
+        perf_stats=perf_stats,
     )
 
 
