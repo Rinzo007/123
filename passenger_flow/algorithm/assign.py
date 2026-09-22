@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -636,8 +637,16 @@ def _assign_od(
     od_distances_m: np.ndarray | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
+    perf_stats: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
+    assign_started = perf_counter() if perf_stats is not None else 0.0
+    if perf_stats is not None:
+        perf_stats.setdefault("assignment_s", 0.0)
+        perf_stats.setdefault("access_s", 0.0)
+        perf_stats.setdefault("journeys_s", 0.0)
+        perf_stats.setdefault("access_cache_misses", 0.0)
+
     totals = _OdTotals()
     n_zones = len(zones)
     totals.total_by_origin = np.zeros(n_zones, dtype=np.float64)
@@ -674,18 +683,25 @@ def _assign_od(
         car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
         od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
+        access_started = perf_counter() if perf_stats is not None else 0.0
         origin_stops = access_cache.get(zi)
         if origin_stops is None:
             origin_stops = _line_access_stops(
                 zone_nearest.get(zi, []), route_sequences
             )
             access_cache[zi] = origin_stops
+            if perf_stats is not None:
+                perf_stats["access_cache_misses"] += 1.0
         destination_stops = access_cache.get(zj)
         if destination_stops is None:
             destination_stops = _line_access_stops(
                 zone_nearest.get(zj, []), route_sequences
             )
             access_cache[zj] = destination_stops
+            if perf_stats is not None:
+                perf_stats["access_cache_misses"] += 1.0
+        if perf_stats is not None:
+            perf_stats["access_s"] += perf_counter() - access_started
         if period_index == 0 and (origin_stops or destination_stops):
             totals.covered_commuters += raw_trips
         if not origin_stops or not destination_stops:
@@ -728,6 +744,7 @@ def _assign_od(
             od_distance_m=od_meters,
             road_time_s=road_time_s,
             ride_edge_cache=ride_edge_cache,
+            perf_stats=perf_stats,
         )
         if not journeys:
             if period_index == 0:
