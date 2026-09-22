@@ -644,6 +644,9 @@ def _assign_od(
     access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
     perf_stats: dict[str, float] | None = None,
     journey_cache: dict[tuple[Any, ...], list[_Journey]] | None = None,
+    pair_base_time_s: np.ndarray | None = None,
+    pair_car_base_time_s: np.ndarray | None = None,
+    journey_cache_token: Any = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     assign_started = perf_counter() if perf_stats is not None else 0.0
@@ -687,8 +690,16 @@ def _assign_od(
         if trips <= 0:
             continue
         totals.period_total += trips
-        road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
-        car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
+        if pair_base_time_s is not None and idx < len(pair_base_time_s):
+            raw_base_time = float(pair_base_time_s[idx])
+            road_time_s = raw_base_time if np.isfinite(raw_base_time) and raw_base_time > 0.0 else None
+        else:
+            road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
+        if pair_car_base_time_s is not None and idx < len(pair_car_base_time_s):
+            raw_car_time = float(pair_car_base_time_s[idx])
+            car_base_time_pair_s = raw_car_time if np.isfinite(raw_car_time) and raw_car_time >= 0.0 else None
+        else:
+            car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
         od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
         access_started = perf_counter() if perf_stats is not None else 0.0
@@ -732,12 +743,15 @@ def _assign_od(
             )
             continue
 
+        cache_token = (
+            journey_cache_token
+            if journey_cache_token is not None
+            else (period_index, id(crowd_state))
+        )
         journey_key = (
             zi,
             zj,
-            id(crowd_state),
-            id(seq_headway_min),
-            id(seq_jitter_s),
+            cache_token,
             road_time_s,
             od_meters,
         )
