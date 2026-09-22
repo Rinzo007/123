@@ -193,6 +193,30 @@ def _takt_msa_gap(
     )
     return numerator / denominator
 
+def _msa_smooth_update(
+    smoothed: dict[Any, float],
+    raw: Mapping[Any, float],
+    alpha: float,
+) -> tuple[float, float]:
+    """Обновляет MSA-нагрузку и сразу возвращает |Δ| и новую сумму."""
+    numerator = 0.0
+    total = 0.0
+    for key in tuple(smoothed):
+        previous = float(smoothed[key])
+        current = (1.0 - alpha) * previous + alpha * float(raw.get(key, 0.0))
+        smoothed[key] = current
+        numerator += abs(current - previous)
+        total += current
+    for key, value in raw.items():
+        if key in smoothed:
+            continue
+        current = alpha * float(value)
+        smoothed[key] = current
+        numerator += abs(current)
+        total += current
+    return numerator, total
+
+
 def _run_msa_period(
     od_rows: np.ndarray,
     od_cols: np.ndarray,
@@ -238,8 +262,6 @@ def _run_msa_period(
     ``1 / iteration``. Остановка при относительном разрыве нагрузок
     маршрутов не больше ``gap_tol`` (по мотивам MSA-цикла Takt, gap <= 1%).
     """
-    smoothed: dict[int, float] = {}
-    prev_smoothed: dict[int, float] = {}
     smoothed_seg_forward: dict[tuple[int, int], float] = {}
     smoothed_seg_reverse: dict[tuple[int, int], float] = {}
     smoothed_stop: dict[tuple[int, int], float] = {}
@@ -283,35 +305,21 @@ def _run_msa_period(
             od_distances_m=od_distances_m,
             ride_edge_cache=ride_edge_cache,
         )
-        raw = agg["route_totals"]
         alpha = 1.0 / iteration
-        rids = sorted(set(raw) | set(smoothed))
-        for rid in rids:
-            smoothed[rid] = (
-                (1.0 - alpha) * smoothed.get(rid, 0.0)
-                + alpha * raw.get(rid, 0.0)
-            )
         raw_seg_forward = agg.get("seg_forward_totals", {})
         raw_seg_reverse = agg.get("seg_reverse_totals", {})
         raw_stop = agg.get("seq_stop_totals", {})
-        previous_seg_forward = dict(smoothed_seg_forward)
-        previous_seg_reverse = dict(smoothed_seg_reverse)
-        previous_stop = dict(smoothed_stop)
-        for key in set(raw_seg_forward) | set(smoothed_seg_forward):
-            smoothed_seg_forward[key] = (
-                (1.0 - alpha) * smoothed_seg_forward.get(key, 0.0)
-                + alpha * raw_seg_forward.get(key, 0.0)
-            )
-        for key in set(raw_seg_reverse) | set(smoothed_seg_reverse):
-            smoothed_seg_reverse[key] = (
-                (1.0 - alpha) * smoothed_seg_reverse.get(key, 0.0)
-                + alpha * raw_seg_reverse.get(key, 0.0)
-            )
-        for key in set(raw_stop) | set(smoothed_stop):
-            smoothed_stop[key] = (
-                (1.0 - alpha) * smoothed_stop.get(key, 0.0)
-                + alpha * raw_stop.get(key, 0.0)
-            )
+        gap_num = 0.0
+        gap_total = 0.0
+        num, total = _msa_smooth_update(smoothed_seg_forward, raw_seg_forward, alpha)
+        gap_num += num
+        gap_total += total
+        num, total = _msa_smooth_update(smoothed_seg_reverse, raw_seg_reverse, alpha)
+        gap_num += num
+        gap_total += total
+        num, total = _msa_smooth_update(smoothed_stop, raw_stop, alpha)
+        gap_num += num
+        gap_total += total
         agg["seg_forward_totals"] = smoothed_seg_forward
         agg["seg_reverse_totals"] = smoothed_seg_reverse
         agg["seq_stop_totals"] = smoothed_stop
@@ -325,16 +333,7 @@ def _run_msa_period(
             period_hours,
             period_index=period_index,
         )
-        final_gap = _takt_msa_gap(
-            prev_smoothed,
-            smoothed,
-            previous_seg_forward,
-            smoothed_seg_forward,
-            previous_seg_reverse,
-            smoothed_seg_reverse,
-            previous_stop,
-            smoothed_stop,
-        )
+        final_gap = gap_num / max(gap_total, 1.0)
         prev_smoothed = dict(smoothed)
         if iteration > 1 and final_gap <= gap_tol:
             break
