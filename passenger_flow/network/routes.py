@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from bisect import bisect_left
 from collections.abc import Iterator, Mapping
 from typing import Any, NamedTuple
 
@@ -122,14 +123,31 @@ def _route_segment_indices(
     orig_pos: int,
     dest_pos: int,
 ) -> list[tuple[int, bool]]:
-    """Возвращает физические сегменты и направление выбранной ножки."""
+    """Возвращает физические сегменты и направление выбранной ножки.
+
+    Результат кэшируется на sequence: геометрия и порядок остановок не меняются
+    между OD-парами и MSA-итерациями, поэтому повторный разбор маршрута не нужен.
+    """
     n = len(seq["stops"])
     if orig_pos == dest_pos or n < 2:
         return []
+    cache = seq.get("_segment_index_cache")
+    if cache is None:
+        cache = {}
+        seq["_segment_index_cache"] = cache
+    key = (int(orig_pos), int(dest_pos))
+    cached = cache.get(key)
+    if cached is not None:
+        return list(cached)
+    cache_enabled = len(cache) < 4096
     if not seq.get("closed"):
         if orig_pos < dest_pos:
-            return [(i, True) for i in range(orig_pos, dest_pos)]
-        return [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+        result = [(i, True) for i in range(orig_pos, dest_pos)]
+    else:
+        result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+    if cache_enabled:
+        cache[key] = tuple(result)
+    return result
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
     forward_s = ((float(cum[dest_pos]) - float(cum[orig_pos])) % cycle)
@@ -142,12 +160,14 @@ def _route_segment_indices(
         while i != dest_pos:
             result.append((i, True))
             i = (i + 1) % n
-        return result
-    result = []
-    i = orig_pos
-    while i != dest_pos:
-        result.append(((i - 1) % n, False))
-        i = (i - 1 + n) % n
+    else:
+        result = []
+        i = orig_pos
+        while i != dest_pos:
+            result.append(((i - 1) % n, False))
+            i = (i - 1 + n) % n
+    if cache_enabled:
+        cache[key] = tuple(result)
     return result
 
 def _nearest_stop_on_sequence(
@@ -1051,6 +1071,15 @@ def _transfer_targets(
                 yield seq_b, ta, best_tb
 
 
+class _TransferEdgeIndex(dict):
+    """Словарь transfer-рёбер плюс индекс позиций источников пересадки."""
+    __slots__ = ("source_positions",)
+
+    def __init__(self, *args: Any, source_positions: Mapping[int, tuple[int, ...]] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.source_positions = dict(source_positions or {})
+
+
 def _build_transfer_edge_index(
     route_stop_sequences: list[dict[str, Any]],
     transfer_radius_m: float,
@@ -1068,6 +1097,7 @@ def _build_transfer_edge_index(
     points = [(lat * lat_scale, lon * lon_scale) for lat, lon, _seq, _stop in entries]
     tree = cKDTree(points)
     result: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    source_positions: dict[int, list[int]] = {i: [] for i in range(len(route_stop_sequences))}
     query_r = float(transfer_radius_m)
     for seq_a, seq in enumerate(route_stop_sequences):
         for ta in seq.get("stops", []):
@@ -1094,7 +1124,12 @@ def _build_transfer_edge_index(
             result[(seq_a, pos)] = tuple(
                 (seq_b, ta, tb) for seq_b, (_distance, tb) in sorted(best_by_line.items())
             )
-    return result
+            if best_by_line:
+                source_positions[seq_a].append(pos)
+    return _TransferEdgeIndex(
+        result,
+        source_positions={seq_i: tuple(sorted(pos_list)) for seq_i, pos_list in source_positions.items()},
+    )
 
 def _dedupe_journeys(
     journeys: list[_Journey],
