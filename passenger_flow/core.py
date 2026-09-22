@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 else:
     RouteLike = Any
     Zones = Any
-from .algorithm.assign import _assign_od, _od_distance_meters
+from .algorithm.assign import _assign_od, _line_access_stops, _od_distance_meters
 from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
@@ -1304,6 +1304,11 @@ def _assign_layer_contexts(
 
     def run_parallel(pool: ProcessPoolExecutor, target_workers: int) -> dict[str, Any]:
         tasks: list[tuple[Any, ...]] = []
+        effective_cache_token = (
+            journey_cache_token
+            if journey_cache_token is not None
+            else ("assign", period_index, id(crowd_state))
+        )
         for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
             n_rows = len(ctx.od_rows)
             parts = min(target_workers, max(1, (n_rows + 3999) // 4000))
@@ -1322,7 +1327,7 @@ def _assign_layer_contexts(
                     wait_extra,
                     crowd_state,
                     perf_stats is not None,
-                    journey_cache_token,
+                    effective_cache_token,
                 ))
         completed = list(pool.map(_assign_layer_process, tasks))
         results = [item[0] for item in completed]
@@ -1866,6 +1871,10 @@ def run_passenger_flow(
         pair_base_time_cache={},
         pair_car_base_time_cache={},
     )
+    # Access filtering is static for the whole prepared network; populate it
+    # before forking so workers inherit the read-mostly cache via copy-on-write.
+    for zi, candidates in zone_nearest.items():
+        ctx.access_cache[int(zi)] = _line_access_stops(candidates, route_sequences)
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
     period_seq_stop_totals: list[tuple[Mapping[tuple[int, int], float], float]] = []
