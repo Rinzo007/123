@@ -1345,6 +1345,7 @@ def run_passenger_flow(
     msa_gap: float = _DEFAULT_MSA_GAP,
     prepared: PreparedPassengerFlow | None = None,
     demand_layers: Sequence[Mapping[str, Any]] | None = None,
+    profile_timings: bool = False,
 ) -> FlowResult:
     """Выполняет расчёт пассажиропотока на маршрутах и остановках.
 
@@ -1430,6 +1431,7 @@ def run_passenger_flow(
         Пассажиропоток по маршрутам и остановкам.
     """
     line = reporter.line if reporter is not None else lambda *_a: None
+    perf_stats: dict[str, float] | None = {} if profile_timings else None
     line("\n[Flow] Расчёт пассажиропотока...")
 
     n_zones = len(zones)
@@ -1650,6 +1652,7 @@ def run_passenger_flow(
             msa_max_iterations=msa_max_iterations,
             msa_gap=msa_gap,
             line=line,
+            perf_stats=perf_stats,
         )
         _merge_pass_aggregates(accum, pass_agg)
         accum["msa_iterations"] = max(int(accum.get("msa_iterations", 0)), int(pass_agg.get("_msa_iterations", 0)))
@@ -1781,6 +1784,7 @@ def run_passenger_flow(
             "iterations": int(accum.get("msa_iterations", 0)),
             "gap": round(float(accum.get("msa_gap", 0.0)), 4),
         },
+        **({"performance": perf_stats} if perf_stats is not None else {}),
     }
     result = assemble_flow_result(
         route_totals=accum["route_totals"],
