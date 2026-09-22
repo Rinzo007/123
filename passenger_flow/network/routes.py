@@ -149,6 +149,7 @@ def _route_segment_indices(
             result_tuple = tuple(result)
             cache[key] = result_tuple
             return result_tuple
+        return tuple(result)
 
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
