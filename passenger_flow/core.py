@@ -1019,6 +1019,7 @@ class _AssignContext:
         crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
         ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
         perf_stats: dict[str, float] | None = None,
+        journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1040,6 +1041,7 @@ class _AssignContext:
             ride_edge_cache=ride_edge_cache or self.ride_edge_cache,
             access_cache=self.access_cache,
             perf_stats=perf_stats,
+            journey_cache=journey_cache,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1099,9 +1101,9 @@ def _assign_layer_contexts(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     perf_stats: dict[str, float] | None = None,
+    journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
 ) -> dict[str, Any]:
-    return _merge_period_aggregates([
-        ctx.assign(
+    return _merge_period_aggregates([        ctx.assign(
             out_factor=out_factor,
             ret_factor=ret_factor,
             wait_extra=wait_extra,
@@ -1109,6 +1111,7 @@ def _assign_layer_contexts(
             crowd_state=crowd_state,
             ride_edge_cache=ride_edge_cache,
             perf_stats=perf_stats,
+            journey_cache=journey_cache,
         )
         for ctx, out_factor, ret_factor in contexts
     ])
@@ -1135,6 +1138,7 @@ def _run_msa_period_layers(
     final_gap = gap_tol
     ride_edge_cache = contexts[0][0].ride_edge_cache
     for iteration in range(1, max_iterations + 1):
+        journey_cache = {} if len(contexts) > 1 else None
         agg = _assign_layer_contexts(
             contexts,
             period_index=period_index,
@@ -1142,6 +1146,7 @@ def _run_msa_period_layers(
             crowd_state=crowd_state,
             ride_edge_cache=ride_edge_cache,
             perf_stats=perf_stats,
+            journey_cache=journey_cache,
         )
         alpha = 1.0 / iteration
         gap_num = 0.0
@@ -1207,6 +1212,7 @@ def _run_period(
     out_factor = period.out if period is not None else 1.0
     ret_factor = period.ret if period is not None else 1.0
     contexts = list(layer_contexts or ((ctx, out_factor, ret_factor),))
+    journey_cache = {} if len(contexts) > 1 else None
 
     if len(contexts) > 1 and wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
         pass_agg, msa_iters, msa_final_gap = _run_msa_period_layers(
@@ -1231,6 +1237,7 @@ def _run_period(
             pass_one = _assign_layer_contexts(
                 contexts, period_index=period_index, wait_extra=reliability_extra,
                 perf_stats=perf_stats,
+                journey_cache=journey_cache,
             )
             crowd_started = perf_counter() if perf_stats is not None else 0.0
             crowd_state = _build_crowd_state(
@@ -1243,10 +1250,11 @@ def _run_period(
             return _assign_layer_contexts(
                 contexts, period_index=period_index, wait_extra=reliability_extra,
                 crowd_state=crowd_state, perf_stats=perf_stats,
+                journey_cache=journey_cache,
             )
         return _assign_layer_contexts(
             contexts, period_index=period_index, wait_extra=reliability_extra,
-            perf_stats=perf_stats,
+            perf_stats=perf_stats, journey_cache=journey_cache,
         )
 
     if wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
@@ -1276,6 +1284,7 @@ def _run_period(
             wait_extra=reliability_extra,
             period_index=period_index,
             perf_stats=perf_stats,
+            journey_cache=journey_cache,
         )
         crowd_started = perf_counter() if perf_stats is not None else 0.0
         crowd_state = _build_crowd_state(
@@ -1297,6 +1306,7 @@ def _run_period(
             period_index=period_index,
             crowd_state=crowd_state,
             perf_stats=perf_stats,
+            journey_cache=journey_cache,
         )
 
     return ctx.assign(
@@ -1305,6 +1315,7 @@ def _run_period(
         wait_extra=reliability_extra,
         period_index=period_index,
         perf_stats=perf_stats,
+        journey_cache=journey_cache,
     )
 
 
