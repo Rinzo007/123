@@ -43,6 +43,7 @@ from .algorithm.wait import (
     _reliability_min,
     _run_msa_period,
     _takt_msa_gap,
+    _msa_smooth_update,
 )
 from .algorithm.mode_choice import (
     _takt_car_period_multiplier,
@@ -939,6 +940,7 @@ class _AssignContext:
     car_period_multipliers: tuple[float, ...]
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
     access_cache: dict[int, list[tuple[int, int, int, float]]]
+    ride_edge_cache: dict[tuple[int, int, int], float]
 
 
     def for_layer(self, layer: _DemandLayer) -> "_AssignContext":
@@ -972,6 +974,7 @@ class _AssignContext:
             car_period_multipliers=self.car_period_multipliers,
             transfer_index=self.transfer_index,
             access_cache=self.access_cache,
+            ride_edge_cache=self.ride_edge_cache,
         )
 
     def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
@@ -1031,7 +1034,7 @@ class _AssignContext:
                 else 1.0
             ),
             transfer_index=self.transfer_index,
-            ride_edge_cache=ride_edge_cache,
+            ride_edge_cache=ride_edge_cache or self.ride_edge_cache,
             access_cache=self.access_cache,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
@@ -1067,6 +1070,7 @@ class _AssignContext:
                 if period_index < len(self.car_period_multipliers)
                 else 1.0
             ),
+            ride_edge_cache=self.ride_edge_cache,
             **self._common_kwargs(period_index),
         )
 
@@ -1112,8 +1116,6 @@ def _run_msa_period_layers(
     period_index: int,
     period_hours: float,
 ) -> tuple[dict[str, Any], int, float]:
-    smoothed: dict[int, float] = {}
-    prev_smoothed: dict[int, float] = {}
     smoothed_seg_forward: dict[tuple[int, int], float] = {}
     smoothed_seg_reverse: dict[tuple[int, int], float] = {}
     smoothed_stop: dict[tuple[int, int], float] = {}
@@ -1121,7 +1123,7 @@ def _run_msa_period_layers(
     crowd_state = None
     agg: dict[str, Any] = _empty_accumulator()
     final_gap = gap_tol
-    ride_edge_cache: dict[tuple[int, int, int], float] = {}
+    ride_edge_cache = contexts[0][0].ride_edge_cache
     for iteration in range(1, max_iterations + 1):
         agg = _assign_layer_contexts(
             contexts,
@@ -1130,20 +1132,17 @@ def _run_msa_period_layers(
             crowd_state=crowd_state,
             ride_edge_cache=ride_edge_cache,
         )
-        raw = agg["route_totals"]
         alpha = 1.0 / iteration
-        rids = sorted(set(raw) | set(smoothed))
-        for rid in rids:
-            smoothed[rid] = (1.0-alpha)*smoothed.get(rid,0.0) + alpha*raw.get(rid,0.0)
-        previous_seg_forward = dict(smoothed_seg_forward)
-        previous_seg_reverse = dict(smoothed_seg_reverse)
-        previous_stop = dict(smoothed_stop)
-        for key in set(agg.get("seg_forward_totals", {})) | set(smoothed_seg_forward):
-            smoothed_seg_forward[key]=(1-alpha)*smoothed_seg_forward.get(key,0.0)+alpha*agg.get("seg_forward_totals",{}).get(key,0.0)
-        for key in set(agg.get("seg_reverse_totals", {})) | set(smoothed_seg_reverse):
-            smoothed_seg_reverse[key]=(1-alpha)*smoothed_seg_reverse.get(key,0.0)+alpha*agg.get("seg_reverse_totals",{}).get(key,0.0)
-        for key in set(agg.get("seq_stop_totals", {})) | set(smoothed_stop):
-            smoothed_stop[key]=(1-alpha)*smoothed_stop.get(key,0.0)+alpha*agg.get("seq_stop_totals",{}).get(key,0.0)
+        gap_num = 0.0
+        gap_total = 0.0
+        for target, source in (
+            (smoothed_seg_forward, agg.get("seg_forward_totals", {})),
+            (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
+            (smoothed_stop, agg.get("seq_stop_totals", {})),
+        ):
+            num, total = _msa_smooth_update(target, source, alpha)
+            gap_num += num
+            gap_total += total
         agg["seg_forward_totals"]=smoothed_seg_forward
         agg["seg_reverse_totals"]=smoothed_seg_reverse
         agg["seq_stop_totals"]=smoothed_stop
@@ -1152,7 +1151,7 @@ def _run_msa_period_layers(
             smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
             period_hours, period_index=period_index,
         )
-        final_gap=_takt_msa_gap(prev_smoothed, smoothed, previous_seg_forward, smoothed_seg_forward, previous_seg_reverse, smoothed_seg_reverse, previous_stop, smoothed_stop)
+        final_gap = gap_num / max(gap_total, 1.0)
         prev_smoothed=dict(smoothed)
         if iteration>1 and final_gap<=gap_tol:
             break
@@ -1579,6 +1578,7 @@ def run_passenger_flow(
             else _build_transfer_edge_index(route_sequences, transfer_radius_m)
         ),
         access_cache={},
+        ride_edge_cache={},
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
