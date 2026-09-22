@@ -1024,6 +1024,8 @@ class _AssignContext:
         access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
         perf_stats: dict[str, float] | None = None,
         journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
+        pair_slice: tuple[int, int] | None = None,
+        journey_cache_token: Any = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1046,6 +1048,8 @@ class _AssignContext:
             access_cache=self.access_cache if access_cache is None else access_cache,
             perf_stats=perf_stats,
             journey_cache=journey_cache,
+            pair_slice=pair_slice,
+            journey_cache_token=journey_cache_token,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
