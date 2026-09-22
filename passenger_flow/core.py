@@ -1174,6 +1174,12 @@ def _assign_layer_process(
     if _P6_WORKER_CONTEXTS is None:
         raise RuntimeError("P6 worker context is not initialized")
     cache_key = (context_index, journey_cache_token)
+    stale_keys = [
+        key for key in _P6_WORKER_JOURNEY_CACHE
+        if key[0] == context_index and key != cache_key
+    ]
+    for key in stale_keys:
+        del _P6_WORKER_JOURNEY_CACHE[key]
     worker_cache = _P6_WORKER_JOURNEY_CACHE.get(cache_key)
     if worker_cache is None:
         worker_cache = {}
