@@ -938,6 +938,8 @@ class _AssignContext:
     vehicle_specs: Mapping[str, VehicleSpec] | None
     car_period_multipliers: tuple[float, ...]
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
+    access_cache: dict[int, list[tuple[int, int, int, float]]]
+
 
     def for_layer(self, layer: _DemandLayer) -> "_AssignContext":
         """Создаёт контекст с тем же графом, но с OD конкретного слоя."""
@@ -969,6 +971,7 @@ class _AssignContext:
             vehicle_specs=self.vehicle_specs,
             car_period_multipliers=self.car_period_multipliers,
             transfer_index=self.transfer_index,
+            access_cache=self.access_cache,
         )
 
     def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
@@ -1029,6 +1032,7 @@ class _AssignContext:
             ),
             transfer_index=self.transfer_index,
             ride_edge_cache=ride_edge_cache,
+            access_cache=self.access_cache,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1574,6 +1578,7 @@ def run_passenger_flow(
             if prepared is not None and abs(float(transfer_radius_m) - 800.0) <= 1e-9
             else _build_transfer_edge_index(route_sequences, transfer_radius_m)
         ),
+        access_cache={},
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
