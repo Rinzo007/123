@@ -1090,7 +1090,7 @@ def _build_transfer_edge_index(
         for stop in seq.get("stops", []):
             entries.append((float(stop["lat"]), float(stop["lon"]), seq_idx, stop))
     if not entries:
-        return {}
+        return _TransferEdgeIndex()
     ref_lat = sum(x[0] for x in entries) / len(entries)
     lat_scale = 111_320.0
     lon_scale = lat_scale * max(math.cos(math.radians(ref_lat)), 0.2)
@@ -1255,6 +1255,8 @@ def _enumerate_journeys(
     ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
 
+    source_positions = getattr(transfer_index, "source_positions", None)
+    
     def cached_downstream_transfer_targets(
         seq_idx: int, pos: int
     ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
@@ -1262,10 +1264,16 @@ def _enumerate_journeys(
         cached = downstream_transfer_cache.get(key)
         if cached is not None:
             return cached
-        n = len(route_stop_sequences[seq_idx].get("stops") or [])
         entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
-        for source_pos in range(max(0, int(pos)), n):
-            entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+        if source_positions is not None:
+            positions = source_positions.get(int(seq_idx), ())
+            start = bisect_left(positions, int(pos))
+            for source_pos in positions[start:]:
+                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+        else:
+            n = len(route_stop_sequences[seq_idx].get("stops") or [])
+            for source_pos in range(max(0, int(pos)), n):
+                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
         cached = tuple(entries)
         downstream_transfer_cache[key] = cached
         return cached
