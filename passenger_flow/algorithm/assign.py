@@ -635,6 +635,7 @@ def _assign_od(
     car_base_time_s: np.ndarray | None = None,
     od_distances_m: np.ndarray | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+    access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -646,7 +647,8 @@ def _assign_od(
     totals.journey_origin_journeys = np.zeros(n_zones, dtype=np.float64)
     if ride_edge_cache is None:
         ride_edge_cache = {}
-    access_cache: dict[int, list[tuple[int, int, int, float]]] = {}
+    if access_cache is None:
+        access_cache = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
