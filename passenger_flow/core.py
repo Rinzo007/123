@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 else:
     RouteLike = Any
     Zones = Any
-from .algorithm.assign import _assign_od, _od_distance_meters
+from .algorithm.assign import _assign_od, _line_access_stops, _od_distance_meters
 from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
@@ -1096,6 +1096,24 @@ class _AssignContext:
 # ===== Один период =====
 
 
+def _prime_p6_access_cache(
+    contexts: Sequence[tuple[_AssignContext, float, float]],
+) -> None:
+    """Заполняет общий кэш доступа до запуска дочерних процессов."""
+    if not contexts:
+        return
+    cache = contexts[0][0].access_cache
+    route_sequences = contexts[0][0].route_sequences
+    zone_nearest = contexts[0][0].zone_nearest
+    needed: set[int] = set()
+    for ctx, _out, _ret in contexts:
+        needed.update(int(x) for x in ctx.od_rows)
+        needed.update(int(x) for x in ctx.od_cols)
+    for zi in needed:
+        if zi not in cache:
+            cache[zi] = _line_access_stops(zone_nearest.get(zi, []), route_sequences)
+
+
 def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Сливает агрегаты нескольких demand-слоёв одного периода."""
     merged = _empty_accumulator()
@@ -1213,6 +1231,7 @@ def _assign_layer_contexts(
 ) -> dict[str, Any]:
     if not contexts:
         return _empty_accumulator()
+    _prime_p6_access_cache(contexts)
     task_count = sum(max(1, (len(ctx.od_rows) + 3999) // 4000) for ctx, _out, _ret in contexts)
     workers = _resolve_p6_task_workers(task_count)
     if workers <= 1 and executor is None:
