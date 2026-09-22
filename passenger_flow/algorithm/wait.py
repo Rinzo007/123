@@ -23,6 +23,7 @@ from ..base.takt import (
     _TAKT_WAIT_EXTRA_PER_MIN,
     _TAKT_WAIT_FLOOR_MIN,
     _TAKT_WAIT_LINEAR_LIMIT_MIN,
+    _takt_crowding_ride_mult,
 )
 from .assign import _assign_od
 
