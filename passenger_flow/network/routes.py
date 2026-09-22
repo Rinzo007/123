@@ -123,11 +123,7 @@ def _route_segment_indices(
     orig_pos: int,
     dest_pos: int,
 ) -> list[tuple[int, bool]]:
-    """Возвращает физические сегменты и направление выбранной ножки.
-
-    Результат кэшируется на sequence: геометрия и порядок остановок не меняются
-    между OD-парами и MSA-итерациями, поэтому повторный разбор маршрута не нужен.
-    """
+    """Возвращает физические сегменты и направление выбранной ножки."""
     n = len(seq["stops"])
     if orig_pos == dest_pos or n < 2:
         return []
@@ -140,22 +136,25 @@ def _route_segment_indices(
     if cached is not None:
         return list(cached)
     cache_enabled = len(cache) < 4096
+
     if not seq.get("closed"):
         if orig_pos < dest_pos:
-        result = [(i, True) for i in range(orig_pos, dest_pos)]
-    else:
-        result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
-    if cache_enabled:
-        cache[key] = tuple(result)
-    return result
+            result = [(i, True) for i in range(orig_pos, dest_pos)]
+        else:
+            result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+        if cache_enabled:
+            cache[key] = tuple(result)
+        return result
+
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
-    forward_s = ((float(cum[dest_pos]) - float(cum[orig_pos])) % cycle)
+    forward_s = (float(cum[dest_pos]) - float(cum[orig_pos])) % cycle
     use_forward = True
     if seq.get("both_ways") and forward_s > cycle - forward_s:
         use_forward = False
+
     if use_forward:
-        result: list[tuple[int, bool]] = []
+        result = []
         i = orig_pos
         while i != dest_pos:
             result.append((i, True))
