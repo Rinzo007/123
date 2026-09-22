@@ -96,8 +96,23 @@ def snap(man,c):
  result=run_passenger_flow(routes,od,z,population=pts[:,2],base_time_s=base,car_base_time_s=base_car,od_sparse=od,
    periods=TAKT_PERIODS,headway_min=10.0,mode_choice=mk(model),transfer_penalty_calc="takt",
    stop_search_radius_m=1500,wait_calc="takt",include_reliability=True,msa_max_iterations=6,msa_gap=.01,
-   prepared=prep,demand_layers=layers,capex_factor=float(model.get('capex',{}).get('costFactor',1.0)))
+   prepared=prep,demand_layers=layers,capex_factor=float(model.get('capex',{}).get('costFactor',1.0)),
+   profile_timings=True)
  d=result.takt_diagnostics or {}
+ perf=d.get("performance") or {}
+ if perf:
+  assignment_other=max(0.0,float(perf.get("assignment_s",0.0))-float(perf.get("access_s",0.0))-float(perf.get("journeys_s",0.0)))
+  print(
+   "[P6 profile] "
+   f"access={float(perf.get('access_s',0.0)):.3f}s "
+   f"journeys={float(perf.get('journeys_s',0.0)):.3f}s "
+   f"assignment={float(perf.get('assignment_s',0.0)):.3f}s "
+   f"assignment_other={assignment_other:.3f}s "
+   f"msa={float(perf.get('msa_s',0.0)):.3f}s "
+   f"crowd_state={float(perf.get('crowd_state_s',0.0)):.3f}s "
+   f"journey_calls={int(perf.get('journey_calls',0.0))} "
+   f"access_cache_misses={int(perf.get('access_cache_misses',0.0))}"
+  )
  total=result.raw_assigned_trips+result.raw_car_trips+result.raw_walk_trips+result.raw_two_wheel_trips+result.raw_rest_trips
  lines=[]
  for lr in result.line_results:
