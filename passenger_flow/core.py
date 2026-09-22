@@ -1009,6 +1009,7 @@ class _AssignContext:
         wait_extra: Mapping[int, float] | None,
         period_index: int,
         crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+        ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1027,6 +1028,7 @@ class _AssignContext:
                 else 1.0
             ),
             transfer_index=self.transfer_index,
+            ride_edge_cache=ride_edge_cache,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1081,6 +1083,7 @@ def _assign_layer_contexts(
     period_index: int,
     wait_extra: Mapping[int, float] | None,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> dict[str, Any]:
     return _merge_period_aggregates([
         ctx.assign(
@@ -1089,6 +1092,7 @@ def _assign_layer_contexts(
             wait_extra=wait_extra,
             period_index=period_index,
             crowd_state=crowd_state,
+            ride_edge_cache=ride_edge_cache,
         )
         for ctx, out_factor, ret_factor in contexts
     ])
@@ -1113,12 +1117,14 @@ def _run_msa_period_layers(
     crowd_state = None
     agg: dict[str, Any] = _empty_accumulator()
     final_gap = gap_tol
+    ride_edge_cache: dict[tuple[int, int, int], float] = {}
     for iteration in range(1, max_iterations + 1):
         agg = _assign_layer_contexts(
             contexts,
             period_index=period_index,
             wait_extra=wait_extra,
             crowd_state=crowd_state,
+            ride_edge_cache=ride_edge_cache,
         )
         raw = agg["route_totals"]
         alpha = 1.0 / iteration
