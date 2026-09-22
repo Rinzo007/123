@@ -370,6 +370,70 @@ def test_python_snapshot_matches_canonical_takt_reference() -> None:
     }
     assert compare_snapshots(reference, snapshot) == []
 
+def test_msa_period_dense_state_has_no_stale_route_reference(monkeypatch) -> None:
+    import passenger_flow.algorithm.wait as wait_module
+
+    calls = []
+
+    def fake_assign(*args, **kwargs):
+        calls.append(1)
+        return {
+            "seg_forward_totals": {(0, 0): 10.0},
+            "seg_reverse_totals": {},
+            "seq_stop_totals": {(0, 0): 5.0},
+        }
+
+    monkeypatch.setattr(wait_module, "_assign_od", fake_assign)
+    monkeypatch.setattr(wait_module, "_build_crowd_state", lambda *args, **kwargs: {})
+
+    route_sequences = [{
+        "stops": [{"position": 0}, {"position": 1}],
+        "closed": False,
+    }]
+    result, iterations, gap = wait_module._run_msa_period(
+        np.asarray([0], dtype=np.int64),
+        np.asarray([1], dtype=np.int64),
+        np.asarray([10.0], dtype=np.float64),
+        {},
+        route_sequences,
+        stop_time_min=2.0,
+        wait_time_min=0.0,
+        walk_to_stop_min=0.0,
+        transfer_penalty_min=0.0,
+        transfer_wait_min=0.0,
+        transfer_radius_m=800.0,
+        max_transfers=1,
+        transfer_penalty_calc="fixed",
+        logit_temp=10.0,
+        out_factor=1.0,
+        ret_factor=0.0,
+        mode=None,
+        zones=None,
+        wait_crowding_per_100_min=0.1,
+        reliability_extra=None,
+        max_iterations=2,
+        gap_tol=0.01,
+        seq_headway_min=None,
+        seq_jitter_s=None,
+        no_car_shares=None,
+        wait_calc="takt",
+        period_hours=24.0,
+        vehicle_specs=None,
+        base_time_s=None,
+        car_base_time_s=None,
+        period_index=0,
+        car_period_multiplier=1.0,
+        transfer_index={},
+        od_distances_m=None,
+        ride_edge_cache={},
+    )
+    assert len(calls) == 2
+    assert iterations == 2
+    assert math.isclose(gap, 0.0, abs_tol=1e-12)
+    assert result["seg_forward_totals"][(0, 0)] == 10.0
+    assert result["seq_stop_totals"][(0, 0)] == 5.0
+
+
 def test_takt_wait_and_fare_golden_values() -> None:
     wait = FIXTURE["wait"]
     assert [
