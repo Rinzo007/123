@@ -638,6 +638,7 @@ def _assign_od(
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
     perf_stats: dict[str, float] | None = None,
+    journey_cache: dict[tuple[Any, ...], list[_Journey]] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     assign_started = perf_counter() if perf_stats is not None else 0.0
@@ -658,6 +659,8 @@ def _assign_od(
         ride_edge_cache = {}
     if access_cache is None:
         access_cache = {}
+    if journey_cache is None:
+        journey_cache = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
@@ -724,9 +727,20 @@ def _assign_od(
             )
             continue
 
-        journeys = build_journeys(
-            origin_stops,
-            destination_stops,
+        journey_key = (
+            zi,
+            zj,
+            id(crowd_state),
+            id(seq_headway_min),
+            id(seq_jitter_s),
+            road_time_s,
+            od_meters,
+        )
+        journeys = journey_cache.get(journey_key)
+        if journeys is None:
+            journeys = build_journeys(
+                origin_stops,
+                destination_stops,
             route_sequences,
             stop_time_min=stop_time_min,
             wait_time_min=wait_time_min,
@@ -744,8 +758,11 @@ def _assign_od(
             od_distance_m=od_meters,
             road_time_s=road_time_s,
             ride_edge_cache=ride_edge_cache,
-            perf_stats=perf_stats,
-        )
+                perf_stats=perf_stats,
+            )
+            journey_cache[journey_key] = journeys
+        elif perf_stats is not None:
+            perf_stats["journey_cache_hits"] = perf_stats.get("journey_cache_hits", 0.0) + 1.0
         if not journeys:
             if period_index == 0:
                 totals.no_route_by_origin[zi] += raw_trips
