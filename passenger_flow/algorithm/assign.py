@@ -28,6 +28,7 @@ from ..network.routes import (
     _scheduled_transfer_wait_min,
     _leg_alternatives,
     _cached_ride_edge_time_min,
+    _crowd_segment_load,
     build_journeys,
 )
 from .mode_choice import (
@@ -321,8 +322,9 @@ def _journey_crowd_extra(
             if not selected or seq_headway_min is None or seq_idx not in seq_headway_min:
                 continue
             crowd_seg, forward = selected[-1 if leg_no > 0 else 0]
-            loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, crowd_seg), 0.0)))
+            lf = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, crowd_seg, forward=forward
+            ))
             if leg_no == 0:
                 if include_first_leg_wait:
                     wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
@@ -442,8 +444,9 @@ def _takt_first_leg_r_r_seconds(
     load = 1.0
     if selected:
         seg_idx, forward = selected[0]
-        loads = seg_forward if forward else seg_reverse
-        load = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+        load = max(1.0, _crowd_segment_load(
+            crowd_state, seq_idx, seg_idx, forward=forward
+        ))
     unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
     return wait_s * unev * load
 
@@ -471,8 +474,9 @@ def _takt_co_route_probs(
         lf = 1.0
         if selected:
             seg_idx, forward = selected[0]
-            loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+            lf = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, seg_idx, forward=forward
+            ))
         unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
         rr = wait_s * unev * lf
         weights[idx] = 1.0 / max(1.0, rr)
@@ -516,8 +520,9 @@ def _takt_leg_choice_probs(
         load = 1.0
         if selected:
             seg_i, forward = selected[0]
-            loads = seg_forward if forward else seg_reverse
-            load = max(1.0, float(loads.get((seq_idx, seg_i), 0.0)))
+            load = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, seg_i, forward=forward
+            ))
         if seq_headway_min is None or seq_idx not in seq_headway_min:
             rr_min = 1.0
         elif prev is None:
