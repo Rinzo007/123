@@ -209,6 +209,7 @@ def _apply_car_only_modes(
     zones: Zones,
     zi: int,
     zj: int,
+    od_meters: float | None = None,
     no_car_share: float | None = None,
     rest_s: float | None = None,
     car_period_multiplier: float = 1.0,
@@ -221,7 +222,8 @@ def _apply_car_only_modes(
     """
     if mode is None:
         return
-    od_meters = _od_distance_meters(zones, zi, zj)
+    if od_meters is None:
+        od_meters = _od_distance_meters(zones, zi, zj)
     _transit, car_s, walk_s, ebike_s, rest_s = _takt_mode_shares(
         mode,
         od_meters,
@@ -317,9 +319,9 @@ def _journey_crowd_extra(
             selected = _route_segment_indices(route_sequences[seq_idx], a, b)
             if not selected or seq_headway_min is None or seq_idx not in seq_headway_min:
                 continue
-            first_seg, forward = selected[0]
+            crowd_seg, forward = selected[-1 if leg_no > 0 else 0]
             loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, first_seg), 0.0)))
+            lf = max(1.0, float(loads.get((seq_idx, crowd_seg), 0.0)))
             if leg_no == 0:
                 if include_first_leg_wait:
                     wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
@@ -328,7 +330,7 @@ def _journey_crowd_extra(
             else:
                 prev_seq, _prev_a, prev_b = journey.legs[leg_no - 1]
                 prev_stop = route_sequences[prev_seq]["stops"][prev_b]
-                curr_stop = route_sequences[seq_idx]["stops"][a]
+                curr_stop = route_sequences[seq_idx]["stops"][b]
                 transfer_wait_min = _scheduled_transfer_wait_min(
                     prev_seq,
                     seq_idx,
@@ -631,6 +633,9 @@ def _assign_od(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     car_period_multiplier: float = 1.0,
     car_base_time_s: np.ndarray | None = None,
+    od_distances_m: np.ndarray | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+    access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     totals = _OdTotals()
@@ -640,7 +645,10 @@ def _assign_od(
     totals.no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.journey_origin_trips = np.zeros(n_zones, dtype=np.float64)
     totals.journey_origin_journeys = np.zeros(n_zones, dtype=np.float64)
-    ride_edge_cache: dict[tuple[int, int, int], float] = {}
+    if ride_edge_cache is None:
+        ride_edge_cache = {}
+    if access_cache is None:
+        access_cache = {}
 
     for idx in range(len(od_rows)):
         zi = int(od_rows[idx])
@@ -664,13 +672,20 @@ def _assign_od(
         totals.period_total += trips
         road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
         car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
+        od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
-        origin_stops = _line_access_stops(
-            zone_nearest.get(zi, []), route_sequences
-        )
-        destination_stops = _line_access_stops(
-            zone_nearest.get(zj, []), route_sequences
-        )
+        origin_stops = access_cache.get(zi)
+        if origin_stops is None:
+            origin_stops = _line_access_stops(
+                zone_nearest.get(zi, []), route_sequences
+            )
+            access_cache[zi] = origin_stops
+        destination_stops = access_cache.get(zj)
+        if destination_stops is None:
+            destination_stops = _line_access_stops(
+                zone_nearest.get(zj, []), route_sequences
+            )
+            access_cache[zj] = destination_stops
         if period_index == 0 and (origin_stops or destination_stops):
             totals.covered_commuters += raw_trips
         if not origin_stops or not destination_stops:
@@ -683,6 +698,7 @@ def _assign_od(
                 zones=zones,
                 zi=zi,
                 zj=zj,
+                od_meters=od_meters,
                 no_car_share=(
                     float(no_car_shares[zi]) if no_car_shares is not None else None
                 ),
@@ -709,7 +725,7 @@ def _assign_od(
             wait_calc=wait_calc,
             crowd_state=crowd_state,
             transfer_index=transfer_index,
-            od_distance_m=_od_distance_meters(zones, zi, zj),
+            od_distance_m=od_meters,
             road_time_s=road_time_s,
             ride_edge_cache=ride_edge_cache,
         )
@@ -768,7 +784,7 @@ def _assign_od(
                 totals,
                 mode=mode,
                 trips=trips,
-                od_meters=_od_distance_meters(zones, zi, zj),
+                od_meters=od_meters,
                 transit_s=transit_cost_s,
                 base_time_s=road_time_s,
                 no_car_share=(

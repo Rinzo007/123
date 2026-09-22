@@ -6,7 +6,7 @@ from geo_utils import (
     union_all,
     utm_epsg,
 )
-from .raster_io import (
+from raster_io import (
     _open_raster_quiet,
     _tile_has_transform,
     geometry_mask_quiet,

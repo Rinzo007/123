@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from bisect import bisect_left
 from collections.abc import Iterator, Mapping
 from typing import Any, NamedTuple
 
@@ -126,28 +127,46 @@ def _route_segment_indices(
     n = len(seq["stops"])
     if orig_pos == dest_pos or n < 2:
         return []
+    cache = seq.get("_segment_index_cache")
+    if cache is None:
+        cache = {}
+        seq["_segment_index_cache"] = cache
+    key = (int(orig_pos), int(dest_pos))
+    cached = cache.get(key)
+    if cached is not None:
+        return list(cached)
+    cache_enabled = len(cache) < 4096
+
     if not seq.get("closed"):
         if orig_pos < dest_pos:
-            return [(i, True) for i in range(orig_pos, dest_pos)]
-        return [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+            result = [(i, True) for i in range(orig_pos, dest_pos)]
+        else:
+            result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
+        if cache_enabled:
+            cache[key] = tuple(result)
+        return result
+
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
-    forward_s = ((float(cum[dest_pos]) - float(cum[orig_pos])) % cycle)
+    forward_s = (float(cum[dest_pos]) - float(cum[orig_pos])) % cycle
     use_forward = True
     if seq.get("both_ways") and forward_s > cycle - forward_s:
         use_forward = False
+
     if use_forward:
-        result: list[tuple[int, bool]] = []
+        result = []
         i = orig_pos
         while i != dest_pos:
             result.append((i, True))
             i = (i + 1) % n
-        return result
-    result = []
-    i = orig_pos
-    while i != dest_pos:
-        result.append(((i - 1) % n, False))
-        i = (i - 1 + n) % n
+    else:
+        result = []
+        i = orig_pos
+        while i != dest_pos:
+            result.append(((i - 1) % n, False))
+            i = (i - 1 + n) % n
+    if cache_enabled:
+        cache[key] = tuple(result)
     return result
 
 def _nearest_stop_on_sequence(
@@ -174,7 +193,7 @@ def _leg_alternatives(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]],
     *,
     stop_time_min: float,
-    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
+    crowd_state: Mapping[str, Any] | None,
     transfer_radius_m: float,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> tuple[tuple[int, int, int], ...]:
@@ -186,7 +205,7 @@ def _leg_alternatives(
     prev_stop = route_sequences[prev_seq]["stops"][prev_b]
     base_dest = route_sequences[base_seq]["stops"][base_b]
     base_ride = _cached_ride_edge_time_min(
-        route_stop_sequences,
+        route_sequences,
         base_seq,
         base_a,
         base_b,
@@ -203,10 +222,10 @@ def _leg_alternatives(
         else None
     )
     alternatives: list[tuple[float, tuple[int, int, int]]] = []
-    for alt_seq, alt_board, _alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
+    for alt_seq, _source_stop, alt_target in transfer_index.get((prev_seq, int(prev_b)), ()):
         if alt_seq == base_seq:
             continue
-        alt_board_pos = int(alt_board["position"])
+        alt_board_pos = int(alt_target["position"])
         alt_candidates: list[tuple[int, float]] = []
         if next_seq is not None and next_stop is not None:
             for pos, stop in enumerate(route_sequences[alt_seq].get("stops") or []):
@@ -233,7 +252,7 @@ def _leg_alternatives(
                 continue
             seen_positions.add(alt_pos)
             alt_ride = _cached_ride_edge_time_min(
-                route_stop_sequences,
+                route_sequences,
                 alt_seq,
                 alt_board_pos,
                 alt_pos,
@@ -361,6 +380,20 @@ def _time_at_stop_s(seq: dict[str, Any], position: int) -> float:
     )
 
 
+def _base_ride_edge_time_min(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+    *,
+    stop_time_min: float,
+) -> float:
+    """Базовая стоимость line-state edge без динамической загрузки."""
+    ride = _route_ride_time_min(seq, orig_pos, dest_pos)
+    if ride <= 0.0 and orig_pos != dest_pos:
+        ride = abs(dest_pos - orig_pos) * stop_time_min
+    return max(0.0, ride)
+
+
 def _cached_ride_edge_time_min(
     route_sequences: list[dict[str, Any]],
     seq_idx: int,
@@ -371,27 +404,84 @@ def _cached_ride_edge_time_min(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
     cache: dict[tuple[int, int, int], float] | None,
 ) -> float:
-    """Стоимость edge с memoization для одного фиксированного crowd state."""
+    """Стоимость edge с кэшем только статической базовой части."""
+    seq = route_sequences[seq_idx]
     if cache is None:
         return _ride_edge_time_min(
-            route_sequences[seq_idx],
+            seq,
             orig_pos,
             dest_pos,
             stop_time_min=stop_time_min,
             crowd_state=crowd_state,
         )
     key = (int(seq_idx), int(orig_pos), int(dest_pos))
-    value = cache.get(key)
-    if value is None:
-        value = _ride_edge_time_min(
-            route_sequences[seq_idx],
+    ride = cache.get(key)
+    if ride is None:
+        ride = _base_ride_edge_time_min(
+            seq,
             orig_pos,
             dest_pos,
             stop_time_min=stop_time_min,
-            crowd_state=crowd_state,
         )
-        cache[key] = float(value)
-    return float(value)
+        cache[key] = float(ride)
+    if not crowd_state or orig_pos == dest_pos:
+        return float(ride)
+    return max(
+        0.0,
+        float(ride) + _crowd_extra_s(seq, orig_pos, dest_pos, crowd_state) / 60.0,
+    )
+
+
+def _crowd_extra_s(
+    seq: dict[str, Any],
+    orig_pos: int,
+    dest_pos: int,
+    crowd_state: Mapping[str, Any] | None,
+) -> float:
+    """Динамическая надбавка за загрузку через префиксные суммы."""
+    if not crowd_state or orig_pos == dest_pos:
+        return 0.0
+    seq_idx = int(seq.get("_seq_idx", -1))
+    selected = _route_segment_indices(seq, orig_pos, dest_pos)
+    if not selected:
+        return 0.0
+    is_forward = bool(selected[0][1])
+    prefixes = (
+        crowd_state.get("seg_forward_prefix", {})
+        if is_forward
+        else crowd_state.get("seg_reverse_prefix", {})
+    )
+    prefix = prefixes.get(seq_idx)
+    if prefix is None:
+        # Backwards-compatible fallback for externally supplied crowd states.
+        loads = (
+            crowd_state.get("seg_forward", {})
+            if is_forward
+            else crowd_state.get("seg_reverse", {})
+        )
+        return sum(
+            _segment_time_s(seq, seg_i)
+            * (_takt_crowding_ride_mult(float(loads.get((seq_idx, seg_i), 0.0))) - 1.0)
+            for seg_i, _ in selected
+            if float(loads.get((seq_idx, seg_i), 0.0)) > 0.0
+        )
+    n = len(seq["stops"])
+    if not seq.get("closed"):
+        lo, hi = (orig_pos, dest_pos) if is_forward else (dest_pos, orig_pos)
+        return max(0.0, float(prefix[hi]) - float(prefix[lo]))
+    if is_forward:
+        if dest_pos > orig_pos:
+            return max(0.0, float(prefix[dest_pos]) - float(prefix[orig_pos]))
+        return max(
+            0.0,
+            float(prefix[n]) - float(prefix[orig_pos]) + float(prefix[dest_pos]),
+        )
+    if dest_pos < orig_pos:
+        return max(0.0, float(prefix[orig_pos]) - float(prefix[dest_pos]))
+    return max(
+        0.0,
+        float(prefix[orig_pos]) + float(prefix[n]) - float(prefix[dest_pos]),
+    )
 
 
 def _ride_edge_time_min(
@@ -403,23 +493,13 @@ def _ride_edge_time_min(
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None,
 ) -> float:
     """Стоимость line-state edge: базовое C плюс crowd/dwell feedback."""
-    ride = _route_ride_time_min(seq, orig_pos, dest_pos)
-    if ride <= 0.0 and orig_pos != dest_pos:
-        ride = abs(dest_pos - orig_pos) * stop_time_min
-    if not crowd_state or orig_pos == dest_pos:
-        return max(0.0, ride)
-    seg_forward = crowd_state.get("seg_forward", {})
-    seg_reverse = crowd_state.get("seg_reverse", {})
-    extra_s = 0.0
-    selected_segments = _route_segment_indices(seq, orig_pos, dest_pos)
-    prev_stop = orig_pos
-    for seg_i, is_forward in selected_segments:
-        loads = seg_forward if is_forward else seg_reverse
-        load = float(loads.get((seq.get("_seq_idx", -1), seg_i), 0.0))
-        if load > 0.0:
-            extra_s += _segment_time_s(seq, seg_i) * (_takt_crowding_ride_mult(load) - 1.0)
-        prev_stop = (seg_i + 1) % len(seq["stops"]) if is_forward else seg_i % len(seq["stops"])
-    return max(0.0, ride + extra_s / 60.0)
+    ride = _base_ride_edge_time_min(
+        seq,
+        orig_pos,
+        dest_pos,
+        stop_time_min=stop_time_min,
+    )
+    return max(0.0, ride + _crowd_extra_s(seq, orig_pos, dest_pos, crowd_state) / 60.0)
 
 def _boarding_wait_min(headway_min: float | None, wait_time_min: float, wait_calc: str) -> float:
     """Ожидание на посадке: Takt Po при известном такте."""
@@ -692,11 +772,7 @@ def _direct_journeys(
         # Takt co() adds the first-leg waiting separately during route-set
         # choice. Keep direct journey time as ride/access only when a
         # headway is available, otherwise preserve the legacy wait behavior.
-        wait_min = (
-            0.0
-            if headway is not None
-            else _boarding_wait_min(None, wait_time_min, wait_calc)
-        )
+        wait_min = _boarding_wait_min(headway, wait_time_min, wait_calc)
         journeys.append(
             JourneyAlternative(
                 ride_min + walk_to_stop_min + wait_min,
@@ -998,7 +1074,12 @@ def _transfer_targets(
     остановка каждой другой линии в пределах радиуса пересадки. Направление
     внутри последовательности линии не ограничивается индексом остановки.
     """
-    for ta in route_stop_sequences[seq_a]["stops"]:
+    stops_a = route_stop_sequences[seq_a]["stops"]
+    if current_pos < 0 or current_pos >= len(stops_a):
+        return
+    for ta in stops_a:
+        if int(ta["position"]) <= current_pos:
+            continue
         for seq_b, data_b in enumerate(route_stop_sequences):
             if seq_b == seq_a or seq_b in excluded:
                 continue
@@ -1027,6 +1108,15 @@ def _transfer_targets(
                 yield seq_b, ta, best_tb
 
 
+class _TransferEdgeIndex(dict):
+    """Словарь transfer-рёбер плюс индекс позиций источников пересадки."""
+    __slots__ = ("source_positions",)
+
+    def __init__(self, *args: Any, source_positions: Mapping[int, tuple[int, ...]] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.source_positions = dict(source_positions or {})
+
+
 def _build_transfer_edge_index(
     route_stop_sequences: list[dict[str, Any]],
     transfer_radius_m: float,
@@ -1037,13 +1127,14 @@ def _build_transfer_edge_index(
         for stop in seq.get("stops", []):
             entries.append((float(stop["lat"]), float(stop["lon"]), seq_idx, stop))
     if not entries:
-        return {}
+        return _TransferEdgeIndex()
     ref_lat = sum(x[0] for x in entries) / len(entries)
     lat_scale = 111_320.0
     lon_scale = lat_scale * max(math.cos(math.radians(ref_lat)), 0.2)
     points = [(lat * lat_scale, lon * lon_scale) for lat, lon, _seq, _stop in entries]
     tree = cKDTree(points)
     result: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
+    source_positions: dict[int, list[int]] = {i: [] for i in range(len(route_stop_sequences))}
     query_r = float(transfer_radius_m)
     for seq_a, seq in enumerate(route_stop_sequences):
         for ta in seq.get("stops", []):
@@ -1070,7 +1161,12 @@ def _build_transfer_edge_index(
             result[(seq_a, pos)] = tuple(
                 (seq_b, ta, tb) for seq_b, (_distance, tb) in sorted(best_by_line.items())
             )
-    return result
+            if best_by_line:
+                source_positions[seq_a].append(pos)
+    return _TransferEdgeIndex(
+        result,
+        source_positions={seq_i: tuple(sorted(pos_list)) for seq_i, pos_list in source_positions.items()},
+    )
 
 def _dedupe_journeys(
     journeys: list[_Journey],
@@ -1187,8 +1283,37 @@ def _enumerate_journeys(
         first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
     transfer_index = transfer_index or _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
-    def cached_transfer_targets(seq_idx: int, pos: int) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+    downstream_transfer_cache: dict[
+        tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
+    ] = {}
+
+    def cached_transfer_targets(
+        seq_idx: int, pos: int
+    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
         return transfer_index.get((seq_idx, pos), ())
+
+    source_positions = getattr(transfer_index, "source_positions", None)
+    
+    def cached_downstream_transfer_targets(
+        seq_idx: int, pos: int
+    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
+        key = (int(seq_idx), int(pos))
+        cached = downstream_transfer_cache.get(key)
+        if cached is not None:
+            return cached
+        entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+        if source_positions is not None:
+            positions = source_positions.get(int(seq_idx), ())
+            start = bisect_left(positions, int(pos))
+            for source_pos in positions[start:]:
+                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+        else:
+            n = len(route_stop_sequences[seq_idx].get("stops") or [])
+            for source_pos in range(max(0, int(pos)), n):
+                entries.extend(transfer_index.get((seq_idx, source_pos), ()))
+        cached = tuple(entries)
+        downstream_transfer_cache[key] = cached
+        return cached
 
     for item in origins:
         seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
@@ -1276,16 +1401,15 @@ def _enumerate_journeys(
                         )
                     )
 
-        # Full same-line edges are evaluated lazily when terminating at a
-        # destination or transferring. Because every pair of stops is linked
-        # in Takt's `we` graph, creating intermediate same-line states would
-        # only duplicate those direct edges and inflate the search space.
         if transfers >= max_legs - 1:
             continue
 
-        # Transfer from the current stop. _transfer_targets also preserves
-        # the Takt nearest-stop-per-target-line rule.
-        for seq_b, ta, tb in cached_transfer_targets(seq_idx, pos):
+        # Takt's `we` graph connects open stops on one sequence, but the
+        # subsequent transfer expansion only needs states at actual transfer
+        # source stops. Jump directly to every transfer source at or after the
+        # current position using the shared ride-time edge cache. This preserves
+        # the reachable transfer set without materializing O(n²) same-line states.
+        for seq_b, ta, tb in cached_downstream_transfer_targets(seq_idx, pos):
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _cached_ride_edge_time_min(

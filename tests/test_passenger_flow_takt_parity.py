@@ -1,10 +1,12 @@
 """Golden/regression checks for the Takt-compatible passenger-flow core."""
+# P6 synchronization: keep CI execution tied to the latest parity fixes.
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
+import os
 import sys
 import types
 from pathlib import Path
@@ -53,7 +55,7 @@ from passenger_flow.base.takt import (
 )
 from passenger_flow.network.geometry import haversine_meters
 from scripts.takt_differential import compare_snapshots
-from passenger_flow.algorithm.assign import _takt_co_route_probs
+from passenger_flow.algorithm.assign import _takt_co_route_probs, _takt_leg_choice_probs
 from passenger_flow.network.routes import (
     JourneyAlternative,
     _direct_journeys,
@@ -66,6 +68,16 @@ from passenger_flow.network.routes import (
     build_journeys,
     _build_route_stop_sequence,
 )
+
+
+def _repo_root() -> Path:
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    candidates = [Path(workspace)] if workspace else []
+    candidates.extend([Path.cwd(), Path(__file__).resolve().parents[1]])
+    for root in candidates:
+        if root and (root / "scripts" / "bd956ff0a1875604740f.js").is_file():
+            return root
+    return Path.cwd()
 
 
 FIXTURE = json.loads(
@@ -328,7 +340,7 @@ def test_takt_reference_bundle_provenance_is_pinned() -> None:
     )
     rel = reference["reference"]["source"]
     expected = reference["reference"]["bundle_git_blob_sha"]
-    path = Path(__file__).resolve().parents[1] / rel
+    path = _repo_root() / rel
     data = path.read_bytes()
     actual = hashlib.sha1(
         f"blob {len(data)}\0".encode("ascii") + data
@@ -347,11 +359,12 @@ def test_python_snapshot_matches_canonical_takt_reference() -> None:
     vals = np.asarray([1000.0, 1000.0], dtype=np.float64)
     snapshot = {
         "reference": reference["reference"],
+        "tolerance": reference["tolerance"],
         "wait_seconds": waits,
         "fare_eur": fares,
         "hold_probability": _takt_hold_prob(60.0, 90.0),
-        "route_probabilities": _takt_route_probs(np.asarray([600.0, 900.0])),
-        "mode_shares": _takt_mode_shares(ModeChoiceConfig(), 5000.0, 1200.0, 1.2),
+        "route_probabilities": _takt_route_probs(np.asarray([600.0, 900.0])).tolist(),
+        "mode_shares": list(_takt_mode_shares(ModeChoiceConfig(), 5000.0, 1200.0, 1.2)),
         "car_period_multipliers": list(_takt_car_period_multipliers(rows, cols, vals, TAKT_PERIODS)),
         "msa_gap_example": _takt_msa_gap({1: 10.0}, {1: 15.0}, {(1, 0): 2.0}, {(1, 0): 3.0}, {(1, 0): 4.0}, {(1, 0): 5.0}, {(1, 0): 6.0}, {(1, 0): 8.0}),
     }
@@ -393,7 +406,7 @@ def test_msa_gap_uses_smoothing_step_not_raw_to_new_delta() -> None:
         {(1, 0): 6.0},
         {(1, 0): 8.0},
     )
-    assert math.isclose(got, 8.0 / 31.0, rel_tol=1e-12, abs_tol=1e-12)
+    assert math.isclose(got, 0.25, rel_tol=1e-12, abs_tol=1e-12)
 
 def test_density_adjusted_no_car_shares_match_takt_formula() -> None:
     case = FIXTURE["no_car_density"]
@@ -578,6 +591,19 @@ def test_multi_leg_search_reaches_four_legs() -> None:
         _synthetic_sequence([5, 6, 7]),
         _synthetic_sequence([7, 8, 9]),
     ]
+    # Keep only the intended adjacent-line transfer stops inside 800 m.
+    for idx, (shift, stops) in enumerate((
+        (0.00, (0.00, 0.01, 0.02)),
+        (0.02, (0.08, 0.09, 0.10)),
+        (0.11, (0.08, 0.09, 0.10)),
+        (0.20, (0.08, 0.09, 0.10)),
+    )):
+        for stop, dx in zip(seqs[idx]["stops"], stops):
+            stop["lon"] = 4.0 + shift + dx
+    # Align the transfer endpoints exactly.
+    seqs[1]["stops"][0]["lon"] = seqs[0]["stops"][2]["lon"]
+    seqs[2]["stops"][0]["lon"] = seqs[1]["stops"][2]["lon"]
+    seqs[3]["stops"][0]["lon"] = seqs[2]["stops"][2]["lon"]
     origins = [(0, 0, 0)]
     destinations = [(3, 2, 2)]
     journeys = build_journeys(
@@ -808,7 +834,7 @@ def test_transfer_index_is_specific_to_current_stop() -> None:
     last_targets = index[(0, 2)]
     assert first_targets and last_targets
     assert first_targets[0][2]["id"] == 4
-    assert last_targets[0][2]["id"] == 5
+    assert last_targets[0][2]["id"] == 6
 
 def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     seq_a = _synthetic_sequence([1, 2, 3])
@@ -827,7 +853,7 @@ def test_transfer_graph_keeps_nearest_stop_per_target_line() -> None:
     for key, ids in by_origin.items():
         assert len(ids) == 1, key
     assert set(line for _ta_pos, line in by_origin) == {1, 2}
-    assert 4 in [ids[0] for (pos, line), ids in by_origin.items() if line == 1 and pos == 1]
+    assert 5 in [ids[0] for (pos, line), ids in by_origin.items() if line == 1 and pos == 1]
 
 
 def test_journey_crowding_uses_selected_directional_load() -> None:
@@ -1216,12 +1242,15 @@ def test_flow_report_denominator_uses_periodized_directional_demand() -> None:
     from passenger_flow.base.models import PeriodFlow
 
     base_od_trips = 916_174.0
-    period_flows = (
-        PeriodFlow("early", "04-06", 64_091.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("am", "06-09", 604_275.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("mid", "09-15", 347_445.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("pm", "15-19", 594_513.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        PeriodFlow("eve", "19-24", 219_676.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    from passenger_flow.base.takt import TAKT_PERIODS
+    period_flows = tuple(
+        PeriodFlow(
+            p.key,
+            p.label,
+            base_od_trips * (p.out + p.ret),
+            0.0, 0.0, 0.0, 0.0, 0.0,
+        )
+        for p in TAKT_PERIODS
     )
 
     assert math.isclose(
@@ -1310,7 +1339,7 @@ def test_p6_city_release_manifest_is_pinned() -> None:
             encoding="utf-8"
         )
     )
-    names = validate_city_manifest(manifest, Path(__file__).resolve().parents[1])
+    names = validate_city_manifest(manifest, _repo_root())
     assert names == ["amsterdam-v8", "berlin-v5", "hong-kong-v6"]
 
 

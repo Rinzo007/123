@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 else:
     RouteLike = Any
     Zones = Any
-from .algorithm.assign import _assign_od
+from .algorithm.assign import _assign_od, _od_distance_meters
 from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
@@ -43,6 +43,8 @@ from .algorithm.wait import (
     _reliability_min,
     _run_msa_period,
     _takt_msa_gap,
+    _build_msa_load_vector,
+    _msa_smooth_vector,
 )
 from .algorithm.mode_choice import (
     _takt_car_period_multiplier,
@@ -428,8 +430,8 @@ def _validate_flow_inputs(
     periods: Sequence[Period],
     mode_choice: ModeChoiceConfig,
     base_time_s: np.ndarray | None,
-    car_base_time_s: np.ndarray | None,
-    od_sparse: Any,
+    car_base_time_s: np.ndarray | None = None,
+    od_sparse: Any = None,
     stop_search_radius_m: float,
     stop_time_min: float,
     wait_time_min: float,
@@ -453,12 +455,12 @@ def _validate_flow_inputs(
         base_time_s,
         n_zones,
         len(periods) if periods else 1,
-        int(matrix.nnz if sparse.issparse(matrix) else np.count_nonzero(matrix > 0.0)),
+        int(np.count_nonzero(np.asarray(matrix.data) > 0.0)) if sparse.issparse(matrix) else int(np.count_nonzero(matrix > 0.0)),
     )
     _validate_car_base_time(
         car_base_time_s,
         n_zones,
-        int(np.count_nonzero(matrix > 0.0)),
+        int(np.count_nonzero(np.asarray(matrix.data) > 0.0)) if sparse.issparse(matrix) else int(np.count_nonzero(matrix > 0.0)),
     )
     _validate_sparse_od(od_sparse, n_zones)
     _validate_transfer_args(max_transfers, transfer_radius_m)
@@ -875,6 +877,22 @@ def _empty_accumulator() -> dict[str, Any]:
 # ===== Контекст прохода (общие аргументы для _assign_od/_run_msa_period) =====
 
 
+def _precompute_od_distances(
+    zones: Zones,
+    rows: np.ndarray,
+    cols: np.ndarray,
+) -> np.ndarray:
+    """Precompute immutable OD distances once instead of per MSA iteration."""
+    return np.fromiter(
+        (
+            _od_distance_meters(zones, int(zi), int(zj))
+            for zi, zj in zip(rows, cols)
+        ),
+        dtype=np.float64,
+        count=len(rows),
+    )
+
+
 @dataclass(frozen=True)
 class _DemandLayer:
     """Внутренний слой спроса в формате Takt: sparse OD + out/ret + baseT."""
@@ -885,6 +903,7 @@ class _DemandLayer:
     ret: tuple[float, ...]
     base_time_s: np.ndarray | None = None
     car_base_time_s: np.ndarray | None = None
+    od_distances_m: np.ndarray | None = None
 
 @dataclass(frozen=True)
 class _AssignContext:
@@ -913,6 +932,7 @@ class _AssignContext:
     no_car_shares: np.ndarray | None
     base_time_s: np.ndarray | None
     car_base_time_s: np.ndarray | None
+    od_distances_m: np.ndarray | None
     seq_headway_min: Mapping[int, float] | None
     seq_jitter_s: Mapping[int, float] | None
     seq_headway_periods: tuple[Mapping[int, float] | None, ...]
@@ -920,6 +940,9 @@ class _AssignContext:
     vehicle_specs: Mapping[str, VehicleSpec] | None
     car_period_multipliers: tuple[float, ...]
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]]
+    access_cache: dict[int, list[tuple[int, int, int, float]]]
+    ride_edge_cache: dict[tuple[int, int, int], float]
+
 
     def for_layer(self, layer: _DemandLayer) -> "_AssignContext":
         """Создаёт контекст с тем же графом, но с OD конкретного слоя."""
@@ -943,6 +966,7 @@ class _AssignContext:
             no_car_shares=self.no_car_shares,
             base_time_s=layer.base_time_s,
             car_base_time_s=layer.car_base_time_s,
+            od_distances_m=layer.od_distances_m,
             seq_headway_min=self.seq_headway_min,
             seq_jitter_s=self.seq_jitter_s,
             seq_headway_periods=self.seq_headway_periods,
@@ -950,6 +974,8 @@ class _AssignContext:
             vehicle_specs=self.vehicle_specs,
             car_period_multipliers=self.car_period_multipliers,
             transfer_index=self.transfer_index,
+            access_cache=self.access_cache,
+            ride_edge_cache=self.ride_edge_cache,
         )
 
     def _common_kwargs(self, period_index: int | None = None) -> dict[str, Any]:
@@ -975,6 +1001,7 @@ class _AssignContext:
             "no_car_shares": self.no_car_shares,
             "base_time_s": self.base_time_s,
             "car_base_time_s": self.car_base_time_s,
+            "od_distances_m": self.od_distances_m,
             "seq_headway_min": headway,
             "seq_jitter_s": self.seq_jitter_s,
             "wait_calc": self.wait_calc,
@@ -989,6 +1016,7 @@ class _AssignContext:
         wait_extra: Mapping[int, float] | None,
         period_index: int,
         crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+        ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1007,6 +1035,8 @@ class _AssignContext:
                 else 1.0
             ),
             transfer_index=self.transfer_index,
+            ride_edge_cache=ride_edge_cache or self.ride_edge_cache,
+            access_cache=self.access_cache,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1041,6 +1071,7 @@ class _AssignContext:
                 if period_index < len(self.car_period_multipliers)
                 else 1.0
             ),
+            ride_edge_cache=self.ride_edge_cache,
             **self._common_kwargs(period_index),
         )
 
@@ -1061,6 +1092,7 @@ def _assign_layer_contexts(
     period_index: int,
     wait_extra: Mapping[int, float] | None,
     crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> dict[str, Any]:
     return _merge_period_aggregates([
         ctx.assign(
@@ -1069,6 +1101,7 @@ def _assign_layer_contexts(
             wait_extra=wait_extra,
             period_index=period_index,
             crowd_state=crowd_state,
+            ride_edge_cache=ride_edge_cache,
         )
         for ctx, out_factor, ret_factor in contexts
     ])
@@ -1084,48 +1117,46 @@ def _run_msa_period_layers(
     period_index: int,
     period_hours: float,
 ) -> tuple[dict[str, Any], int, float]:
-    smoothed: dict[int, float] = {}
-    prev_smoothed: dict[int, float] = {}
-    smoothed_seg_forward: dict[tuple[int, int], float] = {}
-    smoothed_seg_reverse: dict[tuple[int, int], float] = {}
-    smoothed_stop: dict[tuple[int, int], float] = {}
+    smoothed_seg_forward = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
+    smoothed_seg_reverse = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
+    smoothed_stop = _build_msa_load_vector(contexts[0][0].route_sequences, stops=True)
     wait_extra = dict(reliability_extra) if reliability_extra else None
     crowd_state = None
     agg: dict[str, Any] = _empty_accumulator()
     final_gap = gap_tol
+    ride_edge_cache = contexts[0][0].ride_edge_cache
     for iteration in range(1, max_iterations + 1):
         agg = _assign_layer_contexts(
             contexts,
             period_index=period_index,
             wait_extra=wait_extra,
             crowd_state=crowd_state,
+            ride_edge_cache=ride_edge_cache,
         )
-        raw = agg["route_totals"]
         alpha = 1.0 / iteration
-        rids = sorted(set(raw) | set(smoothed))
-        for rid in rids:
-            smoothed[rid] = (1.0-alpha)*smoothed.get(rid,0.0) + alpha*raw.get(rid,0.0)
-        previous_seg_forward = dict(smoothed_seg_forward)
-        previous_seg_reverse = dict(smoothed_seg_reverse)
-        previous_stop = dict(smoothed_stop)
-        for key in set(agg.get("seg_forward_totals", {})) | set(smoothed_seg_forward):
-            smoothed_seg_forward[key]=(1-alpha)*smoothed_seg_forward.get(key,0.0)+alpha*agg.get("seg_forward_totals",{}).get(key,0.0)
-        for key in set(agg.get("seg_reverse_totals", {})) | set(smoothed_seg_reverse):
-            smoothed_seg_reverse[key]=(1-alpha)*smoothed_seg_reverse.get(key,0.0)+alpha*agg.get("seg_reverse_totals",{}).get(key,0.0)
-        for key in set(agg.get("seq_stop_totals", {})) | set(smoothed_stop):
-            smoothed_stop[key]=(1-alpha)*smoothed_stop.get(key,0.0)+alpha*agg.get("seq_stop_totals",{}).get(key,0.0)
-        agg["seg_forward_totals"]=smoothed_seg_forward
-        agg["seg_reverse_totals"]=smoothed_seg_reverse
-        agg["seq_stop_totals"]=smoothed_stop
+        gap_num = 0.0
+        gap_total = 0.0
+        for target, source in (
+            (smoothed_seg_forward, agg.get("seg_forward_totals", {})),
+            (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
+            (smoothed_stop, agg.get("seq_stop_totals", {})),
+        ):
+            num, total = _msa_smooth_vector(target, source, alpha)
+            gap_num += num
+            gap_total += total
+
         crowd_state=_build_crowd_state(
             contexts[0][0].route_sequences, smoothed_seg_forward, smoothed_seg_reverse,
             smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
             period_hours, period_index=period_index,
         )
-        final_gap=_takt_msa_gap(prev_smoothed, smoothed, previous_seg_forward, smoothed_seg_forward, previous_seg_reverse, smoothed_seg_reverse, previous_stop, smoothed_stop)
+        final_gap = gap_num / max(gap_total, 1.0)
         prev_smoothed=dict(smoothed)
         if iteration>1 and final_gap<=gap_tol:
             break
+    agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
+    agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
+    agg["seq_stop_totals"] = smoothed_stop.as_dict()
     return agg, iteration, final_gap
 
 
@@ -1364,7 +1395,12 @@ def run_passenger_flow(
 
     n_zones = len(zones)
     _validate_zones(zones)
-    matrix = od_matrix.tocsr().astype(np.float64) if sparse.issparse(od_matrix) else np.asarray(od_matrix, dtype=np.float64)
+    if sparse.issparse(od_matrix):
+        matrix = od_matrix.tocsr()
+        if matrix.dtype != np.float64:
+            matrix = matrix.astype(np.float64)
+    else:
+        matrix = np.asarray(od_matrix, dtype=np.float64)
     population_arr: np.ndarray | None = None
     if population is not None:
         population_arr = np.asarray(population, dtype=np.float64)
@@ -1474,7 +1510,8 @@ def run_passenger_flow(
 
     # 6. Контекст и общие аккумуляторы
     period_sources: tuple[Period | None, ...] = tuple(periods) or (None,)
-    primary_layer = _DemandLayer(od_rows, od_cols, od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources), base_time_s, car_base_time_s)
+    primary_distances = _precompute_od_distances(zones, od_rows, od_cols)
+    primary_layer = _DemandLayer(od_rows, od_cols, od_vals, tuple(p.out for p in period_sources), tuple(p.ret for p in period_sources), base_time_s, car_base_time_s, primary_distances)
     extra_layers: list[_DemandLayer] = []
     for layer_index, layer in enumerate(demand_layers or ()):
         od = np.asarray(layer.get("od"), dtype=np.float64)
@@ -1494,7 +1531,8 @@ def run_passenger_flow(
         base_layer = layer.get("base_time_s")
         base_layer = None if base_layer is None else np.asarray(base_layer, dtype=np.float64)
         car_layer = od[:, 3].astype(np.float64)[keep] if od.shape[1] >= 4 else None
-        extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer))
+        distances = _precompute_od_distances(zones, rows, cols)
+        extra_layers.append(_DemandLayer(rows, cols, vals, out, ret, base_layer, car_layer, distances))
 
     total_trips = float(od_matrix.sum()) + sum(float(np.sum(layer.od_vals)) for layer in extra_layers)
 
@@ -1526,6 +1564,7 @@ def run_passenger_flow(
         no_car_shares=_takt_no_car_shares(mode_choice, population_arr),
         base_time_s=None if base_time_s is None else np.asarray(base_time_s, dtype=np.float64),
         car_base_time_s=None if car_base_time_s is None else np.asarray(car_base_time_s, dtype=np.float64),
+        od_distances_m=primary_layer.od_distances_m,
         seq_headway_min=seq_headway_min,
         seq_jitter_s=seq_jitter_s,
         seq_headway_periods=tuple(
@@ -1540,6 +1579,8 @@ def run_passenger_flow(
             if prepared is not None and abs(float(transfer_radius_m) - 800.0) <= 1e-9
             else _build_transfer_edge_index(route_sequences, transfer_radius_m)
         ),
+        access_cache={},
+        ride_edge_cache={},
     )
     accum = _empty_accumulator()
     period_flows: list[PeriodFlow] = []
