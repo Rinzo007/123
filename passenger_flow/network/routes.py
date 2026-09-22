@@ -445,6 +445,26 @@ def _cached_ride_edge_time_min(
     )
 
 
+def _crowd_segment_load(
+    crowd_state: Mapping[str, Any] | None,
+    seq_idx: int,
+    seg_idx: int,
+    *,
+    forward: bool,
+) -> float:
+    """Быстрый доступ к загрузке сегмента; sparse dict остаётся fallback."""
+    if not crowd_state:
+        return 0.0
+    dense = crowd_state.get("seg_forward_dense" if forward else "seg_reverse_dense")
+    offsets = crowd_state.get("seg_offsets")
+    if dense is not None and offsets is not None:
+        pos = int(offsets[seq_idx]) + int(seg_idx)
+        if 0 <= pos < len(dense):
+            return float(dense[pos])
+    loads = crowd_state.get("seg_forward" if forward else "seg_reverse", {})
+    return float(loads.get((seq_idx, seg_idx), 0.0))
+
+
 def _crowd_extra_s(
     seq: dict[str, Any],
     orig_pos: int,
@@ -467,16 +487,13 @@ def _crowd_extra_s(
     prefix = prefixes.get(seq_idx)
     if prefix is None:
         # Backwards-compatible fallback for externally supplied crowd states.
-        loads = (
-            crowd_state.get("seg_forward", {})
-            if is_forward
-            else crowd_state.get("seg_reverse", {})
-        )
         return sum(
             _segment_time_s(seq, seg_i)
-            * (_takt_crowding_ride_mult(float(loads.get((seq_idx, seg_i), 0.0))) - 1.0)
+            * (_takt_crowding_ride_mult(
+                _crowd_segment_load(crowd_state, seq_idx, seg_i, forward=is_forward)
+            ) - 1.0)
             for seg_i, _ in selected
-            if float(loads.get((seq_idx, seg_i), 0.0)) > 0.0
+            if _crowd_segment_load(crowd_state, seq_idx, seg_i, forward=is_forward) > 0.0
         )
     n = len(seq["stops"])
     if not seq.get("closed"):
