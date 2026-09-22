@@ -1123,6 +1123,7 @@ def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 _P6_DEFAULT_PROCESS_WORKERS = max(1, min(4, os.cpu_count() or 1))
+_P6_PAIR_CHUNK_SIZE = 750
 
 
 def _resolve_p6_process_workers(context_count: int) -> int:
@@ -1232,7 +1233,7 @@ def _assign_layer_contexts(
     if not contexts:
         return _empty_accumulator()
     _prime_p6_access_cache(contexts)
-    task_count = sum(max(1, (len(ctx.od_rows) + 3999) // 4000) for ctx, _out, _ret in contexts)
+    task_count = sum(max(1, (len(ctx.od_rows) + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE) for ctx, _out, _ret in contexts)
     workers = _resolve_p6_task_workers(task_count)
     if workers <= 1 and executor is None:
         return _merge_period_aggregates([
@@ -1255,7 +1256,7 @@ def _assign_layer_contexts(
         token = journey_cache_token if journey_cache_token is not None else ("assign", period_index, id(crowd_state))
         for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
             n_rows = len(ctx.od_rows)
-            parts = min(workers, max(1, (n_rows + 3999) // 4000))
+            parts = min(workers, max(1, (n_rows + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE))
             for part in range(parts):
                 start = (n_rows * part) // parts
                 end = (n_rows * (part + 1)) // parts
