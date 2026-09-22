@@ -634,6 +634,18 @@ def test_build_journeys_shared_ride_cache_preserves_results() -> None:
     assert cached == uncached
     assert cache
 
+    perf: dict[str, float] = {}
+    profiled = build_journeys(
+        [(0, 0, 0)],
+        [(0, 2, 2)],
+        [seq],
+        perf_stats=perf,
+        **kwargs,
+    )
+    assert profiled == uncached
+    assert perf["journey_calls"] == 1.0
+    assert perf["journeys_s"] >= 0.0
+
 
 def test_base_t_rest_alternative_is_present_when_base_time_exists() -> None:
     got = _takt_mode_shares(
@@ -885,6 +897,23 @@ def test_closed_one_way_route_does_not_add_reverse_state() -> None:
     )
     assert journeys
     assert journeys[0].legs == ((0, 1, 0),)
+
+
+def test_transfer_index_shares_downstream_suffix_cache() -> None:
+    a = _synthetic_sequence([1, 2, 3, 4])
+    b = _synthetic_sequence([5, 6, 7, 8])
+    a["_seq_idx"] = 0
+    b["_seq_idx"] = 1
+    b["stops"][0]["lat"] = a["stops"][1]["lat"] + 0.0001
+    b["stops"][1]["lat"] = a["stops"][3]["lat"] + 0.0001
+    index = _build_transfer_edge_index([a, b], 800.0)
+
+    first = index.downstream_targets([a, b], 0, 0)
+    second = index.downstream_targets([a, b], 0, 0)
+
+    assert first == second
+    assert len(index.downstream_cache) == 1
+    assert index.downstream_cache[(0, 0)] is first
 
 
 def test_transfer_index_is_specific_to_current_stop() -> None:
