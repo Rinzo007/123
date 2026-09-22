@@ -741,7 +741,7 @@ def _assign_od(
             journeys = build_journeys(
                 origin_stops,
                 destination_stops,
-            route_sequences,
+                route_sequences,
             stop_time_min=stop_time_min,
             wait_time_min=wait_time_min,
             walk_to_stop_min=walk_to_stop_min,
