@@ -44,7 +44,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check numpy scipy networkx shapely pytest
 
       - name: Run Python P6 regression tests
-        run: python -m pytest -q --rootdir=tests tests/test_passenger_flow_takt_parity.py
+        run: |
+          mv __init__.py __init__.py.ci-disabled
+          trap 'mv __init__.py.ci-disabled __init__.py' EXIT
+          python -m pytest -q tests/test_passenger_flow_takt_parity.py
 
       - name: Generate Berlin Python snapshot with performance profile
         run: python scripts/takt_city_python_snapshot.py --city=berlin-v5
