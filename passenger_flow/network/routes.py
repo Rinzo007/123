@@ -231,17 +231,23 @@ def _leg_alternatives(
         alt_board_pos = int(alt_target["position"])
         alt_candidates: list[tuple[int, float]] = []
         if next_seq is not None and next_stop is not None:
-            for pos, stop in enumerate(route_sequences[alt_seq].get("stops") or []):
-                for target_seq, _target_stop, target_stop in transfer_index.get((alt_seq, pos), ()):
-                    if target_seq != next_seq:
-                        continue
-                    d = haversine_meters(
-                        float(target_stop["lat"]), float(target_stop["lon"]),
-                        float(next_stop["lat"]), float(next_stop["lon"]),
-                    )
-                    if d <= transfer_radius_m + 1e-9:
-                        alt_candidates.append((pos, d))
-                        break
+            target_candidates = (
+                transfer_index.targets_to_line(alt_seq, next_seq)
+                if hasattr(transfer_index, "targets_to_line")
+                else tuple(
+                    (int(pos), target_stop)
+                    for pos in range(len(route_sequences[alt_seq].get("stops") or []))
+                    for target_seq, _target_stop, target_stop in transfer_index.get((alt_seq, pos), ())
+                    if target_seq == next_seq
+                )
+            )
+            for pos, target_stop in target_candidates:
+                d = haversine_meters(
+                    float(target_stop["lat"]), float(target_stop["lon"]),
+                    float(next_stop["lat"]), float(next_stop["lon"]),
+                )
+                if d <= transfer_radius_m + 1e-9:
+                    alt_candidates.append((pos, d))
         else:
             found = _nearest_stop_on_sequence(
                 route_sequences[alt_seq], base_dest, radius_m=transfer_radius_m
@@ -1118,7 +1124,7 @@ class _TransferEdgeIndex(dict):
     downstream transfer targets теперь строится один раз для всей сети, а не
     заново для каждого OD.
     """
-    __slots__ = ("source_positions", "downstream_cache")
+    __slots__ = ("source_positions", "downstream_cache", "line_targets")
     _MAX_DOWNSTREAM_CACHE = 32768
 
     def __init__(self, *args: Any, source_positions: Mapping[int, tuple[int, ...]] | None = None, **kwargs: Any) -> None:
@@ -1127,6 +1133,16 @@ class _TransferEdgeIndex(dict):
         self.downstream_cache: dict[
             tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
         ] = {}
+        self.line_targets: dict[
+            tuple[int, int], tuple[tuple[int, dict[str, Any]], ...]
+        ] = {}
+
+    def targets_to_line(
+        self,
+        seq_idx: int,
+        target_seq_idx: int,
+    ) -> tuple[tuple[int, dict[str, Any]], ...]:
+        return self.line_targets.get((int(seq_idx), int(target_seq_idx)), ())
 
     def downstream_targets(
         self,
@@ -1174,6 +1190,7 @@ def _build_transfer_edge_index(
     tree = cKDTree(points)
     result: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
     source_positions: dict[int, list[int]] = {i: [] for i in range(len(route_stop_sequences))}
+    line_targets: dict[tuple[int, int], list[tuple[int, dict[str, Any]]]] = {}
     query_r = float(transfer_radius_m)
     for seq_a, seq in enumerate(route_stop_sequences):
         for ta in seq.get("stops", []):
@@ -1200,12 +1217,16 @@ def _build_transfer_edge_index(
             result[(seq_a, pos)] = tuple(
                 (seq_b, ta, tb) for seq_b, (_distance, tb) in sorted(best_by_line.items())
             )
+            for seq_b, (_distance, tb) in sorted(best_by_line.items()):
+                line_targets.setdefault((seq_a, seq_b), []).append((pos, tb))
             if best_by_line:
                 source_positions[seq_a].append(pos)
-    return _TransferEdgeIndex(
+    index = _TransferEdgeIndex(
         result,
         source_positions={seq_i: tuple(sorted(pos_list)) for seq_i, pos_list in source_positions.items()},
     )
+    index.line_targets = {key: tuple(value) for key, value in line_targets.items()}
+    return index
 
 def _dedupe_journeys(
     journeys: list[_Journey],
