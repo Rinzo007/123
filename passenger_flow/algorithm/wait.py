@@ -322,6 +322,7 @@ def _run_msa_period(
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     od_distances_m: np.ndarray | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+    perf_stats: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -330,6 +331,7 @@ def _run_msa_period(
     ``1 / iteration``. Остановка при относительном разрыве нагрузок
     маршрутов не больше ``gap_tol`` (по мотивам MSA-цикла Takt, gap <= 1%).
     """
+    msa_started = perf_counter() if perf_stats is not None else 0.0
     smoothed_seg_forward = _build_msa_load_vector(route_sequences, stops=False)
     smoothed_seg_reverse = _build_msa_load_vector(route_sequences, stops=False)
     smoothed_stop = _build_msa_load_vector(route_sequences, stops=True)
@@ -372,6 +374,7 @@ def _run_msa_period(
             car_period_multiplier=car_period_multiplier,
             od_distances_m=od_distances_m,
             ride_edge_cache=ride_edge_cache,
+            perf_stats=perf_stats,
         )
         alpha = 1.0 / iteration
         gap_num = 0.0
@@ -384,6 +387,7 @@ def _run_msa_period(
             num, total = _msa_smooth_vector(target, source, alpha)
             gap_num += num
             gap_total += total
+        crowd_started = perf_counter() if perf_stats is not None else 0.0
         crowd_state = _build_crowd_state(
             route_sequences,
             smoothed_seg_forward,
@@ -394,6 +398,9 @@ def _run_msa_period(
             period_hours,
             period_index=period_index,
         )
+        if perf_stats is not None:
+            perf_stats.setdefault("crowd_state_s", 0.0)
+            perf_stats["crowd_state_s"] += perf_counter() - crowd_started
         final_gap = gap_num / max(gap_total, 1.0)
         if iteration > 1 and final_gap <= gap_tol:
             break
@@ -401,4 +408,7 @@ def _run_msa_period(
     agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
     agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
     agg["seq_stop_totals"] = smoothed_stop.as_dict()
+    if perf_stats is not None:
+        perf_stats.setdefault("msa_s", 0.0)
+        perf_stats["msa_s"] += perf_counter() - msa_started
     return agg, iteration, final_gap
