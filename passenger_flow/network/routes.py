@@ -1303,14 +1303,9 @@ def _enumerate_journeys(
     road_time_s: float | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> list[_Journey]:
-    """Детерминированный shortest-path поиск по состояниям stop/line.
-
-    В отличие от прежнего beam-search здесь нет произвольного лимита ширины.
-    Состояние хранит текущую линию, остановку и число пересадок; после
-    перехода к следующей линии позиция посадки совпадает с текущей позицией,
-    поэтому отдельные leg_start и used в состоянии не нужны.
-    """
+    """Dijkstra по состояниям с ранней остановкой после получения альтернатив."""
     max_legs = min(max(1, int(max_legs)), _TAKT_MAX_LEGS)
+    max_alternatives = max(1, min(int(max_alternatives), _TAKT_ALTS))
     if not origins or not destinations or not route_stop_sequences:
         return []
 
@@ -1322,13 +1317,8 @@ def _enumerate_journeys(
         destination_by_seq.setdefault(seq_idx, set()).add(pos)
         destination_has_distance = destination_has_distance or has_distance
         if has_distance:
-            egress_by_stop[(seq_idx, pos)] = min(
-                egress_by_stop.get((seq_idx, pos), math.inf), dist_m
-            )
+            egress_by_stop[(seq_idx, pos)] = min(egress_by_stop.get((seq_idx, pos), math.inf), dist_m)
 
-    # (cost, seq_idx, pos, transfers, legs)
-    # После отказа от полного same-line графа всегда выполняется pos == leg_start;
-    # повторное использование линии разрешено.
     heap: list[tuple[float, int, int, int, tuple[tuple[int, int, int], ...]]] = []
     best: dict[tuple[int, int, int], float] = {}
     first_wait_by_seq: dict[int, float] = {}
@@ -1338,124 +1328,96 @@ def _enumerate_journeys(
         seq_idx, _stop_idx, pos, dist_m, has_distance = _journey_stop_parts(item)
         origin_has_distance = origin_has_distance or has_distance
         if has_distance:
-            access_by_stop[(seq_idx, pos)] = min(
-                access_by_stop.get((seq_idx, pos), math.inf), dist_m
-            )
-        if seq_idx in first_wait_by_seq:
-            continue
-        headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
-        first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
+            access_by_stop[(seq_idx, pos)] = min(access_by_stop.get((seq_idx, pos), math.inf), dist_m)
+        if seq_idx not in first_wait_by_seq:
+            headway = seq_headway_min.get(seq_idx) if seq_headway_min is not None else None
+            first_wait_by_seq[seq_idx] = _boarding_wait_min(headway, wait_time_min, wait_calc)
 
     transfer_index = transfer_index or _build_transfer_edge_index(route_stop_sequences, transfer_radius_m)
-    def cached_transfer_targets(
-        seq_idx: int, pos: int
-    ) -> tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]:
-        return transfer_index.get((seq_idx, pos), ())
+    complete_heap: list[tuple[float, tuple[tuple[int, int, int], ...]]] = []
+    selected: list[_Journey] = []
+    selected_signatures: set[tuple[tuple[int, int, int], ...]] = set()
+    first_stop: dict[str, Any] | None = None
+
+    def commit_ready(force: bool = False) -> bool:
+        nonlocal first_stop
+        lower_bound = heap[0][0] if heap else math.inf
+        while complete_heap and (force or complete_heap[0][0] <= lower_bound + 1e-12):
+            cost_value, signature = heapq.heappop(complete_heap)
+            if signature in selected_signatures:
+                continue
+            candidate = JourneyAlternative(cost_value, signature)
+            if not selected:
+                first_stop = route_stop_sequences[candidate.legs[0][0]]["stops"][candidate.legs[0][1]]
+                selected.append(candidate)
+                selected_signatures.add(signature)
+            else:
+                leg = candidate.legs[0]
+                stop = route_stop_sequences[leg[0]]["stops"][leg[1]]
+                distance_m = haversine_meters(
+                    float(first_stop["lat"]), float(first_stop["lon"]),
+                    float(stop["lat"]), float(stop["lon"]),
+                )
+                if distance_m <= 150.0 + 1e-9:
+                    selected.append(candidate)
+                    selected_signatures.add(signature)
+            if len(selected) >= max_alternatives:
+                return True
+        return False
 
     for item in origins:
         seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
         key = (seq_idx, int(orig_pos), 0)
-        state = (0.0, seq_idx, int(orig_pos), 0, tuple())
         if best.get(key) is None:
             best[key] = 0.0
-            heapq.heappush(heap, state)
-
-    journeys: list[_Journey] = []
-    seen_journeys: set[tuple[tuple[int, int, int], ...]] = set()
+            heapq.heappush(heap, (0.0, seq_idx, int(orig_pos), 0, tuple()))
 
     while heap:
+        if commit_ready():
+            return selected
         cost, seq_idx, pos, transfers, legs = heapq.heappop(heap)
         key = (seq_idx, pos, transfers)
         if cost > best.get(key, math.inf) + 1e-9:
             continue
-        seq = route_stop_sequences[seq_idx]
 
-        # Terminate at every destination stop reachable on this line.
         for d_pos in destination_by_seq.get(seq_idx, ()):
             if d_pos == pos and not legs:
                 continue
-            ride = _cached_ride_edge_time_min(
-                route_stop_sequences,
-                seq_idx,
-                pos,
-                d_pos,
-                stop_time_min=stop_time_min,
-                crowd_state=crowd_state,
-                cache=ride_edge_cache,
-            )
+            ride = _cached_ride_edge_time_min(route_stop_sequences, seq_idx, pos, d_pos,
+                                              stop_time_min=stop_time_min, crowd_state=crowd_state,
+                                              cache=ride_edge_cache)
             final_legs = legs + ((seq_idx, pos, d_pos),)
-            if not final_legs:
-                continue
-            first_seq = final_legs[0][0]
             use_takt_access = origin_has_distance and destination_has_distance
             if use_takt_access:
-                access_dist = access_by_stop.get((first_seq, int(final_legs[0][1])), 0.0)
+                access_dist = access_by_stop.get((seq_idx, int(final_legs[0][1])), 0.0)
                 egress_dist = egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
-                access_min = _takt_ri_access_min(
-                    access_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
+                fixed_access_min = (
+                    _takt_ri_anchor_min()
+                    + _takt_ri_access_min(access_dist, od_distance_m=od_distance_m, base_time_s=road_time_s)
+                    + _takt_ri_access_min(egress_dist, od_distance_m=od_distance_m, base_time_s=road_time_s)
                 )
-                egress_min = _takt_ri_access_min(
-                    egress_dist, od_distance_m=od_distance_m, base_time_s=road_time_s
-                )
-                fixed_access_min = _takt_ri_anchor_min() + access_min + egress_min
+                pool_total = cost + ride + _takt_pool_access_min(access_dist) + _takt_pool_access_min(egress_dist)
+                heapq.heappush(complete_heap, (pool_total, final_legs))
+                direct_total = cost + ride + fixed_access_min + first_wait_by_seq.get(seq_idx, 0.0)
+                if abs(direct_total - pool_total) > 1e-12:
+                    heapq.heappush(complete_heap, (direct_total, final_legs))
             else:
-                fixed_access_min = walk_to_stop_min
-            signature = final_legs
-            if signature not in seen_journeys:
-                seen_journeys.add(signature)
-                # Takt ri() first evaluates the shortest transit-network
-                # candidate without the initial wait/anchor. Keep that
-                # candidate ahead of the direct wait+anchor alternative.
-                if use_takt_access:
-                    pool_access_min = _takt_pool_access_min(
-                        access_by_stop.get(
-                            (first_seq, int(final_legs[0][1])), 0.0
-                        )
-                    )
-                    pool_egress_min = _takt_pool_access_min(
-                        egress_by_stop.get((seq_idx, int(d_pos)), 0.0)
-                    )
-                    pool_total = cost + ride + pool_access_min + pool_egress_min
-                    journeys.append(JourneyAlternative(pool_total, final_legs))
-                    direct_total = (
-                        cost
-                        + ride
-                        + fixed_access_min
-                        + first_wait_by_seq.get(first_seq, 0.0)
-                    )
-                    if abs(direct_total - pool_total) > 1e-12:
-                        journeys.append(JourneyAlternative(direct_total, final_legs))
-                else:
-                    journeys.append(
-                        JourneyAlternative(
-                            cost + ride + fixed_access_min + first_wait_by_seq.get(
-                                first_seq, 0.0
-                            ),
-                            final_legs,
-                        )
-                    )
+                complete_total = cost + ride + first_wait_by_seq.get(seq_idx, 0.0) + walk_to_stop_min
+                heapq.heappush(complete_heap, (complete_total, final_legs))
 
         if transfers >= max_legs - 1:
             continue
-
-        # Takt's `we` graph connects open stops on one sequence, but the
-        # subsequent transfer expansion only needs states at actual transfer
-        # source stops. Jump directly to every transfer source at or after the
-        # current position using the shared ride-time edge cache. This preserves
-        # the reachable transfer set without materializing O(n²) same-line states.
         if hasattr(transfer_index, "downstream_targets"):
-            downstream_targets = transfer_index.downstream_targets(
-                route_stop_sequences, seq_idx, pos
-            )
+            downstream_targets = transfer_index.downstream_targets(route_stop_sequences, seq_idx, pos)
         else:
             positions = getattr(transfer_index, "source_positions", None)
             entries: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
             if positions is not None:
                 source_positions = positions.get(int(seq_idx), ())
-                start = bisect_left(source_positions, int(pos))
-                for source_pos in source_positions[start:]:
+                start_pos = bisect_left(source_positions, int(pos))
+                for source_pos in source_positions[start_pos:]:
                     entries.extend(transfer_index.get((seq_idx, source_pos), ()))
             else:
                 n = len(route_stop_sequences[seq_idx].get("stops") or [])
@@ -1467,41 +1429,26 @@ def _enumerate_journeys(
             ta_pos = int(ta["position"])
             tb_pos = int(tb["position"])
             ride_to_transfer = _cached_ride_edge_time_min(
-                route_stop_sequences,
-                seq_idx,
-                pos,
-                ta_pos,
-                stop_time_min=stop_time_min,
-                crowd_state=crowd_state,
-                cache=ride_edge_cache,
-            )
+                route_stop_sequences, seq_idx, pos, ta_pos, stop_time_min=stop_time_min,
+                crowd_state=crowd_state, cache=ride_edge_cache)
             transfer_wait = _transfer_wait_min(
-                seq_idx, seq_b, ta, tb,
-                stop_time_min=stop_time_min,
-                wait_time_min=wait_time_min,
-                transfer_wait_min=transfer_wait_min,
-                seq_headway_min=seq_headway_min,
-                seq_jitter_s=seq_jitter_s,
-                route_stop_sequences=route_stop_sequences,
-            )
-            penalty = _transfer_penalty(
-                ta, tb,
-                transfer_penalty_min=transfer_penalty_min,
-                transfer_penalty_calc=transfer_penalty_calc,
-            )
+                seq_idx, seq_b, ta, tb, stop_time_min=stop_time_min, wait_time_min=wait_time_min,
+                transfer_wait_min=transfer_wait_min, seq_headway_min=seq_headway_min,
+                seq_jitter_s=seq_jitter_s, route_stop_sequences=route_stop_sequences)
+            penalty = _transfer_penalty(ta, tb, transfer_penalty_min=transfer_penalty_min,
+                                        transfer_penalty_calc=transfer_penalty_calc)
             closed_legs = legs + ((seq_idx, pos, ta_pos),)
             new_cost = cost + ride_to_transfer + penalty + transfer_wait
             nkey = (seq_b, tb_pos, transfers + 1)
             if new_cost + 1e-12 < best.get(nkey, math.inf):
                 best[nkey] = new_cost
-                heapq.heappush(heap, (
-                    new_cost, seq_b, tb_pos, transfers + 1,
-                    closed_legs
-                ))
+                heapq.heappush(heap, (new_cost, seq_b, tb_pos, transfers + 1, closed_legs))
 
-    return _dedupe_journeys(
-        journeys, max_alternatives, route_stop_sequences
-    )
+        if commit_ready():
+            return selected
+
+    commit_ready(force=True)
+    return selected
 
 # ===== Главная точка входа =====
 
