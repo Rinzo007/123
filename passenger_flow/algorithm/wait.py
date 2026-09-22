@@ -395,7 +395,6 @@ def _run_msa_period(
             period_index=period_index,
         )
         final_gap = gap_num / max(gap_total, 1.0)
-        prev_smoothed = dict(smoothed)
         if iteration > 1 and final_gap <= gap_tol:
             break
         wait_extra = dict(reliability_extra) if reliability_extra else None
