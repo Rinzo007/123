@@ -1242,9 +1242,9 @@ def _enumerate_journeys(
     """Детерминированный shortest-path поиск по состояниям stop/line.
 
     В отличие от прежнего beam-search здесь нет произвольного лимита ширины.
-    Состояние хранит текущую линию, остановку, число пересадок и уже
-    использованные линии; соседями являются оба направления движения по
-    sequence и ближайшие transfer-edge по каждой другой линии.
+    Состояние хранит текущую линию, остановку и число пересадок; после
+    перехода к следующей линии позиция посадки совпадает с текущей позицией,
+    поэтому отдельные leg_start и used в состоянии не нужны.
     """
     max_legs = min(max(1, int(max_legs)), _TAKT_MAX_LEGS)
     if not origins or not destinations or not route_stop_sequences:
@@ -1262,11 +1262,11 @@ def _enumerate_journeys(
                 egress_by_stop.get((seq_idx, pos), math.inf), dist_m
             )
 
-    # (cost, seq_idx, pos, transfers, leg_start, legs, used)
-    # used сохраняется только как provenance state; повторное использование
-    # линии разрешено, как в JS we-графе. Глубина ограничивается max_legs.
-    heap: list[tuple[float, int, int, int, int, tuple[tuple[int,int,int], ...], frozenset[int]]] = []
-    best: dict[tuple[int, int, int, int, frozenset[int]], float] = {}
+    # (cost, seq_idx, pos, transfers, legs)
+    # После отказа от полного same-line графа всегда выполняется pos == leg_start;
+    # повторное использование линии разрешено.
+    heap: list[tuple[float, int, int, int, tuple[tuple[int, int, int], ...]]] = []
+    best: dict[tuple[int, int, int], float] = {}
     first_wait_by_seq: dict[int, float] = {}
     access_by_stop: dict[tuple[int, int], float] = {}
     origin_has_distance = False
@@ -1319,8 +1319,8 @@ def _enumerate_journeys(
         seq_idx, _stop_idx, orig_pos, _dist_m, _has_distance = _journey_stop_parts(item)
         if seq_idx < 0 or seq_idx >= len(route_stop_sequences):
             continue
-        key = (seq_idx, int(orig_pos), 0, int(orig_pos), frozenset((seq_idx,)))
-        state = (0.0, seq_idx, int(orig_pos), 0, int(orig_pos), tuple(), frozenset((seq_idx,)))
+        key = (seq_idx, int(orig_pos), 0)
+        state = (0.0, seq_idx, int(orig_pos), 0, tuple())
         prior = best.get(key)
         if prior is None:
             best[key] = 0.0
@@ -1330,8 +1330,8 @@ def _enumerate_journeys(
     seen_journeys: set[tuple[tuple[int, int, int], ...]] = set()
 
     while heap:
-        cost, seq_idx, pos, transfers, leg_start, legs, used = heapq.heappop(heap)
-        key = (seq_idx, pos, transfers, leg_start, used)
+        cost, seq_idx, pos, transfers, legs = heapq.heappop(heap)
+        key = (seq_idx, pos, transfers)
         if cost > best.get(key, math.inf) + 1e-9:
             continue
         seq = route_stop_sequences[seq_idx]
@@ -1343,7 +1343,7 @@ def _enumerate_journeys(
             ride = _cached_ride_edge_time_min(
                 route_stop_sequences,
                 seq_idx,
-                leg_start,
+                pos,
                 d_pos,
                 stop_time_min=stop_time_min,
                 crowd_state=crowd_state,
@@ -1415,7 +1415,7 @@ def _enumerate_journeys(
             ride_to_transfer = _cached_ride_edge_time_min(
                 route_stop_sequences,
                 seq_idx,
-                leg_start,
+                pos,
                 ta_pos,
                 stop_time_min=stop_time_min,
                 crowd_state=crowd_state,
@@ -1437,12 +1437,12 @@ def _enumerate_journeys(
             )
             closed_legs = legs + ((seq_idx, leg_start, ta_pos),)
             new_cost = cost + ride_to_transfer + penalty + transfer_wait
-            nkey = (seq_b, tb_pos, transfers + 1, tb_pos, used | {seq_b})
+            nkey = (seq_b, tb_pos, transfers + 1)
             if new_cost + 1e-12 < best.get(nkey, math.inf):
                 best[nkey] = new_cost
                 heapq.heappush(heap, (
-                    new_cost, seq_b, tb_pos, transfers + 1, tb_pos,
-                    closed_legs, used | {seq_b}
+                    new_cost, seq_b, tb_pos, transfers + 1,
+                    closed_legs
                 ))
 
     return _dedupe_journeys(
