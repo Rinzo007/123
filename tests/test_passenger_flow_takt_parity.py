@@ -920,6 +920,9 @@ def test_transfer_index_precomputes_line_target_candidates() -> None:
     a = _synthetic_sequence([1, 2, 3, 4])
     b = _synthetic_sequence([5, 6, 7, 8])
     c = _synthetic_sequence([9, 10, 11, 12])
+    for pos, stop in enumerate(a["stops"]):
+        stop["lat"] = 52.0 + pos * 0.01
+        stop["lon"] = 4.0 + pos * 0.01
     for pos, stop in enumerate(b["stops"]):
         stop["lat"] = 52.02 + pos * 0.02
         stop["lon"] = 4.02 + pos * 0.02
