@@ -125,7 +125,7 @@ def _route_segment_indices(
     seq: dict[str, Any],
     orig_pos: int,
     dest_pos: int,
-) -> list[tuple[int, bool]]:
+) -> tuple[tuple[int, bool], ...]:
     """Возвращает физические сегменты и направление выбранной ножки."""
     n = len(seq["stops"])
     if orig_pos == dest_pos or n < 2:
@@ -137,7 +137,7 @@ def _route_segment_indices(
     key = (int(orig_pos), int(dest_pos))
     cached = cache.get(key)
     if cached is not None:
-        return list(cached)
+        return cached
     cache_enabled = len(cache) < 4096
 
     if not seq.get("closed"):
@@ -146,8 +146,9 @@ def _route_segment_indices(
         else:
             result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
         if cache_enabled:
-            cache[key] = tuple(result)
-        return result
+            result_tuple = tuple(result)
+            cache[key] = result_tuple
+            return result_tuple
 
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
@@ -169,8 +170,10 @@ def _route_segment_indices(
             result.append(((i - 1) % n, False))
             i = (i - 1 + n) % n
     if cache_enabled:
-        cache[key] = tuple(result)
-    return result
+        result_tuple = tuple(result)
+        cache[key] = result_tuple
+        return result_tuple
+    return tuple(result)
 
 def _nearest_stop_on_sequence(
     seq: Mapping[str, Any],
