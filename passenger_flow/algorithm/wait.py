@@ -229,6 +229,7 @@ def _run_msa_period(
     car_period_multiplier: float = 1.0,
     transfer_index: Mapping[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] | None = None,
     od_distances_m: np.ndarray | None = None,
+    ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     """Итеративное присваивание с методом последовательных усреднений (MSA).
 
@@ -246,6 +247,8 @@ def _run_msa_period(
     crowd_state = None
     agg: dict[str, Any] = {}
     final_gap = gap_tol
+    if ride_edge_cache is None:
+        ride_edge_cache = {}
     for iteration in range(1, max_iterations + 1):
         agg = _assign_od(
             od_rows,
@@ -278,6 +281,7 @@ def _run_msa_period(
             transfer_index=transfer_index,
             car_period_multiplier=car_period_multiplier,
             od_distances_m=od_distances_m,
+            ride_edge_cache=ride_edge_cache,
         )
         raw = agg["route_totals"]
         alpha = 1.0 / iteration
