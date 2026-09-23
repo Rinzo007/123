@@ -191,7 +191,7 @@ def verify_city_snapshots(
                     "satisfaction", "interchanges", "trackCapacity",
                     "coveredPoint", "servedByPoint", "missedByPoint",
                     "noRouteByPoint", "journeyOrigins", "equilibrium",
-                    "lines", "periods", "stops",
+                    "lines",
                 ),
             }
             for section, keys in required.items():
@@ -208,6 +208,25 @@ def verify_city_snapshots(
                     if key not in js_part or key not in py_part:
                         raise ReleaseGateError(
                             f"{name}: missing {section}.{key} in one of the snapshots"
+                        )
+            for label, snap in (("JS", js_snapshot), ("Python", py_snapshot)):
+                lines = snap["result"].get("lines")
+                if not isinstance(lines, list):
+                    raise ReleaseGateError(f"{name}: {label} result.lines must be a list")
+                for index, line in enumerate(lines):
+                    if not isinstance(line, dict):
+                        raise ReleaseGateError(
+                            f"{name}: {label} result.lines[{index}] must be an object"
+                        )
+                    periods = line.get("periods")
+                    if periods is not None and len(periods) != 5:
+                        raise ReleaseGateError(
+                            f"{name}: {label} line {line.get('id', index)} period result must contain 5 periods"
+                        )
+                    stops = line.get("stops")
+                    if stops is not None and not isinstance(stops, list):
+                        raise ReleaseGateError(
+                            f"{name}: {label} line {line.get('id', index)} stops must be a list"
                         )
             zone_count = js_snapshot.get("scenario", {}).get("zones")
             py_zone_count = py_snapshot.get("scenario", {}).get("zones")
@@ -226,10 +245,6 @@ def verify_city_snapshots(
                 ):
                     raise ReleaseGateError(
                         f"{name}: {label} journeyOrigins length does not match zones"
-                    )
-                if len(result["periods"]) != 5:
-                    raise ReleaseGateError(
-                        f"{name}: {label} period result must contain 5 periods"
                     )
     if require and missing:
         raise ReleaseGateError(
