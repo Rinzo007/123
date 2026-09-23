@@ -1122,8 +1122,9 @@ def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-_P6_DEFAULT_PROCESS_WORKERS = max(1, min(4, os.cpu_count() or 1))
-_P6_PAIR_CHUNK_SIZE = 750
+_P6_DEFAULT_PROCESS_WORKERS = max(1, min(6, os.cpu_count() or 1))
+# P6 assignment is CPU-bound Python work; use processes instead of threads.
+_P6_PAIR_CHUNK_SIZE = 500
 
 
 def _resolve_p6_process_workers(context_count: int) -> int:
@@ -1308,6 +1309,8 @@ def _run_msa_period_layers(
     ride_edge_cache = contexts[0][0].ride_edge_cache
     task_count = sum(max(1, (len(ctx.od_rows) + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE) for ctx, _out, _ret in contexts)
     workers = _resolve_p6_task_workers(task_count)
+    if workers > 1:
+        print(f"  P6: параллельный расчёт — {workers} процессов, {task_count} задач", flush=True)
     pool = _create_p6_process_pool(contexts, workers) if workers > 1 else None
     try:
         for iteration in range(1, max_iterations + 1):
