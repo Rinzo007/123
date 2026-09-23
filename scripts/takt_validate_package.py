@@ -33,11 +33,14 @@ def blob_sha(path: Path) -> str:
     return hashlib.sha1(f"blob {len(data)}\0".encode("ascii") + data).hexdigest()
 
 
-def resolve(base: Path, value: str, label: str) -> Path:
+def resolve(base: Path, value: str, label: str, fallback_root: Path | None = None) -> Path:
     path = Path(value)
-    if not path.is_absolute():
-        path = base / path
-    path = path.resolve()
+    if path.is_absolute():
+        path = path.resolve()
+    else:
+        primary = (base / path).resolve()
+        fallback = (fallback_root / path).resolve() if fallback_root else primary
+        path = primary if primary.is_file() else fallback
     if not path.is_file():
         raise PackageError(f"{label}: file not found: {path}")
     return path
@@ -127,7 +130,7 @@ def validate_purposes(data: Any) -> None:
                 raise PackageError(f"purposes.layers[{li}].{key}: expected an array")
 
 
-def validate_manifest(path: Path) -> dict[str, Any]:
+def validate_manifest(path: Path, fallback_root: Path | None = None) -> dict[str, Any]:
     data = load(path)
     if not isinstance(data, dict):
         raise PackageError("manifest: root must be an object")
@@ -138,7 +141,7 @@ def validate_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(bundle, dict) or not isinstance(bundle.get("source"), str):
         raise PackageError("manifest.bundle.source: required")
     base = path.parent
-    bundle_path = resolve(base, bundle["source"], "bundle")
+    bundle_path = resolve(base, bundle["source"], "bundle", fallback_root)
     expected_bundle = bundle.get("git_blob_sha")
     if expected_bundle:
         if blob_sha(bundle_path) != expected_bundle:
@@ -154,7 +157,7 @@ def validate_manifest(path: Path) -> dict[str, Any]:
             raise PackageError(f"duplicate city case: {name}")
         names.add(name)
         for field in ("model", "demand", "baseline", "purposes"):
-            resolve(base, case.get(field, ""), f"{name}.{field}")
+            resolve(base, case.get(field, ""), f"{name}.{field}", fallback_root)
     return data
 
 
@@ -163,8 +166,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args(argv)
     path = args.manifest.expanduser().resolve()
+    fallback_root = Path.cwd().resolve()
     try:
-        manifest = validate_manifest(path)
+        manifest = validate_manifest(path, fallback_root)
     except (OSError, PackageError) as exc:
         print(f"takt-package: FAIL: {exc}")
         return 1
@@ -172,10 +176,10 @@ def main(argv: list[str] | None = None) -> int:
     base = path.parent
     for case in manifest["city_cases"]:
         name = case["name"]
-        demand = load(resolve(base, case["demand"], f"{name}.demand"))
-        baseline = load(resolve(base, case["baseline"], f"{name}.baseline"))
-        purposes = load(resolve(base, case["purposes"], f"{name}.purposes"))
-        load(resolve(base, case["model"], f"{name}.model"))
+        demand = load(resolve(base, case["demand"], f"{name}.demand", fallback_root))
+        baseline = load(resolve(base, case["baseline"], f"{name}.baseline", fallback_root))
+        purposes = load(resolve(base, case["purposes"], f"{name}.purposes", fallback_root))
+        load(resolve(base, case["model"], f"{name}.model", fallback_root))
         validate_demand(demand)
         validate_baseline(baseline)
         validate_purposes(purposes)
