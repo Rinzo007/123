@@ -3,7 +3,6 @@
 Реализация вынесена в ``pipeline_runtime`` и специализированные stage-модули.
 """
 
-from ..ghs import compute_ghs, compute_ghs_s
 from ..overture.core import compute_overture
 from .dedup import apply_dedup_removals, dir_stat_volume_map
 from .filtering import (
@@ -22,8 +21,6 @@ __all__ = [
     "apply_limits",
     "build_filter_limits",
     "build_route_tasks",
-    "compute_ghs",
-    "compute_ghs_s",
     "compute_overture",
     "dir_stat_volume_map",
     "run_pipeline",
