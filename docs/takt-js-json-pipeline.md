@@ -64,3 +64,43 @@ The P7 workflow also:
 - validates generated JSON.
 
 The old Takt workflows that installed and executed the Python `passenger_flow` implementation are retired.
+
+## External OSM/WorldPop/OD integration
+
+Upstream geodata processing should produce four JSON products:
+
+- **demand** — zone points `pts` plus OD rows `od`; population from WorldPop is used upstream when building the demand/OD model.
+- **baseline** — route lines and stops derived from OSM/GTFS/network processing.
+- **purposes** — purpose-specific OD layers in the Takt JSON format.
+- **model** — city/model parameters consumed by the Takt bundle.
+
+Create a portable manifest for those products:
+
+```bash
+python scripts/takt_build_city_package.py \
+  --name voronezh-v1 \
+  --version v1 \
+  --model /data/voronezh/model.json \
+  --demand /data/voronezh/demand.json \
+  --baseline /data/voronezh/baseline.json \
+  --purposes /data/voronezh/purposes.json \
+  --bundle scripts/bd956ff0a1875604740f.js \
+  --output /data/voronezh/takt_city_manifest.json
+```
+
+Validate the package before running the engine:
+
+```bash
+python scripts/takt_validate_package.py /data/voronezh/takt_city_manifest.json
+```
+
+Run the external package directly:
+
+```bash
+python scripts/takt_city_python_snapshot.py \
+  --manifest /data/voronezh/takt_city_manifest.json \
+  --city voronezh-v1 \
+  --output-dir /data/voronezh/takt-results
+```
+
+Relative paths inside a custom manifest are resolved from the manifest directory. Absolute paths are also supported, so the OSM/WorldPop/OD pipeline can keep its source data outside the repository.
