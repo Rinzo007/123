@@ -271,7 +271,7 @@ async function terminateMatrixWorkers(){
   await Promise.all(workers.map(w=>w.worker.terminate()));
 }
 let MATRIX_CURRENT_CITY=null;
-const ROOT=path.resolve(__dirname,".."),MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
+const ROOT=path.resolve(__dirname,".."),DEFAULT_MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
 const hav=(a,b)=>{const r=6371e3,z=Math.PI/180,dl=(b[1]-a[1])*z,dn=(b[0]-a[0])*z,la=a[1]*z,lb=b[1]*z,q=Math.sin(dl/2)**2+Math.cos(la)*Math.cos(lb)*Math.sin(dn/2)**2;return 2*r*Math.asin(Math.sqrt(q))};
@@ -374,7 +374,9 @@ async function runOne(Bs,man,c){
  }
 }
 async function main(){
- const man=load(MANIFEST);
+ const manifestArg=process.argv.find(x=>x.startsWith("--manifest="));
+ const manifestPath=manifestArg?path.resolve(manifestArg.slice("--manifest=".length)):DEFAULT_MANIFEST;
+ const man=load(manifestPath);
  const arg=process.argv.find(x=>x.startsWith("--city="));
  const outputArg=process.argv.find(x=>x.startsWith("--output="));
  const cases=arg?[man.city_cases.find(c=>c.name===arg.slice(7))]:man.city_cases;
