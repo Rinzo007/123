@@ -1145,7 +1145,8 @@ def _resolve_p6_task_workers(task_count: int) -> int:
         requested = int(raw) if raw else _P6_DEFAULT_PROCESS_WORKERS
     except ValueError:
         requested = _P6_DEFAULT_PROCESS_WORKERS
-    return max(1, min(task_count, requested))
+    cpu_limit = max(1, os.cpu_count() or 1)
+    return max(1, min(task_count, requested, cpu_limit))
 
 
 _P6_WORKER_CONTEXTS: tuple[_AssignContext, ...] | None = None
