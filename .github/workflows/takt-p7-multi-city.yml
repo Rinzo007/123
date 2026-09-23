@@ -2,7 +2,9 @@ name: Takt P7 multi-city JS/JSON pipeline
 
 on:
   push:
-    branches: [p6-one-city-berlin-current]
+    branches: [main, p6-one-city-berlin-current]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -62,7 +64,7 @@ jobs:
           )
           for case in manifest["city_cases"]:
               name = case["name"]
-              generated = root / ".takt-generated" / name / "takt_python_snapshot.json"
+              generated = root / ".takt-generated" / name / "takt_result.json"
               golden = root / case["js_snapshot"]
               if not generated.is_file():
                   raise SystemExit(f"missing generated snapshot: {generated}")
@@ -86,7 +88,7 @@ jobs:
           import json
           from pathlib import Path
 
-          for path in Path(".takt-generated").glob("*/takt_python_snapshot.json"):
+          for path in Path(".takt-generated").glob("*/takt_result.json"):
               with path.open("r", encoding="utf-8") as handle:
                   value = json.load(handle)
               if not isinstance(value, dict):
