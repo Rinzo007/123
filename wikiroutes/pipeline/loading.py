@@ -7,7 +7,6 @@ from typing import Any
 from ..cache import JsonCache
 from ..config import CliConfig
 from ..http_client import SessionProvider
-from ..ideas import ideas_to_routes, load_ideas
 from ..models import Catalog, RouteData, RouteTask
 from ..report import Reporter
 from ..support import route_passes_number_filter
@@ -68,6 +67,18 @@ def load_idea_routes(
         return []
 
     reporter.line("\n[2.1/4] Загрузка идей пассажиров...")
+    try:
+        from ..ideas import ideas_to_routes, load_ideas
+    except ModuleNotFoundError as exc:
+        if exc.name in {"wikiroutes.ideas", "ideas"}:
+            reporter.line(
+                "  ⚠ Модуль идей пассажиров отсутствует в текущем пакете; "
+                "идеи пропущены."
+            )
+            return []
+
+        raise
+
     ideas_data: list[dict[str, Any]] = []
     try:
         ideas_data = load_ideas(
