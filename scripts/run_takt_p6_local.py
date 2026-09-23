@@ -87,6 +87,14 @@ def main() -> int:
         return 2
 
     _set_numeric_thread_limits()
+    # The snapshot script lives under scripts/, so make the repository root
+    # importable even when Python sets sys.path[0] to the script directory.
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = (
+        str(ROOT)
+        if not existing_pythonpath
+        else os.pathsep.join((str(ROOT), existing_pythonpath))
+    )
 
     start_method = (
         _default_start_method()
