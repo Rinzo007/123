@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from scripts.takt_city_python_snapshot import _bundle_path, _cases
+from scripts.takt_validate_package import validate_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,11 +34,22 @@ class TaktJsJsonPipelineTests(unittest.TestCase):
             ["amsterdam-v8", "berlin-v5", "hong-kong-v6"],
         )
 
+    def test_checked_in_manifest_is_a_valid_portable_package(self) -> None:
+        manifest = validate_manifest(MANIFEST)
+        self.assertEqual(
+            [case["name"] for case in manifest["city_cases"]],
+            ["amsterdam-v8", "berlin-v5", "hong-kong-v6"],
+        )
+
     def test_canonical_bundle_is_present_and_pinned(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         bundle = _bundle_path(manifest)
         self.assertTrue(bundle.is_file())
         self.assertEqual(len(manifest["bundle"]["git_blob_sha"]), 40)
+
+    def test_external_manifest_paths_are_resolved_from_manifest_directory(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertTrue(_bundle_path(manifest, MANIFEST).is_file())
 
     def test_python_orchestrator_does_not_import_legacy_engines(self) -> None:
         path = ROOT / "scripts" / "takt_city_python_snapshot.py"
