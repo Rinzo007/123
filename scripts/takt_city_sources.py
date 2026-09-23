@@ -159,9 +159,12 @@ def request_json(
     last_error: Exception | None = None
     for attempt in range(retries):
         try:
+            request_body = data
+            if method.upper() == "POST" and body is not None:
+                request_body = urlencode({"data": body}).encode("utf-8")
             req = Request(
                 query_url,
-                data=data,
+                data=request_body,
                 method=method,
                 headers={
                     "User-Agent": OSM_UA,
@@ -837,7 +840,7 @@ def build_package(args: argparse.Namespace) -> Path:
     if args.routes and args.osm:
         raise SourceError("--routes and --osm are mutually exclusive")
 
-    boundary = resolve_boundary(args.city, args.boundary) if (args.worldpop or args.osm or args.boundary) else None
+    boundary = resolve_boundary(args.place or args.city, args.boundary) if (args.worldpop or args.osm or args.boundary) else None
     bbox = parse_bbox(args.bbox) if args.bbox else (boundary_bbox(boundary) if boundary else None)
 
     points = prepare_population(
@@ -910,6 +913,7 @@ def build_package(args: argparse.Namespace) -> Path:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--city", required=True)
+    parser.add_argument("--place", help="OSM/Nominatim place name; defaults to --city.")
     parser.add_argument("--version", default="custom")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--bundle", type=Path, default=ROOT / "scripts" / "bd956ff0a1875604740f.js")
