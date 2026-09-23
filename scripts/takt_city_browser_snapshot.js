@@ -374,7 +374,21 @@ async function runOne(Bs,man,c){
  }
 }
 async function main(){
- const man=load(MANIFEST),arg=process.argv.find(x=>x.startsWith("--city="));
- const cases=arg?[man.city_cases.find(c=>c.name===arg.slice(7))]:man.city_cases;if(cases.some(x=>!x))throw Error("unknown city");
- const Bs=getBs();for(const c of cases){const out=path.join(ROOT,"tests/fixtures/cities",c.name,"takt_browser_snapshot.json");fs.mkdirSync(path.dirname(out),{recursive:true});const snap=await runOne(Bs,man,c);fs.writeFileSync(out,JSON.stringify(snap,null,2)+"\n");console.log(out)}}
+ const man=load(MANIFEST);
+ const arg=process.argv.find(x=>x.startsWith("--city="));
+ const outputArg=process.argv.find(x=>x.startsWith("--output="));
+ const cases=arg?[man.city_cases.find(c=>c.name===arg.slice(7))]:man.city_cases;
+ if(cases.some(x=>!x))throw Error("unknown city");
+ if(outputArg && cases.length!==1)throw Error("--output requires exactly one city");
+ const Bs=getBs();
+ for(const c of cases){
+   const out=outputArg
+     ? path.resolve(outputArg.slice("--output=".length))
+     : path.join(ROOT,"tests/fixtures/cities",c.name,"takt_browser_snapshot.json");
+   fs.mkdirSync(path.dirname(out),{recursive:true});
+   const snap=await runOne(Bs,man,c);
+   fs.writeFileSync(out,JSON.stringify(snap,null,2)+"\n");
+   console.log(out);
+ }
+}
 main().catch(e=>{console.error(e&&e.stack?e.stack:e);process.exitCode=1});
