@@ -55,9 +55,12 @@ def _bundle_path(manifest: dict[str, Any], manifest_path: Path | None = None) ->
         raise ValueError("city manifest bundle source is missing")
     base = manifest_path.parent if manifest_path is not None else ROOT
     path = Path(source)
-    if not path.is_absolute():
-        path = base / path
-    path = path.resolve()
+    if path.is_absolute():
+        path = path.resolve()
+    else:
+        primary = (base / path).resolve()
+        legacy = (ROOT / path).resolve()
+        path = primary if primary.is_file() else legacy
     if not path.is_file():
         raise FileNotFoundError(f"Takt JS bundle not found: {path}")
     return path
