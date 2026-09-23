@@ -141,6 +141,16 @@ def verify_city_snapshots(
         if not js_path.is_file() or not py_path.is_file():
             missing.append(name)
             continue
+        # Both schema and parity checks operate on the same loaded snapshots.
+        try:
+            js_snapshot = load_json(js_path)
+            py_snapshot = load_json(py_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ReleaseGateError(f"{name}: cannot read city snapshots: {exc}") from exc
+
+        if not isinstance(js_snapshot, dict) or not isinstance(py_snapshot, dict):
+            raise ReleaseGateError(f"{name}: city snapshots must be JSON objects")
+
         if check_parity:
             # Import lazily so the gate stays dependency-free.
             repo_root_str = str(repo_root)
@@ -148,8 +158,6 @@ def verify_city_snapshots(
                 sys.path.insert(0, repo_root_str)
             from scripts.takt_differential import compare_snapshots
 
-            js_snapshot = load_json(js_path)
-            py_snapshot = load_json(py_path)
             js_parity = dict(js_snapshot.get("parity", js_snapshot.get("differential", {})) or {})
             py_parity = dict(py_snapshot.get("parity", py_snapshot.get("differential", {})) or {})
             # Satisfaction causes remain in the full result for schema/audit coverage;
