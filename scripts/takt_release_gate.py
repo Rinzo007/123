@@ -127,9 +127,16 @@ def verify_city_snapshots(
     require: bool,
     check_schema: bool = False,
     check_parity: bool = False,
+    city: str | None = None,
 ) -> list[str]:
     missing: list[str] = []
-    for case in manifest["city_cases"]:
+    cases = [
+        case for case in manifest["city_cases"]
+        if city is None or case.get("name") == city
+    ]
+    if city is not None and not cases:
+        raise ReleaseGateError(f"unknown city {city!r}")
+    for case in cases:
         name = case["name"]
         js_rel = case.get("js_snapshot")
         py_rel = case.get("python_snapshot")
@@ -256,7 +263,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-city-parity",
         action="store_true",
-        help="compare checked-in JS/Python city snapshots for every city case",
+        help="compare checked-in JS/Python city snapshots",
+    )
+    parser.add_argument(
+        "--city",
+        help="restrict city snapshot checks to one manifest case",
     )
     args = parser.parse_args(argv)
 
@@ -280,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 require=args.require_city_snapshots,
                 check_schema=args.check_city_schemas,
                 check_parity=args.check_city_parity,
+                city=args.city,
             )
     except ReleaseGateError as exc:
         print(f"takt-release-gate: FAIL: {exc}", file=sys.stderr)
