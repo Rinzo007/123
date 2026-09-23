@@ -1,0 +1,99 @@
+name: Takt P7 multi-city JS/JSON pipeline
+
+on:
+  push:
+    branches: [p6-one-city-berlin-current]
+  workflow_dispatch:
+
+concurrency:
+  group: takt-p7-multi-city-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  takt:
+    name: Takt P7 multi-city
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify pinned Takt bundle and all city inputs
+        run: python scripts/takt_release_gate.py
+
+      - name: Run stdlib JS/JSON architecture tests
+        run: python -m unittest discover -s tests -p "test_takt_js_json_pipeline.py" -v
+
+      - name: Check Python orchestration scripts
+        run: python -m compileall -q scripts/takt_city_python_snapshot.py scripts/run_takt_p6_local.py scripts/takt_release_gate.py scripts/takt_differential.py
+
+      - name: Check canonical JS pipeline syntax
+        run: node --check scripts/takt_city_browser_snapshot.js
+
+      - name: Verify checked-in city goldens
+        run: python scripts/takt_release_gate.py --require-city-snapshots --check-city-schemas --check-city-parity
+
+      - name: Generate every pinned city through Python JS/JSON pipeline
+        run: python scripts/takt_city_python_snapshot.py --all --output-dir=.takt-generated
+
+      - name: Compare generated runtime results with canonical JS goldens
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path(".")
+          manifest = json.loads(
+              (root / "tests/fixtures/takt_release_city_cases.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          for case in manifest["city_cases"]:
+              name = case["name"]
+              generated = root / ".takt-generated" / name / "takt_python_snapshot.json"
+              golden = root / case["js_snapshot"]
+              if not generated.is_file():
+                  raise SystemExit(f"missing generated snapshot: {generated}")
+              subprocess.run(
+                  [
+                      sys.executable,
+                      "scripts/takt_differential.py",
+                      str(golden),
+                      str(generated),
+                      "--max-diffs",
+                      "5",
+                  ],
+                  check=True,
+              )
+              print(f"{name}: generated result matches canonical JS golden")
+          PY
+
+      - name: Validate generated JSON documents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for path in Path(".takt-generated").glob("*/takt_python_snapshot.json"):
+              with path.open("r", encoding="utf-8") as handle:
+                  value = json.load(handle)
+              if not isinstance(value, dict):
+                  raise SystemExit(f"snapshot is not a JSON object: {path}")
+              print(f"{path}: valid JSON object")
+          PY
+
+      - name: Cleanup generated snapshots
+        if: always()
+        run: rm -rf .takt-generated
