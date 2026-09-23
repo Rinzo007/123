@@ -337,6 +337,8 @@ function clean(x){
     lines: x.lines || [],
     modeSplit: x.modeSplit || {transit:0,car:0,walk:0,rest:0},
     satisfaction: x.satisfaction || null,
+    periods: x.periods || [],
+    stops: x.stops || [],
     ridersPerDay: Number(x.ridersPerDay || 0),
     transferTrips: Number(x.transferTrips || 0),
     interchanges: x.interchanges || [],
