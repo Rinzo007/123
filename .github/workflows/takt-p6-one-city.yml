@@ -37,7 +37,7 @@ jobs:
         run: python scripts/takt_city_python_snapshot.py --city=berlin-v5 --sync-browser
 
       - name: Check city golden schema
-        run: python scripts/takt_release_gate.py --check-city-schemas
+        run: python scripts/takt_release_gate.py --check-city-schemas --city=berlin-v5
 
       - name: Verify canonical Berlin snapshot is valid JSON
         run: python -m json.tool tests/fixtures/cities/berlin-v5/takt_python_snapshot.json >/dev/null
