@@ -37,7 +37,10 @@ jobs:
         run: python scripts/takt_validate_package.py tests/fixtures/takt_release_city_cases.json
 
       - name: Run stdlib JS/JSON architecture tests
-        run: python -m unittest discover -s tests -p "test_takt_*_pipeline.py" -v
+        run: python -m unittest discover -s tests -p "test_takt_js_json_pipeline.py" -v
+
+      - name: Run Takt source adapter tests
+        run: python -m unittest discover -s tests -p "test_takt_city_sources.py" -v
 
       - name: Check Python orchestration scripts
         run: python -m compileall -q scripts/takt_city_python_snapshot.py scripts/run_takt_p6_local.py scripts/takt_release_gate.py scripts/takt_differential.py scripts/takt_validate_package.py scripts/takt_build_city_package.py
