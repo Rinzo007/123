@@ -80,7 +80,7 @@ def run_city(
         f"--output={output}",
     ]
     print(
-        f"P6 Python pipeline: city={city}, "
+        f"P6 Python orchestration: city={city}, "
         f"engine=JS bundle, input=JSON, output={output}"
     )
     completed = subprocess.run(command, cwd=ROOT, env=env)
@@ -90,7 +90,7 @@ def run_city(
     if sync_browser:
         browser_output = output.parent / "takt_browser_snapshot.json"
         shutil.copyfile(output, browser_output)
-        print(f"Synced JS golden: {browser_output}")
+        print(f"Synced canonical JS snapshot: {browser_output}")
 
     return 0
 
@@ -99,10 +99,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the canonical Takt JS + JSON pipeline through Python."
     )
-    parser.add_argument(
+    city_group = parser.add_mutually_exclusive_group()
+    city_group.add_argument(
         "--city",
-        default="berlin-v5",
         help="Pinned city case from tests/fixtures/takt_release_city_cases.json.",
+    )
+    city_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every pinned city case from the manifest.",
     )
     parser.add_argument(
         "--output-dir",
@@ -131,8 +136,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         manifest = load_json(MANIFEST)
-        cases = _cases(manifest, args.city)
         bundle_path = _bundle_path(manifest)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    selected_city = None if args.all else (args.city or "berlin-v5")
+    try:
+        cases = _cases(manifest, selected_city)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
