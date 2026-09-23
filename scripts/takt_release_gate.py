@@ -240,9 +240,8 @@ def verify_city_snapshots(
                         f"{name}: JS line {line.get('id', index)} stops must be a list"
                     )
             zone_count = js_snapshot.get("scenario", {}).get("zones")
-            py_zone_count = py_snapshot.get("scenario", {}).get("zones")
-            if zone_count != py_zone_count:
-                raise ReleaseGateError(f"{name}: zone count differs between snapshots")
+            if not isinstance(zone_count, int) or zone_count < 0:
+                raise ReleaseGateError(f"{name}: JS scenario.zones must be a non-negative integer")
             result = js_snapshot["result"]
             for key in ("coveredPoint", "servedByPoint", "missedByPoint", "noRouteByPoint"):
                 if len(result[key]) != zone_count:
@@ -278,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-city-snapshots",
         action="store_true",
-        help="fail unless every city case has checked-in JS/Python golden snapshots",
+        help="fail unless every city case has a checked-in canonical JS golden snapshot",
     )
     parser.add_argument(
         "--check-city-schemas",
