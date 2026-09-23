@@ -43,7 +43,7 @@ jobs:
         run: python -m unittest discover -s tests -p "test_takt_city_sources.py" -v
 
       - name: Check Python orchestration scripts
-        run: python -m compileall -q scripts/takt_city_python_snapshot.py scripts/run_takt_p6_local.py scripts/takt_release_gate.py scripts/takt_differential.py scripts/takt_validate_package.py scripts/takt_build_city_package.py
+        run: python -m compileall -q scripts/takt_release_gate.py scripts/takt_differential.py scripts/takt_validate_package.py scripts/takt_build_city_package.py scripts/takt_city_input.py scripts/takt_city_sources.py
 
       - name: Check canonical JS pipeline syntax
         run: node --check scripts/takt_city_browser_snapshot.js
