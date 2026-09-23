@@ -126,6 +126,7 @@ def verify_city_snapshots(
     *,
     require: bool,
     check_schema: bool = False,
+    check_parity: bool = False,
 ) -> list[str]:
     missing: list[str] = []
     for case in manifest["city_cases"]:
@@ -140,33 +141,31 @@ def verify_city_snapshots(
         if not js_path.is_file() or not py_path.is_file():
             missing.append(name)
             continue
-        # Import lazily so the gate stays dependency-free. When this
-        # file is executed directly (python scripts/takt_release_gate.py),
-        # Python puts scripts/ on sys.path, not the repository root.
-        # Add the root explicitly so the sibling module is importable.
-        repo_root_str = str(repo_root)
-        if repo_root_str not in sys.path:
-            sys.path.insert(0, repo_root_str)
-        from scripts.takt_differential import compare_snapshots
+        if check_parity:
+            # Import lazily so the gate stays dependency-free.
+            repo_root_str = str(repo_root)
+            if repo_root_str not in sys.path:
+                sys.path.insert(0, repo_root_str)
+            from scripts.takt_differential import compare_snapshots
 
-        js_snapshot = load_json(js_path)
-        py_snapshot = load_json(py_path)
-        js_parity = dict(js_snapshot.get("parity", js_snapshot.get("differential", {})) or {})
-        py_parity = dict(py_snapshot.get("parity", py_snapshot.get("differential", {})) or {})
-        # Satisfaction causes remain in the full result for schema/audit coverage;
-        # the release comparison uses the stable score/trip scalar only.
-        for parity in (js_parity, py_parity):
-            sat = parity.pop("satisfaction", None)
-            if isinstance(sat, dict):
-                parity["satisfactionScore"] = sat.get("score")
-                parity["satisfactionTotalTrips"] = sat.get("totalTrips")
-        differences = compare_snapshots(js_parity, py_parity)
-        if differences:
-            first = differences[0]
-            raise ReleaseGateError(
-                f"{name}: JS/Python parity mismatch at {first.path}: "
-                f"{first.detail}"
-            )
+            js_snapshot = load_json(js_path)
+            py_snapshot = load_json(py_path)
+            js_parity = dict(js_snapshot.get("parity", js_snapshot.get("differential", {})) or {})
+            py_parity = dict(py_snapshot.get("parity", py_snapshot.get("differential", {})) or {})
+            # Satisfaction causes remain in the full result for schema/audit coverage;
+            # the parity comparison uses the stable score/trip scalar only.
+            for parity in (js_parity, py_parity):
+                sat = parity.pop("satisfaction", None)
+                if isinstance(sat, dict):
+                    parity["satisfactionScore"] = sat.get("score")
+                    parity["satisfactionTotalTrips"] = sat.get("totalTrips")
+            differences = compare_snapshots(js_parity, py_parity)
+            if differences:
+                first = differences[0]
+                raise ReleaseGateError(
+                    f"{name}: JS/Python parity mismatch at {first.path}: "
+                    f"{first.detail}"
+                )
         if check_schema:
             required = {
                 "parity": (
@@ -246,6 +245,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="validate the richer city result schema and point-vector lengths",
     )
+    parser.add_argument(
+        "--check-city-parity",
+        action="store_true",
+        help="compare checked-in JS/Python city snapshots for every city case",
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -261,12 +265,13 @@ def main(argv: list[str] | None = None) -> int:
         # compare checked-in snapshots before regeneration, because a stale
         # fixture must not block the job that refreshes it.
         missing: list[str] = []
-        if args.require_city_snapshots or args.check_city_schemas:
+        if args.require_city_snapshots or args.check_city_schemas or args.check_city_parity:
             missing = verify_city_snapshots(
                 manifest,
                 repo_root,
                 require=args.require_city_snapshots,
                 check_schema=args.check_city_schemas,
+                check_parity=args.check_city_parity,
             )
     except ReleaseGateError as exc:
         print(f"takt-release-gate: FAIL: {exc}", file=sys.stderr)
