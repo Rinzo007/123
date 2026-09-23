@@ -283,9 +283,9 @@ const resolveFrom= (base,p) => {
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
 const hav=(a,b)=>{const r=6371e3,z=Math.PI/180,dl=(b[1]-a[1])*z,dn=(b[0]-a[0])*z,la=a[1]*z,lb=b[1]*z,q=Math.sin(dl/2)**2+Math.cos(la)*Math.cos(lb)*Math.sin(dn/2)**2;return 2*r*Math.asin(Math.sqrt(q))};
-function getBs(bundleOverride){
- const bundlePath=bundleOverride
-   ? resolveFrom(path.dirname(DEFAULT_MANIFEST),bundleOverride)
+function getBs(bundlePathOverride){
+ const bundlePath=bundlePathOverride
+   ? path.resolve(bundlePathOverride)
    : (process.env.TAKT_BUNDLE_PATH?path.resolve(process.env.TAKT_BUNDLE_PATH):path.join(ROOT,"scripts/bd956ff0a1875604740f.js"));
  const b=fs.readFileSync(bundlePath,"utf8"),m="})();",i=b.lastIndexOf(m);if(i<0)throw Error("Takt bundle terminator not found");
  const s={console,performance,setTimeout,clearTimeout,setInterval,clearInterval,TextEncoder,TextDecoder,URL,URLSearchParams,
@@ -395,7 +395,9 @@ async function main(){
  if(cases.some(x=>!x))throw Error("unknown city");
  if(outputArg && cases.length!==1)throw Error("--output requires exactly one city");
  const bundleOverride=man.bundle&&typeof man.bundle.source==="string"?man.bundle.source:null;
- const Bs=getBs(bundleOverride);
+ const bundlePath=bundleOverride?resolveFrom(manifestDir,bundleOverride):null;
+ if(bundlePath&&!fs.existsSync(bundlePath))throw Error("Takt bundle not found: "+bundlePath);
+ const Bs=getBs(bundlePath);
  for(const c of cases){
    const out=outputArg
      ? path.resolve(outputArg.slice("--output=".length))
