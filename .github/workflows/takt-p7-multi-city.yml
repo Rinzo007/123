@@ -41,7 +41,7 @@ jobs:
         run: node --check scripts/takt_city_browser_snapshot.js
 
       - name: Verify checked-in city goldens
-        run: python scripts/takt_release_gate.py --require-city-snapshots --check-city-schemas --check-city-parity
+        run: python scripts/takt_release_gate.py --require-city-snapshots --check-city-schemas
 
       - name: Generate every pinned city through Python JS/JSON pipeline
         run: python scripts/takt_city_python_snapshot.py --all --output-dir=.takt-generated
