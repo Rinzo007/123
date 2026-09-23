@@ -47,7 +47,6 @@ All pinned cities:
 python scripts/takt_city_python_snapshot.py --all
 ```
 
-The legacy launcher `scripts/run_takt_p6_local.py` remains as a compatibility entry point and invokes the same JS/JSON pipeline.
 
 ## Release checks
 
