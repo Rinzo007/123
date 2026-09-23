@@ -31,10 +31,8 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
-import hashlib
 import json
 import math
-import os
 import shutil
 import struct
 import sys
@@ -56,10 +54,8 @@ from scripts.takt_city_input import (  # noqa: E402
     load_od as load_od_file,
     load_population as load_population_geojson,
     load_routes as load_routes_geojson,
-    props,
 )
 
-PERIODS = 5
 GRID_LON_DEG = 0.01
 GRID_LAT_RATIO = 0.62
 POP_CUTOFF = 40.0
@@ -480,8 +476,15 @@ def load_worldpop(
     with rasterio.open(path) as ds:
         if ds.crs is None:
             raise SourceError(f"{path}: raster has no CRS")
-        if boundary is not None:
-            min_lon, min_lat, max_lon, max_lat = _geojson_bounds(boundary)  # type: ignore[misc]
+        boundary_raster = boundary
+        if boundary is not None and str(ds.crs).upper() not in {"EPSG:4326", "OGC:CRS84"}:
+            from rasterio.warp import transform_geom
+            boundary_raster = transform_geom("EPSG:4326", ds.crs, boundary)
+        if boundary_raster is not None:
+            bounds = _geojson_bounds(boundary_raster)
+            if bounds is None:
+                raise SourceError("boundary has no coordinates")
+            min_lon, min_lat, max_lon, max_lat = bounds
             try:
                 window = from_bounds(min_lon, min_lat, max_lon, max_lat, ds.transform)
             except (ValueError, TypeError) as exc:
@@ -506,7 +509,7 @@ def load_worldpop(
         values = np.maximum(values, 0.0)
         if boundary is not None:
             mask = geometry_mask(
-                [boundary],
+                [boundary_raster],
                 out_shape=values.shape,
                 transform=transform_window,
                 invert=True,
