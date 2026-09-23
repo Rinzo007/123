@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "tests" / "fixtures" / "takt_release_city_cases.json"
+DEFAULT_MANIFEST = ROOT / "tests" / "fixtures" / "takt_release_city_cases.json"
 JS_PIPELINE = ROOT / "scripts" / "takt_city_browser_snapshot.js"
 
 
@@ -110,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Run every pinned city case from the manifest.",
     )
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=DEFAULT_MANIFEST,
+        help="City manifest; can be a generated custom-city package manifest.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("tests/fixtures/cities"),
@@ -130,12 +136,13 @@ def main(argv: list[str] | None = None) -> int:
     if not JS_PIPELINE.is_file():
         print(f"error: JS pipeline not found: {JS_PIPELINE}", file=sys.stderr)
         return 2
-    if not MANIFEST.is_file():
-        print(f"error: city manifest not found: {MANIFEST}", file=sys.stderr)
+    manifest_path = _rooted(args.manifest)
+    if not manifest_path.is_file():
+        print(f"error: city manifest not found: {manifest_path}", file=sys.stderr)
         return 2
 
     try:
-        manifest = load_json(MANIFEST)
+        manifest = load_json(manifest_path)
         bundle_path = _bundle_path(manifest)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
