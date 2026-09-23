@@ -251,9 +251,18 @@ def zonal_weights(
     rasterio = stack["rasterio"]
     paths = resolve_sources(raster_path, (".tif", ".tiff"))
     if not paths:
+        logger.warning(
+            "OD: population raster не найден (%r); используются единичные веса зон",
+            raster_path,
+        )
         return np.ones(len(zones))
     index = open_raster_index(paths, rasterio)
     if not index:
+        logger.warning(
+            "OD: population raster не удалось открыть/геопривязать (%s); "
+            "используются единичные веса зон",
+            ", ".join(paths),
+        )
         return np.ones(len(zones))
     total = np.zeros(len(zones), dtype=np.float64)
     try:
