@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import unittest
 from pathlib import Path
@@ -33,12 +34,27 @@ class TaktJsJsonPipelineTests(unittest.TestCase):
         self.assertEqual(len(manifest["bundle"]["git_blob_sha"]), 40)
 
     def test_python_orchestrator_does_not_import_legacy_engines(self) -> None:
-        source = (
-            ROOT / "scripts" / "takt_city_python_snapshot.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("passenger_flow", source)
-        self.assertNotIn("from od", source)
-        self.assertNotIn("import od", source)
+        path = ROOT / "scripts" / "takt_city_python_snapshot.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported_modules = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        imported_modules.update(
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        self.assertFalse(
+            any(
+                module == "od" or module.startswith("od.")
+                or module == "passenger_flow"
+                or module.startswith("passenger_flow.")
+                for module in imported_modules
+            )
+        )
 
 
 if __name__ == "__main__":
