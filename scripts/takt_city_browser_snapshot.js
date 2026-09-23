@@ -272,6 +272,10 @@ async function terminateMatrixWorkers(){
 }
 let MATRIX_CURRENT_CITY=null;
 const ROOT=path.resolve(__dirname,".."),DEFAULT_MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
+const resolveFrom= (base,p) => {
+  if(typeof p!=="string" || !p) throw Error("manifest path must be a non-empty string");
+  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(base,p);
+};
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
 const hav=(a,b)=>{const r=6371e3,z=Math.PI/180,dl=(b[1]-a[1])*z,dn=(b[0]-a[0])*z,la=a[1]*z,lb=b[1]*z,q=Math.sin(dl/2)**2+Math.cos(la)*Math.cos(lb)*Math.sin(dn/2)**2;return 2*r*Math.asin(Math.sqrt(q))};
@@ -289,8 +293,9 @@ function coarseCell(point){
  const lon=Number(point[0]),lat=Number(point[1]);
  return Math.floor(lon/0.01)+":"+Math.floor(lat/0.0062);
 }
-function build(c){
- const d=load(path.join(ROOT,c.demand)),m=load(path.join(ROOT,c.model)),b=load(path.join(ROOT,c.baseline)),p=load(path.join(ROOT,c.purposes));
+function build(c,manifestDir){
+ const d=load(resolveFrom(manifestDir,c.demand)),m=load(resolveFrom(manifestDir,c.model)),
+   b=load(resolveFrom(manifestDir,c.baseline)),p=load(resolveFrom(manifestDir,c.purposes));
  const s=c.golden_scenario||{};
  const maxOd=Number(s.max_od_pairs||Infinity),maxPurpose=Number(s.max_purpose_od_pairs||Infinity),maxLines=Number(s.max_lines||Infinity);
  const originalOd=d.od||[];
@@ -354,8 +359,8 @@ function clean(x){
     equilibrium: x.equilibrium || null,
   };
 }
-async function runOne(Bs,man,c){
- const q=build(c); MATRIX_CURRENT_CITY=q;
+async function runOne(Bs,man,c,manifestDir){
+ const q=build(c,manifestDir); MATRIX_CURRENT_CITY=q;
  try{
  const r=await Bs(q.city,q.lines,q.geoms,q.base,q.layers,false,undefined,undefined,{base:.6,perKm:.12});
  const full=clean(r),modes=r.modeSplit||{};
@@ -376,6 +381,7 @@ async function runOne(Bs,man,c){
 async function main(){
  const manifestArg=process.argv.find(x=>x.startsWith("--manifest="));
  const manifestPath=manifestArg?path.resolve(manifestArg.slice("--manifest=".length)):DEFAULT_MANIFEST;
+ const manifestDir=path.dirname(manifestPath);
  const man=load(manifestPath);
  const arg=process.argv.find(x=>x.startsWith("--city="));
  const outputArg=process.argv.find(x=>x.startsWith("--output="));
@@ -388,7 +394,7 @@ async function main(){
      ? path.resolve(outputArg.slice("--output=".length))
      : path.join(ROOT,"tests/fixtures/cities",c.name,"takt_browser_snapshot.json");
    fs.mkdirSync(path.dirname(out),{recursive:true});
-   const snap=await runOne(Bs,man,c);
+   const snap=await runOne(Bs,man,c,manifestDir);
    fs.writeFileSync(out,JSON.stringify(snap,null,2)+"\n");
    console.log(out);
  }
