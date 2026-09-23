@@ -22,7 +22,7 @@ from .enums import ExportFormat, RouteType, parse_route_type
 
 
 DEFAULT_DATA_DIR = Path(
-    os.getenv("WIKIROUTES_DATA_DIR", r"D:\\Programs\\Cities2")
+    os.getenv("WIKIROUTES_DATA_DIR", r"D:\Programs\Cities2")
 )
 DEFAULT_GHS_DIR = Path(
     os.getenv("WIKIROUTES_GHS_DIR", str(DEFAULT_DATA_DIR / "GHS"))
