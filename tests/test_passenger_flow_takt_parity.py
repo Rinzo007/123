@@ -1481,3 +1481,14 @@ def test_p6_process_worker_count_respects_context_count(monkeypatch):
     assert _resolve_p6_process_workers(3) == 3
     assert _resolve_p6_process_workers(1) == 1
 
+
+def test_p6_task_worker_count_respects_cpu_limit(monkeypatch):
+    """Явный лимит процессов P6 не должен превышать доступные CPU."""
+    monkeypatch.setenv("TAKT_P6_PROCESSES", "8")
+    import passenger_flow.core as core
+
+    monkeypatch.setattr(core.os, "cpu_count", lambda: 4)
+    from passenger_flow.core import _resolve_p6_task_workers
+
+    assert _resolve_p6_task_workers(20) == 4
+
