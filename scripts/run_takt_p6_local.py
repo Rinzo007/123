@@ -17,10 +17,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the canonical Takt JS + JSON P6 pipeline locally."
     )
-    parser.add_argument(
+    city_group = parser.add_mutually_exclusive_group()
+    city_group.add_argument(
         "--city",
-        default="berlin-v5",
         help="Pinned city case from tests/fixtures/takt_release_city_cases.json.",
+    )
+    city_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every pinned city case from the manifest.",
     )
     parser.add_argument(
         "--output-dir",
@@ -62,11 +67,16 @@ def main(argv: list[str] | None = None) -> int:
     command = [
         sys.executable,
         str(SNAPSHOT),
-        f"--city={args.city}",
         f"--output-dir={args.output_dir}",
         f"--node={args.node}",
     ]
-    print(f"P6 local: city={args.city}, engine=JS bundle, input=JSON")
+    if args.all:
+        command.append("--all")
+        selected_label = "all"
+    else:
+        selected_label = args.city or "berlin-v5"
+        command.append(f"--city={selected_label}")
+    print(f"P7 local: city={selected_label}, engine=JS bundle, input=JSON")
     completed = subprocess.run(command, cwd=ROOT)
     return completed.returncode
 
