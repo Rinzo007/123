@@ -65,6 +65,57 @@ The P7 workflow also:
 
 The old Takt workflows that installed and executed the Python `passenger_flow` implementation are retired.
 
+## Direct source adapter (P9)
+
+For a city that is not already packaged, the repository now has a single upstream
+adapter that can start from WorldPop + OSM instead of requiring hand-written
+Takt JSON:
+
+```bash
+python scripts/takt_city_sources.py \
+  --city voronezh-v1 \
+  --place Voronezh \
+  --worldpop /data/rus_pop_2025_CN_100m_R2025A_v1.tif \
+  --boundary /data/voronezh-boundary.geojson \
+  --osm \
+  --trips-per-resident 1.0 \
+  --d0-m 5000 \
+  --k 12 \
+  --output-dir /data/voronezh
+```
+
+The adapter performs these source steps:
+
+```
+WorldPop GeoTIFF + boundary
+        -> aggregated demand points
+        -> Takt-compatible gravity OD
+        -> demand.json
+
+OSM Overpass route relations
+        -> route directions + stops
+        -> baseline.json
+
+optional purpose OD
+        -> purposes.json
+
+all four JSON inputs + pinned bundle
+        -> takt_city_manifest.json
+```
+
+The resulting package is validated automatically. Add `--run` to invoke the
+same JavaScript engine used by the release pipeline and write
+`results/<city>/takt_result.json`.
+
+WorldPop processing requires `rasterio` and `numpy`. OSM mode uses the public
+Nominatim/Overpass endpoints and can be avoided entirely with the offline
+`--population` + `--routes` inputs.
+
+The gravity stage is deliberately parameterized (`--trips-per-resident`,
+`--d0-m`, `--k`) rather than silently claiming a city calibration. For a
+calibrated OD matrix, pass `--od`; for purpose-specific layers, pass
+`--purposes`. The Takt runtime itself remains JavaScript-only.
+
 ## External OSM/WorldPop/OD integration
 
 Upstream geodata processing should produce four JSON products:
