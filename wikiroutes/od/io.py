@@ -728,7 +728,21 @@ def _prepare_generation(
             candidate = str(DEFAULT_GHS_FILE) if DEFAULT_GHS_FILE else None
             if candidate:
                 weight_path = candidate
+        if weight_path:
+            reporter.line(f"  Население OD: {weight_path}")
+        else:
+            reporter.line("  ⚠ Население OD: population-растр не найден")
+            if getattr(config, "passenger_flow", False):
+                raise OdMatrixError(
+                    "Для --passenger-flow не найден population-растр. "
+                    "Проверьте D:\\Programs\\Cities2\\GHS или задайте --ghs-file."
+                )
         production = zonal_weights(zones, weight_path)
+        if getattr(config, "passenger_flow", False) and float(production.sum()) <= 0.0:
+            raise OdMatrixError(
+                "Population raster не дал положительных весов зон OD; "
+                "расчёт пассажиропотока остановлен."
+            )
         attraction = production.copy()
         weights = production
         geo_boundary = boundary
