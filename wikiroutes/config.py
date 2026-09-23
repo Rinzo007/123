@@ -21,16 +21,59 @@ from .constants import (
 from .enums import ExportFormat, RouteType, parse_route_type
 
 
-DEFAULT_GHS_FILE = os.getenv("WIKIROUTES_GHS_FILE") or None
+DEFAULT_DATA_DIR = Path(
+    os.getenv("WIKIROUTES_DATA_DIR", r"D:\\Programs\\Cities2")
+)
+DEFAULT_GHS_DIR = Path(
+    os.getenv("WIKIROUTES_GHS_DIR", str(DEFAULT_DATA_DIR / "GHS"))
+)
+
+
+def _discover_ghs_population_file() -> str | None:
+    """Находит локальный raster населения в каталоге GHS.
+
+    Явный ``WIKIROUTES_GHS_FILE`` имеет приоритет. Без него берётся первый
+    TIFF с ``pop``/``population`` в имени.
+    """
+    explicit = os.getenv("WIKIROUTES_GHS_FILE")
+    if explicit:
+        return explicit
+
+    if not DEFAULT_GHS_DIR.is_dir():
+        return None
+
+    candidates = sorted(
+        (
+            *DEFAULT_GHS_DIR.glob("*pop*.tif"),
+            *DEFAULT_GHS_DIR.glob("*pop*.tiff"),
+            *DEFAULT_GHS_DIR.glob("*population*.tif"),
+            *DEFAULT_GHS_DIR.glob("*population*.tiff"),
+        ),
+        key=lambda path: path.name.lower(),
+    )
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        return str(path)
+    return None
+
+DEFAULT_GHS_FILE = _discover_ghs_population_file()
 DEFAULT_UCDB_PATHS: tuple[str, ...] = (
     os.getenv(
         "WIKIROUTES_UCDB_2015",
-        r"D:\\Programs\\Cities2\\GHS\\GHS_STAT_UCDB2015MT_GLOBE_R2019A_V1_2.gpkg",
+        str(DEFAULT_GHS_DIR / "GHS_STAT_UCDB2015MT_GLOBE_R2019A_V1_2.gpkg"),
     ),
     os.getenv(
         "WIKIROUTES_UCDB_2024",
-        r"D:\\Programs\\Cities2\\GHS\\GHS_UCDB_GLOBE_R2024A.gpkg",
+        str(DEFAULT_GHS_DIR / "GHS_UCDB_GLOBE_R2024A.gpkg"),
     ),
+)
+DEFAULT_CACHE_DIR = os.getenv(
+    "WIKIROUTES_CACHE_DIR",
+    str(DEFAULT_DATA_DIR / "wikiroutes_cache"),
 )
 
 
@@ -234,7 +277,7 @@ class CliConfig:
     # Runtime flags
     no_cache: bool = False
     refresh: bool = False
-    cache_dir: str = "wikiroutes_cache"
+    cache_dir: str = DEFAULT_CACHE_DIR
 
 
 def build_cli_config(args: Any) -> CliConfig:
@@ -321,7 +364,7 @@ def build_cli_config(args: Any) -> CliConfig:
         passenger_flow=bool(getattr(args, "passenger_flow", False)),
         no_cache=bool(getattr(args, "no_cache", False)),
         refresh=bool(getattr(args, "refresh", False)),
-        cache_dir=str(getattr(args, "cache_dir", "wikiroutes_cache") or "wikiroutes_cache"),
+        cache_dir=str(getattr(args, "cache_dir", DEFAULT_CACHE_DIR) or DEFAULT_CACHE_DIR),
     )
 
     # Полный пассажиропоток всегда требует OD. Разложение по целям включаем
@@ -346,6 +389,9 @@ def build_cli_config(args: Any) -> CliConfig:
 __all__ = [
     "CliConfig",
     "CliConfigError",
+    "DEFAULT_CACHE_DIR",
+    "DEFAULT_DATA_DIR",
+    "DEFAULT_GHS_DIR",
     "DEFAULT_GHS_FILE",
     "DEFAULT_UCDB_PATHS",
     "build_cli_config",
