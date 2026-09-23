@@ -30,35 +30,17 @@ DEFAULT_GHS_DIR = Path(
 
 
 def _discover_ghs_population_file() -> str | None:
-    """Находит локальный raster населения в каталоге GHS.
+    """Возвращает основной population raster GHS.
 
-    Явный ``WIKIROUTES_GHS_FILE`` имеет приоритет. Без него берётся первый
-    TIFF с ``pop``/``population`` в имени.
+    Явный ``WIKIROUTES_GHS_FILE`` имеет приоритет. По умолчанию используется
+    закреплённый файл населения 2030/2025A из локального каталога GHS.
     """
     explicit = os.getenv("WIKIROUTES_GHS_FILE")
     if explicit:
         return explicit
 
-    if not DEFAULT_GHS_DIR.is_dir():
-        return None
-
-    candidates = sorted(
-        (
-            *DEFAULT_GHS_DIR.glob("*pop*.tif"),
-            *DEFAULT_GHS_DIR.glob("*pop*.tiff"),
-            *DEFAULT_GHS_DIR.glob("*population*.tif"),
-            *DEFAULT_GHS_DIR.glob("*population*.tiff"),
-        ),
-        key=lambda path: path.name.lower(),
-    )
-    seen: set[str] = set()
-    for path in candidates:
-        key = str(path.resolve()).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        return str(path)
-    return None
+    default_path = DEFAULT_GHS_DIR / "rus_pop_2030_CN_100m_R2025A_v1.tif"
+    return str(default_path) if default_path.is_file() else None
 
 DEFAULT_GHS_FILE = _discover_ghs_population_file()
 DEFAULT_UCDB_PATHS: tuple[str, ...] = (
