@@ -1,7 +1,14 @@
+from pathlib import Path
+import sys
+
+# Исходный пакет приложения теперь находится в wikiroutes/.
+PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "wikiroutes"
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
 """Минимальные host-stubs для тестирования Overture как изолированного компонента."""
 
 from dataclasses import dataclass
-import sys
 import types
 
 
