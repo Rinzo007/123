@@ -36,10 +36,3 @@ def add_ideas_args(parser: argparse.ArgumentParser) -> None:
         help="Экспортировать конечные остановки отдельным GeoJSON-файлом "
         "(FeatureCollection точек WGS-84: [lon, lat], название из properties.name).",
     )
-    parser.add_argument(
-        "--boundary-geojson",
-        action="store_true",
-        help="Экспортировать полигон границы города отдельным GeoJSON-файлом "
-        "(FeatureCollection: источник границы в properties.source — "
-        "GHS-BUILT-S/UCDB/OSM).",
-    )
