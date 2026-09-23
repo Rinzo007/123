@@ -46,14 +46,18 @@ def _cases(manifest: dict[str, Any], city: str | None) -> list[dict[str, Any]]:
     return selected
 
 
-def _bundle_path(manifest: dict[str, Any]) -> Path:
+def _bundle_path(manifest: dict[str, Any], manifest_path: Path | None = None) -> Path:
     bundle = manifest.get("bundle")
     if not isinstance(bundle, dict):
         raise ValueError("city manifest is missing bundle metadata")
     source = bundle.get("source")
     if not isinstance(source, str) or not source:
         raise ValueError("city manifest bundle source is missing")
-    path = ROOT / source
+    base = manifest_path.parent if manifest_path is not None else ROOT
+    path = Path(source)
+    if not path.is_absolute():
+        path = base / path
+    path = path.resolve()
     if not path.is_file():
         raise FileNotFoundError(f"Takt JS bundle not found: {path}")
     return path
@@ -143,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         manifest = load_json(manifest_path)
-        bundle_path = _bundle_path(manifest)
+        bundle_path = _bundle_path(manifest, manifest_path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
