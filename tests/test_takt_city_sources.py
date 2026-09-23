@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import tempfile
 import unittest
@@ -20,6 +21,21 @@ BUNDLE = ROOT / "scripts" / "bd956ff0a1875604740f.js"
 
 
 class TaktCitySourcesTests(unittest.TestCase):
+    def test_source_adapter_has_no_legacy_engine_imports(self) -> None:
+        path = ROOT / "scripts" / "takt_city_sources.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        self.assertFalse(any(
+            value == "od" or value.startswith("od.")
+            or value == "passenger_flow" or value.startswith("passenger_flow.")
+            for value in imported
+        ))
+
     def test_gravity_od_is_non_empty_and_has_no_self_pairs(self) -> None:
         points = [
             [39.00, 51.00, 1000.0, 1000.0],
