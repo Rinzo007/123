@@ -274,13 +274,19 @@ let MATRIX_CURRENT_CITY=null;
 const ROOT=path.resolve(__dirname,".."),DEFAULT_MANIFEST=path.join(ROOT,"tests/fixtures/takt_release_city_cases.json");
 const resolveFrom= (base,p) => {
   if(typeof p!=="string" || !p) throw Error("manifest path must be a non-empty string");
-  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(base,p);
+  if(path.isAbsolute(p)) return path.resolve(p);
+  const primary=path.resolve(base,p);
+  if(fs.existsSync(primary)) return primary;
+  const legacy=path.resolve(ROOT,p);
+  return fs.existsSync(legacy) ? legacy : primary;
 };
 const load=p=>JSON.parse(fs.readFileSync(p,"utf8"));
 const decodeF32=s=>{const b=Buffer.from(s,"base64");const v=new Float32Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));return Array.from(v)};
 const hav=(a,b)=>{const r=6371e3,z=Math.PI/180,dl=(b[1]-a[1])*z,dn=(b[0]-a[0])*z,la=a[1]*z,lb=b[1]*z,q=Math.sin(dl/2)**2+Math.cos(la)*Math.cos(lb)*Math.sin(dn/2)**2;return 2*r*Math.asin(Math.sqrt(q))};
-function getBs(){
- const bundlePath=process.env.TAKT_BUNDLE_PATH?path.resolve(process.env.TAKT_BUNDLE_PATH):path.join(ROOT,"scripts/bd956ff0a1875604740f.js");
+function getBs(bundleOverride){
+ const bundlePath=bundleOverride
+   ? resolveFrom(path.dirname(DEFAULT_MANIFEST),bundleOverride)
+   : (process.env.TAKT_BUNDLE_PATH?path.resolve(process.env.TAKT_BUNDLE_PATH):path.join(ROOT,"scripts/bd956ff0a1875604740f.js"));
  const b=fs.readFileSync(bundlePath,"utf8"),m="})();",i=b.lastIndexOf(m);if(i<0)throw Error("Takt bundle terminator not found");
  const s={console,performance,setTimeout,clearTimeout,setInterval,clearInterval,TextEncoder,TextDecoder,URL,URLSearchParams,
  Uint8Array,Uint16Array,Uint32Array,Int32Array,Float32Array,Float64Array,DataView,ArrayBuffer,SharedArrayBuffer,BigInt64Array,BigUint64Array,Math,Date,JSON,
@@ -388,7 +394,8 @@ async function main(){
  const cases=arg?[man.city_cases.find(c=>c.name===arg.slice(7))]:man.city_cases;
  if(cases.some(x=>!x))throw Error("unknown city");
  if(outputArg && cases.length!==1)throw Error("--output requires exactly one city");
- const Bs=getBs();
+ const bundleOverride=man.bundle&&typeof man.bundle.source==="string"?man.bundle.source:null;
+ const Bs=getBs(bundleOverride);
  for(const c of cases){
    const out=outputArg
      ? path.resolve(outputArg.slice("--output=".length))
