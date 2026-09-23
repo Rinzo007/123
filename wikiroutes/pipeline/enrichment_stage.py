@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..filters import compute_bbox
-from ..ghs.runtime import compute_ghs, compute_ghs_s
+from ..errors import MissingDependencyError
 from ..metrics import BuiltSStats, GhsStats, PoiStats
 from ..models import RouteData
 from ..overture.load import resolve_poi_place_file
@@ -71,6 +71,16 @@ def _compute_ghs_block(
     if not config.ghs:
         return stats, meta, dir_stats
 
+    try:
+        from ..ghs.runtime import compute_ghs
+    except ModuleNotFoundError as exc:
+        if exc.name in {"wikiroutes.ghs", "wikiroutes.ghs.runtime"}:
+            raise MissingDependencyError(
+                "GHS включён, но модуль wikiroutes.ghs отсутствует в репозитории. "
+                "Восстановите пакет GHS-BUILT-V/S или отключите --ghs/--ghs-s."
+            ) from exc
+        raise
+
     line(f"  GHS-BUILT-V вдоль остановок (буфер {config.ghs_buffer:.0f} м)...")
     stats, meta, dir_stats = compute_ghs(
         routes,
@@ -97,6 +107,16 @@ def _compute_ghs_s_block(
     dir_stats: dict[tuple[int, int], BuiltSStats] = {}
     if not config.ghs_s:
         return stats, meta, dir_stats
+
+    try:
+        from ..ghs.runtime import compute_ghs_s
+    except ModuleNotFoundError as exc:
+        if exc.name in {"wikiroutes.ghs", "wikiroutes.ghs.runtime"}:
+            raise MissingDependencyError(
+                "GHS включён, но модуль wikiroutes.ghs отсутствует в репозитории. "
+                "Восстановите пакет GHS-BUILT-V/S или отключите --ghs/--ghs-s."
+            ) from exc
+        raise
 
     ghs_s_buffer = (
         config.ghs_buffer if config.ghs_s_buffer is None else config.ghs_s_buffer
