@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for case in cases:
         name = str(case["name"])
-        output = args.output_dir / name / "takt_python_snapshot.json"
+        output = args.output_dir / name / "takt_result.json"
         return_code = run_city(
             node=args.node,
             city=name,
