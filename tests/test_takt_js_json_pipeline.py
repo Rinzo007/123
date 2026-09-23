@@ -35,7 +35,7 @@ class TaktJsJsonPipelineTests(unittest.TestCase):
         )
 
     def test_checked_in_manifest_is_a_valid_portable_package(self) -> None:
-        manifest = validate_manifest(MANIFEST)
+        manifest = validate_manifest(MANIFEST, ROOT)
         self.assertEqual(
             [case["name"] for case in manifest["city_cases"]],
             ["amsterdam-v8", "berlin-v5", "hong-kong-v6"],
