@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -64,6 +65,7 @@ def run_city(
     city: str,
     output: Path,
     bundle_path: Path,
+    sync_browser: bool,
 ) -> int:
     output = _rooted(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -82,7 +84,15 @@ def run_city(
         f"engine=JS bundle, input=JSON, output={output}"
     )
     completed = subprocess.run(command, cwd=ROOT, env=env)
-    return completed.returncode
+    if completed.returncode:
+        return completed.returncode
+
+    if sync_browser:
+        browser_output = output.parent / "takt_browser_snapshot.json"
+        shutil.copyfile(output, browser_output)
+        print(f"Synced JS golden: {browser_output}")
+
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
         "--node",
         default="node",
         help="Node.js executable.",
+    )
+    parser.add_argument(
+        "--sync-browser",
+        action="store_true",
+        help="Also write the canonical JS result to takt_browser_snapshot.json.",
     )
     args = parser.parse_args(argv)
 
@@ -130,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             city=name,
             output=output,
             bundle_path=bundle_path,
+            sync_browser=args.sync_browser,
         )
         if return_code:
             return return_code
