@@ -476,6 +476,10 @@ def load_worldpop(
     with rasterio.open(path) as ds:
         if ds.crs is None:
             raise SourceError(f"{path}: raster has no CRS")
+        if boundary is None:
+            raise SourceError(
+                "WorldPop input requires --boundary (or a successful Nominatim boundary lookup)"
+            )
         boundary_raster = boundary
         if boundary is not None and str(ds.crs).upper() not in {"EPSG:4326", "OGC:CRS84"}:
             from rasterio.warp import transform_geom
