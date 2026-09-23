@@ -33,13 +33,8 @@ jobs:
       - name: Check Python orchestration scripts
         run: python -m compileall -q scripts/takt_city_python_snapshot.py scripts/takt_release_gate.py scripts/takt_differential.py
 
-      - name: Generate Berlin JS golden from JSON
-        env:
-          TAKT_BUNDLE_PATH: scripts/bd956ff0a1875604740f.js
-        run: node scripts/takt_city_browser_snapshot.js --city=berlin-v5
-
-      - name: Generate Berlin Python pipeline snapshot
-        run: python scripts/takt_city_python_snapshot.py --city=berlin-v5
+      - name: Generate Berlin snapshot through Python JS/JSON pipeline
+        run: python scripts/takt_city_python_snapshot.py --city=berlin-v5 --sync-browser
 
       - name: Check city golden schema
         run: python scripts/takt_release_gate.py --check-city-schemas
