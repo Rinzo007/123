@@ -1305,7 +1305,7 @@ def _run_msa_period_layers(
     agg: dict[str, Any] = _empty_accumulator()
     final_gap = gap_tol
     ride_edge_cache = contexts[0][0].ride_edge_cache
-    task_count = sum(max(1, (len(ctx.od_rows) + 3999) // 4000) for ctx, _out, _ret in contexts)
+    task_count = sum(max(1, (len(ctx.od_rows) + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE) for ctx, _out, _ret in contexts)
     workers = _resolve_p6_task_workers(task_count)
     pool = _create_p6_process_pool(contexts, workers) if workers > 1 else None
     try:
