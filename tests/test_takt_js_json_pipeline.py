@@ -19,6 +19,12 @@ class TaktJsJsonPipelineTests(unittest.TestCase):
             [case["name"] for case in manifest["city_cases"]],
             ["amsterdam-v8", "berlin-v5", "hong-kong-v6"],
         )
+        self.assertTrue(
+            all("js_snapshot" in case for case in manifest["city_cases"])
+        )
+        self.assertTrue(
+            all("python_snapshot" not in case for case in manifest["city_cases"])
+        )
 
     def test_all_mode_selects_every_city(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
