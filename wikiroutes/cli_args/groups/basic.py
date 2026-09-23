@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 
 from ...constants import MAX_WORKERS
+from ...config import DEFAULT_CACHE_DIR
 
 
 def add_basic_args(parser: argparse.ArgumentParser) -> None:
@@ -105,6 +106,6 @@ def add_misc_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--cache-dir",
-        default="wikiroutes_cache",
-        help="Каталог локального кэша.",
+        default=DEFAULT_CACHE_DIR,
+        help="Каталог локального кэша; по умолчанию D:\\Programs\\Cities2\\wikiroutes_cache (можно переопределить WIKIROUTES_CACHE_DIR).",
     )
