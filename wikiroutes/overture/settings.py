@@ -36,11 +36,13 @@ OVERTURE_THEME_ALIASES = {
 
 
 def _resolve_overture_release(release: str | None = None) -> str | None:
-    """Разрешает явный release или значение OVERTURE_RELEASE."""
-    import os
+    """Совместимый фасад единого resolver'а release Overture."""
+    from .release import resolve_overture_release
 
-    value = release if release is not None else os.getenv("OVERTURE_RELEASE")
-    if value is None:
+    try:
+        return resolve_overture_release(release)
+    except Exception:
+        # Старый приватный API исторически возвращал None при отсутствии
+        # возможности определить release; сохраняем это поведение только
+        # для legacy-вызовов, новый loader использует строгий resolver.
         return None
-    value = value.strip()
-    return value or None
