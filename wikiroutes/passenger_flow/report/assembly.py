@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import math
 from decimal import Decimal, ROUND_HALF_UP
 
 
 def round_half_up(value: float, digits: int = 0) -> float:
-    """Round using decimal half-up semantics, matching the legacy helper."""
+    """Round using decimal half-up semantics, preserving non-finite sentinels."""
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return numeric
     quantum = Decimal("1").scaleb(-int(digits))
-    return float(Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP))
+    return float(Decimal(str(numeric)).quantize(quantum, rounding=ROUND_HALF_UP))
 from ..base.models import (
     FlowResult,
     LineResult,
