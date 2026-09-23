@@ -140,7 +140,13 @@ def verify_city_snapshots(
         if not js_path.is_file() or not py_path.is_file():
             missing.append(name)
             continue
-        # Import lazily so the gate stays dependency-free.
+        # Import lazily so the gate stays dependency-free. When this
+        # file is executed directly (python scripts/takt_release_gate.py),
+        # Python puts scripts/ on sys.path, not the repository root.
+        # Add the root explicitly so the sibling module is importable.
+        repo_root_str = str(repo_root)
+        if repo_root_str not in sys.path:
+            sys.path.insert(0, repo_root_str)
         from scripts.takt_differential import compare_snapshots
 
         js_snapshot = load_json(js_path)
