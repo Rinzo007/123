@@ -23,6 +23,7 @@ from ..base.takt import (
     _TAKT_WAIT_EXTRA_PER_MIN,
     _TAKT_WAIT_FLOOR_MIN,
     _TAKT_WAIT_LINEAR_LIMIT_MIN,
+    _takt_crowding_ride_mult,
 )
 from .assign import _assign_od
 
@@ -90,6 +91,9 @@ def _build_crowd_state(
     state: dict[str, Any] = {
         "seg_forward": {},
         "seg_reverse": {},
+        "seg_forward_dense": None,
+        "seg_reverse_dense": None,
+        "seg_offsets": None,
         "seg_forward_prefix": {},
         "seg_reverse_prefix": {},
         "stop_extra": {},
@@ -97,6 +101,19 @@ def _build_crowd_state(
     }
     if seq_headway_min is None:
         return state
+
+    seg_offsets = np.zeros(len(route_sequences) + 1, dtype=np.int64)
+    for seq_idx, seq in enumerate(route_sequences):
+        seg_count = (
+            len(seq["stops"])
+            if seq.get("closed")
+            else max(0, len(seq["stops"]) - 1)
+        )
+        seg_offsets[seq_idx + 1] = seg_offsets[seq_idx] + seg_count
+    total_segments = int(seg_offsets[-1])
+    state["seg_offsets"] = seg_offsets
+    state["seg_forward_dense"] = np.zeros(total_segments, dtype=np.float64)
+    state["seg_reverse_dense"] = np.zeros(total_segments, dtype=np.float64)
 
     for seq_idx, seq in enumerate(route_sequences):
         h = float(seq_headway_min.get(seq_idx, 0.0))
@@ -125,6 +142,9 @@ def _build_crowd_state(
             state["seg_reverse"][(seq_idx, seg_idx)] = max(
                 r / denom, 0.0
             )
+            offset = int(seg_offsets[seq_idx])
+            state["seg_forward_dense"][offset + seg_idx] = state["seg_forward"][(seq_idx, seg_idx)]
+            state["seg_reverse_dense"][offset + seg_idx] = state["seg_reverse"][(seq_idx, seg_idx)]
 
         segment_time = seq.get("segment_time_s") or ()
         forward_prefix = [0.0]
@@ -276,10 +296,9 @@ def _msa_smooth_vector(
         pos = smoothed.index.get(key)
         if pos is not None:
             scratch[pos] = float(value)
-    previous = smoothed.values.copy()
-    smoothed.values *= 1.0 - alpha
-    smoothed.values += alpha * scratch
-    numerator = float(np.abs(smoothed.values - previous).sum())
+    delta = alpha * (scratch - smoothed.values)
+    smoothed.values += delta
+    numerator = float(np.abs(delta).sum())
     total = float(smoothed.values.sum())
     return numerator, total
 

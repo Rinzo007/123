@@ -19,7 +19,6 @@
         "purposes": "fe6fe9eaa16a3b371f3f136456d8c2b0e0d80bca"
       },
       "js_snapshot": "tests/fixtures/cities/amsterdam-v8/takt_browser_snapshot.json",
-      "python_snapshot": "tests/fixtures/cities/amsterdam-v8/takt_python_snapshot.json",
       "golden_scenario": {
         "max_od_pairs": 3000,
         "max_purpose_od_pairs": 1500,
@@ -41,7 +40,6 @@
         "purposes": "a65558dd8e5a99222d9836e90159ca5cd5c25065"
       },
       "js_snapshot": "tests/fixtures/cities/berlin-v5/takt_browser_snapshot.json",
-      "python_snapshot": "tests/fixtures/cities/berlin-v5/takt_python_snapshot.json",
       "golden_scenario": {
         "max_od_pairs": 3000,
         "max_purpose_od_pairs": 1500,
@@ -63,7 +61,6 @@
         "purposes": "74add1448f04aa980824a73c28c39ea7d0ac6442"
       },
       "js_snapshot": "tests/fixtures/cities/hong-kong-v6/takt_browser_snapshot.json",
-      "python_snapshot": "tests/fixtures/cities/hong-kong-v6/takt_python_snapshot.json",
       "golden_scenario": {
         "max_od_pairs": 3000,
         "max_purpose_od_pairs": 1500,

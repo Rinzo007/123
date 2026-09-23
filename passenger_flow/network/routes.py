@@ -125,7 +125,7 @@ def _route_segment_indices(
     seq: dict[str, Any],
     orig_pos: int,
     dest_pos: int,
-) -> list[tuple[int, bool]]:
+) -> tuple[tuple[int, bool], ...]:
     """Возвращает физические сегменты и направление выбранной ножки."""
     n = len(seq["stops"])
     if orig_pos == dest_pos or n < 2:
@@ -137,7 +137,7 @@ def _route_segment_indices(
     key = (int(orig_pos), int(dest_pos))
     cached = cache.get(key)
     if cached is not None:
-        return list(cached)
+        return cached
     cache_enabled = len(cache) < 4096
 
     if not seq.get("closed"):
@@ -146,8 +146,10 @@ def _route_segment_indices(
         else:
             result = [(i - 1, False) for i in range(orig_pos, dest_pos, -1)]
         if cache_enabled:
-            cache[key] = tuple(result)
-        return result
+            result_tuple = tuple(result)
+            cache[key] = result_tuple
+            return result_tuple
+        return tuple(result)
 
     cum = seq["cum_t_s"]
     cycle = float(seq["cycle_run_s"])
@@ -169,8 +171,10 @@ def _route_segment_indices(
             result.append(((i - 1) % n, False))
             i = (i - 1 + n) % n
     if cache_enabled:
-        cache[key] = tuple(result)
-    return result
+        result_tuple = tuple(result)
+        cache[key] = result_tuple
+        return result_tuple
+    return tuple(result)
 
 def _nearest_stop_on_sequence(
     seq: Mapping[str, Any],
@@ -231,17 +235,23 @@ def _leg_alternatives(
         alt_board_pos = int(alt_target["position"])
         alt_candidates: list[tuple[int, float]] = []
         if next_seq is not None and next_stop is not None:
-            for pos, stop in enumerate(route_sequences[alt_seq].get("stops") or []):
-                for target_seq, _target_stop, target_stop in transfer_index.get((alt_seq, pos), ()):
-                    if target_seq != next_seq:
-                        continue
-                    d = haversine_meters(
-                        float(target_stop["lat"]), float(target_stop["lon"]),
-                        float(next_stop["lat"]), float(next_stop["lon"]),
-                    )
-                    if d <= transfer_radius_m + 1e-9:
-                        alt_candidates.append((pos, d))
-                        break
+            target_candidates = (
+                transfer_index.targets_to_line(alt_seq, next_seq)
+                if hasattr(transfer_index, "targets_to_line")
+                else tuple(
+                    (int(pos), target_stop)
+                    for pos in range(len(route_sequences[alt_seq].get("stops") or []))
+                    for target_seq, _target_stop, target_stop in transfer_index.get((alt_seq, pos), ())
+                    if target_seq == next_seq
+                )
+            )
+            for pos, target_stop in target_candidates:
+                d = haversine_meters(
+                    float(target_stop["lat"]), float(target_stop["lon"]),
+                    float(next_stop["lat"]), float(next_stop["lon"]),
+                )
+                if d <= transfer_radius_m + 1e-9:
+                    alt_candidates.append((pos, d))
         else:
             found = _nearest_stop_on_sequence(
                 route_sequences[alt_seq], base_dest, radius_m=transfer_radius_m
@@ -435,6 +445,26 @@ def _cached_ride_edge_time_min(
     )
 
 
+def _crowd_segment_load(
+    crowd_state: Mapping[str, Any] | None,
+    seq_idx: int,
+    seg_idx: int,
+    *,
+    forward: bool,
+) -> float:
+    """Быстрый доступ к загрузке сегмента; sparse dict остаётся fallback."""
+    if not crowd_state:
+        return 0.0
+    dense = crowd_state.get("seg_forward_dense" if forward else "seg_reverse_dense")
+    offsets = crowd_state.get("seg_offsets")
+    if dense is not None and offsets is not None:
+        pos = int(offsets[seq_idx]) + int(seg_idx)
+        if 0 <= pos < len(dense):
+            return float(dense[pos])
+    loads = crowd_state.get("seg_forward" if forward else "seg_reverse", {})
+    return float(loads.get((seq_idx, seg_idx), 0.0))
+
+
 def _crowd_extra_s(
     seq: dict[str, Any],
     orig_pos: int,
@@ -457,16 +487,13 @@ def _crowd_extra_s(
     prefix = prefixes.get(seq_idx)
     if prefix is None:
         # Backwards-compatible fallback for externally supplied crowd states.
-        loads = (
-            crowd_state.get("seg_forward", {})
-            if is_forward
-            else crowd_state.get("seg_reverse", {})
-        )
         return sum(
             _segment_time_s(seq, seg_i)
-            * (_takt_crowding_ride_mult(float(loads.get((seq_idx, seg_i), 0.0))) - 1.0)
+            * (_takt_crowding_ride_mult(
+                _crowd_segment_load(crowd_state, seq_idx, seg_i, forward=is_forward)
+            ) - 1.0)
             for seg_i, _ in selected
-            if float(loads.get((seq_idx, seg_i), 0.0)) > 0.0
+            if _crowd_segment_load(crowd_state, seq_idx, seg_i, forward=is_forward) > 0.0
         )
     n = len(seq["stops"])
     if not seq.get("closed"):
@@ -1118,7 +1145,7 @@ class _TransferEdgeIndex(dict):
     downstream transfer targets теперь строится один раз для всей сети, а не
     заново для каждого OD.
     """
-    __slots__ = ("source_positions", "downstream_cache")
+    __slots__ = ("source_positions", "downstream_cache", "line_targets")
     _MAX_DOWNSTREAM_CACHE = 32768
 
     def __init__(self, *args: Any, source_positions: Mapping[int, tuple[int, ...]] | None = None, **kwargs: Any) -> None:
@@ -1127,6 +1154,16 @@ class _TransferEdgeIndex(dict):
         self.downstream_cache: dict[
             tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]
         ] = {}
+        self.line_targets: dict[
+            tuple[int, int], tuple[tuple[int, dict[str, Any]], ...]
+        ] = {}
+
+    def targets_to_line(
+        self,
+        seq_idx: int,
+        target_seq_idx: int,
+    ) -> tuple[tuple[int, dict[str, Any]], ...]:
+        return self.line_targets.get((int(seq_idx), int(target_seq_idx)), ())
 
     def downstream_targets(
         self,
@@ -1174,6 +1211,7 @@ def _build_transfer_edge_index(
     tree = cKDTree(points)
     result: dict[tuple[int, int], tuple[tuple[int, dict[str, Any], dict[str, Any]], ...]] = {}
     source_positions: dict[int, list[int]] = {i: [] for i in range(len(route_stop_sequences))}
+    line_targets: dict[tuple[int, int], list[tuple[int, dict[str, Any]]]] = {}
     query_r = float(transfer_radius_m)
     for seq_a, seq in enumerate(route_stop_sequences):
         for ta in seq.get("stops", []):
@@ -1200,12 +1238,16 @@ def _build_transfer_edge_index(
             result[(seq_a, pos)] = tuple(
                 (seq_b, ta, tb) for seq_b, (_distance, tb) in sorted(best_by_line.items())
             )
+            for seq_b, (_distance, tb) in sorted(best_by_line.items()):
+                line_targets.setdefault((seq_a, seq_b), []).append((pos, tb))
             if best_by_line:
                 source_positions[seq_a].append(pos)
-    return _TransferEdgeIndex(
+    index = _TransferEdgeIndex(
         result,
         source_positions={seq_i: tuple(sorted(pos_list)) for seq_i, pos_list in source_positions.items()},
     )
+    index.line_targets = {key: tuple(value) for key, value in line_targets.items()}
+    return index
 
 def _dedupe_journeys(
     journeys: list[_Journey],

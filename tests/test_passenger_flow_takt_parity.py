@@ -38,7 +38,7 @@ from passenger_flow.algorithm.kpis import (
     _geometry_reuse_edges,
     _geometry_segment_edges,
 )
-from passenger_flow.core import _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
+from passenger_flow.core import _resolve_p6_process_workers, _takt_car_period_multipliers, _validate_base_time, _validate_flow_inputs, _validate_route_sequences, _validate_sparse_od
 from passenger_flow.algorithm.wait import _build_crowd_state, _takt_msa_gap
 from passenger_flow.algorithm.mode_choice import (
     _takt_car_cost_s,
@@ -916,6 +916,30 @@ def test_transfer_index_shares_downstream_suffix_cache() -> None:
     assert index.downstream_cache[(0, 0)] is first
 
 
+def test_transfer_index_precomputes_line_target_candidates() -> None:
+    a = _synthetic_sequence([1, 2, 3, 4])
+    b = _synthetic_sequence([5, 6, 7, 8])
+    c = _synthetic_sequence([9, 10, 11, 12])
+    for pos, stop in enumerate(a["stops"]):
+        stop["lat"] = 52.0 + pos * 0.01
+        stop["lon"] = 4.0 + pos * 0.01
+    for pos, stop in enumerate(b["stops"]):
+        stop["lat"] = 52.02 + pos * 0.02
+        stop["lon"] = 4.02 + pos * 0.02
+    for pos, stop in enumerate(c["stops"]):
+        stop["lat"] = 53.0 + pos * 0.02
+        stop["lon"] = 5.0 + pos * 0.02
+    b["stops"][0]["lat"] = a["stops"][1]["lat"] + 0.0001
+    b["stops"][0]["lon"] = a["stops"][1]["lon"] + 0.0001
+    c["stops"][1]["lat"] = a["stops"][2]["lat"] + 0.0001
+    c["stops"][1]["lon"] = a["stops"][2]["lon"] + 0.0001
+    index = _build_transfer_edge_index([a, b, c], 800.0)
+
+    got = index.targets_to_line(0, 1)
+    assert [pos for pos, _stop in got] == [1]
+    assert got[0][1]["id"] == b["stops"][0]["id"]
+    assert index.targets_to_line(0, 2) == ((2, c["stops"][1]),)
+
 def test_transfer_index_is_specific_to_current_stop() -> None:
     a = _synthetic_sequence([1, 2, 3])
     b = _synthetic_sequence([4, 5, 6])
@@ -1449,3 +1473,22 @@ def test_p6_release_gate_rejects_changed_bundle(tmp_path: Path) -> None:
     reference["reference"]["source"] = "bundle.js"
     with pytest.raises(ReleaseGateError):
         verify_bundle_provenance(reference, tmp_path)
+
+
+def test_p6_process_worker_count_respects_context_count(monkeypatch):
+    """Число процессов P6 не превышает число независимых demand-слоёв."""
+    monkeypatch.setenv("TAKT_P6_PROCESSES", "8")
+    assert _resolve_p6_process_workers(3) == 3
+    assert _resolve_p6_process_workers(1) == 1
+
+
+def test_p6_task_worker_count_respects_cpu_limit(monkeypatch):
+    """Явный лимит процессов P6 не должен превышать доступные CPU."""
+    monkeypatch.setenv("TAKT_P6_PROCESSES", "8")
+    import passenger_flow.core as core
+
+    monkeypatch.setattr(core.os, "cpu_count", lambda: 4)
+    from passenger_flow.core import _resolve_p6_task_workers
+
+    assert _resolve_p6_task_workers(20) == 4
+

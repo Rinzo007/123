@@ -28,6 +28,7 @@ from ..network.routes import (
     _scheduled_transfer_wait_min,
     _leg_alternatives,
     _cached_ride_edge_time_min,
+    _crowd_segment_load,
     build_journeys,
 )
 from .mode_choice import (
@@ -321,8 +322,9 @@ def _journey_crowd_extra(
             if not selected or seq_headway_min is None or seq_idx not in seq_headway_min:
                 continue
             crowd_seg, forward = selected[-1 if leg_no > 0 else 0]
-            loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, crowd_seg), 0.0)))
+            lf = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, crowd_seg, forward=forward
+            ))
             if leg_no == 0:
                 if include_first_leg_wait:
                     wait_s = _takt_po_seconds(float(seq_headway_min[seq_idx]))
@@ -442,8 +444,9 @@ def _takt_first_leg_r_r_seconds(
     load = 1.0
     if selected:
         seg_idx, forward = selected[0]
-        loads = seg_forward if forward else seg_reverse
-        load = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+        load = max(1.0, _crowd_segment_load(
+            crowd_state, seq_idx, seg_idx, forward=forward
+        ))
     unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
     return wait_s * unev * load
 
@@ -471,8 +474,9 @@ def _takt_co_route_probs(
         lf = 1.0
         if selected:
             seg_idx, forward = selected[0]
-            loads = seg_forward if forward else seg_reverse
-            lf = max(1.0, float(loads.get((seq_idx, seg_idx), 0.0)))
+            lf = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, seg_idx, forward=forward
+            ))
         unev = max(1.0, float(unreliability.get((seq_idx, period_index), 1.0)))
         rr = wait_s * unev * lf
         weights[idx] = 1.0 / max(1.0, rr)
@@ -516,8 +520,9 @@ def _takt_leg_choice_probs(
         load = 1.0
         if selected:
             seg_i, forward = selected[0]
-            loads = seg_forward if forward else seg_reverse
-            load = max(1.0, float(loads.get((seq_idx, seg_i), 0.0)))
+            load = max(1.0, _crowd_segment_load(
+                crowd_state, seq_idx, seg_i, forward=forward
+            ))
         if seq_headway_min is None or seq_idx not in seq_headway_min:
             rr_min = 1.0
         elif prev is None:
@@ -639,6 +644,10 @@ def _assign_od(
     access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
     perf_stats: dict[str, float] | None = None,
     journey_cache: dict[tuple[Any, ...], list[_Journey]] | None = None,
+    pair_base_time_s: np.ndarray | None = None,
+    pair_car_base_time_s: np.ndarray | None = None,
+    journey_cache_token: Any = None,
+    pair_slice: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Один проход распределения по всем OD-парам; возвращает агрегаты."""
     assign_started = perf_counter() if perf_stats is not None else 0.0
@@ -650,6 +659,9 @@ def _assign_od(
 
     totals = _OdTotals()
     n_zones = len(zones)
+    start_idx, end_idx = pair_slice if pair_slice is not None else (0, len(od_rows))
+    start_idx = max(0, min(int(start_idx), len(od_rows)))
+    end_idx = max(start_idx, min(int(end_idx), len(od_rows)))
     totals.total_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.covered_by_origin = np.zeros(n_zones, dtype=np.float64)
     totals.no_route_by_origin = np.zeros(n_zones, dtype=np.float64)
@@ -662,7 +674,7 @@ def _assign_od(
     if journey_cache is None:
         journey_cache = {}
 
-    for idx in range(len(od_rows)):
+    for idx in range(start_idx, end_idx):
         zi = int(od_rows[idx])
         zj = int(od_cols[idx])
         raw_trips = float(od_vals[idx])
@@ -682,8 +694,16 @@ def _assign_od(
         if trips <= 0:
             continue
         totals.period_total += trips
-        road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
-        car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
+        if pair_base_time_s is not None and idx < len(pair_base_time_s):
+            raw_base_time = float(pair_base_time_s[idx])
+            road_time_s = raw_base_time if np.isfinite(raw_base_time) and raw_base_time > 0.0 else None
+        else:
+            road_time_s = _base_time_for_pair(base_time_s, period_index, idx, zi, zj, n_periods=5)
+        if pair_car_base_time_s is not None and idx < len(pair_car_base_time_s):
+            raw_car_time = float(pair_car_base_time_s[idx])
+            car_base_time_pair_s = raw_car_time if np.isfinite(raw_car_time) and raw_car_time >= 0.0 else None
+        else:
+            car_base_time_pair_s = _car_base_time_for_pair(car_base_time_s, idx, zi, zj)
         od_meters = (float(od_distances_m[idx]) if od_distances_m is not None else _od_distance_meters(zones, zi, zj))
 
         access_started = perf_counter() if perf_stats is not None else 0.0
@@ -727,12 +747,15 @@ def _assign_od(
             )
             continue
 
+        cache_token = (
+            journey_cache_token
+            if journey_cache_token is not None
+            else (period_index, id(crowd_state))
+        )
         journey_key = (
             zi,
             zj,
-            id(crowd_state),
-            id(seq_headway_min),
-            id(seq_jitter_s),
+            cache_token,
             road_time_s,
             od_meters,
         )

@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 import math
+import os
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
@@ -35,7 +38,7 @@ if TYPE_CHECKING:
 else:
     RouteLike = Any
     Zones = Any
-from .algorithm.assign import _assign_od, _od_distance_meters
+from .algorithm.assign import _assign_od, _line_access_stops, _od_distance_meters
 from .algorithm.kpis import _atomic_infrastructure_sections, _build_line_kpis
 from .algorithm.wait import (
     _build_crowd_state,
@@ -836,6 +839,7 @@ def _merge_pass_aggregates(
             if accum[name] is None:
                 accum[name] = np.zeros_like(array, dtype=np.float64)
             accum[name] += np.asarray(array, dtype=np.float64)
+    accum["period_total"] += pass_agg.get("period_total", 0.0)
     accum["assigned_trips"] += pass_agg["assigned_trips"]
     accum["car_trips"] += pass_agg["car_trips"]
     accum["walk_trips"] += pass_agg["walk_trips"]
@@ -853,6 +857,7 @@ def _empty_accumulator() -> dict[str, Any]:
         "two_wheel_trips": 0.0,
         "rest_trips": 0.0,
         "fare_revenue": 0.0,
+        "period_total": 0.0,
         "route_totals": defaultdict(float),
         "dir_totals": defaultdict(float),
         "stop_totals": defaultdict(_empty_stop_entry),
@@ -1018,8 +1023,11 @@ class _AssignContext:
         period_index: int,
         crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
         ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
+        access_cache: dict[int, list[tuple[int, int, int, float]]] | None = None,
         perf_stats: dict[str, float] | None = None,
         journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
+        pair_slice: tuple[int, int] | None = None,
+        journey_cache_token: Any = None,
     ) -> dict[str, Any]:
         return _assign_od(
             self.od_rows,
@@ -1038,10 +1046,12 @@ class _AssignContext:
                 else 1.0
             ),
             transfer_index=self.transfer_index,
-            ride_edge_cache=ride_edge_cache or self.ride_edge_cache,
-            access_cache=self.access_cache,
+            ride_edge_cache=self.ride_edge_cache if ride_edge_cache is None else ride_edge_cache,
+            access_cache=self.access_cache if access_cache is None else access_cache,
             perf_stats=perf_stats,
             journey_cache=journey_cache,
+            pair_slice=pair_slice,
+            journey_cache_token=journey_cache_token,
             **{k: v for k, v in self._common_kwargs(period_index).items() if k != "transfer_index"},
         )
 
@@ -1086,6 +1096,24 @@ class _AssignContext:
 # ===== Один период =====
 
 
+def _prime_p6_access_cache(
+    contexts: Sequence[tuple[_AssignContext, float, float]],
+) -> None:
+    """Заполняет общий кэш доступа до запуска дочерних процессов."""
+    if not contexts:
+        return
+    cache = contexts[0][0].access_cache
+    route_sequences = contexts[0][0].route_sequences
+    zone_nearest = contexts[0][0].zone_nearest
+    needed: set[int] = set()
+    for ctx, _out, _ret in contexts:
+        needed.update(int(x) for x in ctx.od_rows)
+        needed.update(int(x) for x in ctx.od_cols)
+    for zi in needed:
+        if zi not in cache:
+            cache[zi] = _line_access_stops(zone_nearest.get(zi, []), route_sequences)
+
+
 def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Сливает агрегаты нескольких demand-слоёв одного периода."""
     merged = _empty_accumulator()
@@ -1094,27 +1122,167 @@ def _merge_period_aggregates(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
+_P6_DEFAULT_PROCESS_WORKERS = max(1, min(4, os.cpu_count() or 1))
+_P6_PAIR_CHUNK_SIZE = 750
+
+
+def _resolve_p6_process_workers(context_count: int) -> int:
+    if context_count <= 1:
+        return 1
+    raw = os.getenv("TAKT_P6_PROCESSES")
+    try:
+        requested = int(raw) if raw else _P6_DEFAULT_PROCESS_WORKERS
+    except ValueError:
+        requested = _P6_DEFAULT_PROCESS_WORKERS
+    return max(1, min(context_count, requested))
+
+
+def _resolve_p6_task_workers(task_count: int) -> int:
+    if task_count <= 1:
+        return 1
+    raw = os.getenv("TAKT_P6_PROCESSES")
+    try:
+        requested = int(raw) if raw else _P6_DEFAULT_PROCESS_WORKERS
+    except ValueError:
+        requested = _P6_DEFAULT_PROCESS_WORKERS
+    cpu_limit = max(1, os.cpu_count() or 1)
+    return max(1, min(task_count, requested, cpu_limit))
+
+
+_P6_WORKER_CONTEXTS: tuple[_AssignContext, ...] | None = None
+_P6_WORKER_JOURNEY_CACHE: dict[tuple[int, Any], dict[tuple[Any, ...], list[Any]]] = {}
+
+
+def _p6_worker_init(contexts: Sequence[_AssignContext]) -> None:
+    global _P6_WORKER_CONTEXTS, _P6_WORKER_JOURNEY_CACHE
+    _P6_WORKER_CONTEXTS = tuple(contexts)
+    _P6_WORKER_JOURNEY_CACHE = {}
+
+
+def _create_p6_process_pool(
+    contexts: Sequence[tuple[_AssignContext, float, float]],
+    workers: int,
+) -> ProcessPoolExecutor:
+    requested = os.getenv("TAKT_P6_MP_START")
+    start_method = requested or ("fork" if os.name == "posix" else "spawn")
+    try:
+        mp_context = mp.get_context(start_method)
+    except ValueError:
+        mp_context = mp.get_context("spawn")
+    return ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=mp_context,
+        initializer=_p6_worker_init,
+        initargs=(tuple(item[0] for item in contexts),),
+    )
+
+
+def _assign_layer_process(
+    task: tuple[
+        int, int, int, int, float, float,
+        Mapping[int, float] | None,
+        Mapping[str, Any] | None,
+        bool,
+        Any,
+    ],
+) -> tuple[dict[str, Any], dict[str, float]]:
+    (
+        context_index, start, end, period_index,
+        out_factor, ret_factor, wait_extra, crowd_state,
+        profile_timings, journey_cache_token,
+    ) = task
+    if _P6_WORKER_CONTEXTS is None:
+        raise RuntimeError("P6 worker context is not initialized")
+    cache_key = (context_index, journey_cache_token)
+    stale_keys = [
+        key for key in _P6_WORKER_JOURNEY_CACHE
+        if key[0] == context_index and key != cache_key
+    ]
+    for key in stale_keys:
+        del _P6_WORKER_JOURNEY_CACHE[key]
+    worker_cache = _P6_WORKER_JOURNEY_CACHE.get(cache_key)
+    if worker_cache is None:
+        worker_cache = {}
+        _P6_WORKER_JOURNEY_CACHE[cache_key] = worker_cache
+    ctx = _P6_WORKER_CONTEXTS[context_index]
+    local_perf = {} if profile_timings else None
+    result = ctx.assign(
+        out_factor=out_factor,
+        ret_factor=ret_factor,
+        wait_extra=wait_extra,
+        period_index=period_index,
+        crowd_state=crowd_state,
+        perf_stats=local_perf,
+        journey_cache=worker_cache,
+        pair_slice=(start, end),
+        journey_cache_token=journey_cache_token,
+    )
+    return result, local_perf or {}
+
+
 def _assign_layer_contexts(
     contexts: Sequence[tuple[_AssignContext, float, float]],
     period_index: int,
     wait_extra: Mapping[int, float] | None,
-    crowd_state: Mapping[str, Mapping[tuple[int, int], float]] | None = None,
+    crowd_state: Mapping[str, Any] | None = None,
     ride_edge_cache: dict[tuple[int, int, int], float] | None = None,
     perf_stats: dict[str, float] | None = None,
-    journey_cache: dict[tuple[Any, ...], list[tuple[float, tuple[tuple[int, int, int], ...]]]] | None = None,
+    journey_cache: dict[Any, Any] | None = None,
+    executor: ProcessPoolExecutor | None = None,
+    journey_cache_token: Any = None,
 ) -> dict[str, Any]:
-    return _merge_period_aggregates([        ctx.assign(
-            out_factor=out_factor,
-            ret_factor=ret_factor,
-            wait_extra=wait_extra,
-            period_index=period_index,
-            crowd_state=crowd_state,
-            ride_edge_cache=ride_edge_cache,
-            perf_stats=perf_stats,
-            journey_cache=journey_cache,
-        )
-        for ctx, out_factor, ret_factor in contexts
-    ])
+    if not contexts:
+        return _empty_accumulator()
+    _prime_p6_access_cache(contexts)
+    task_count = sum(max(1, (len(ctx.od_rows) + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE) for ctx, _out, _ret in contexts)
+    workers = _resolve_p6_task_workers(task_count)
+    if workers <= 1 and executor is None:
+        return _merge_period_aggregates([
+            ctx.assign(
+                out_factor=out_factor,
+                ret_factor=ret_factor,
+                wait_extra=wait_extra,
+                period_index=period_index,
+                crowd_state=crowd_state,
+                ride_edge_cache=ride_edge_cache,
+                perf_stats=perf_stats,
+                journey_cache=journey_cache,
+                journey_cache_token=journey_cache_token,
+            )
+            for ctx, out_factor, ret_factor in contexts
+        ])
+
+    def run_parallel(pool: ProcessPoolExecutor) -> dict[str, Any]:
+        tasks: list[tuple[Any, ...]] = []
+        token = journey_cache_token if journey_cache_token is not None else ("assign", period_index, id(crowd_state))
+        for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
+            n_rows = len(ctx.od_rows)
+            parts = min(workers, max(1, (n_rows + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE))
+            for part in range(parts):
+                start = (n_rows * part) // parts
+                end = (n_rows * (part + 1)) // parts
+                if start >= end:
+                    continue
+                tasks.append((
+                    context_index, start, end, period_index,
+                    out_factor, ret_factor, wait_extra, crowd_state,
+                    perf_stats is not None, token,
+                ))
+        completed = list(pool.map(_assign_layer_process, tasks))
+        results = [item[0] for item in completed]
+        if perf_stats is not None:
+            for local in (item[1] for item in completed):
+                for key, value in local.items():
+                    perf_stats[key] = perf_stats.get(key, 0.0) + float(value)
+        return _merge_period_aggregates(results)
+
+    if executor is not None:
+        return run_parallel(executor)
+    pool = _create_p6_process_pool(contexts, workers)
+    try:
+        return run_parallel(pool)
+    finally:
+        pool.shutdown(wait=True)
 
 
 def _run_msa_period_layers(
@@ -1129,49 +1297,62 @@ def _run_msa_period_layers(
     perf_stats: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     msa_started = perf_counter() if perf_stats is not None else 0.0
-    smoothed_seg_forward = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
-    smoothed_seg_reverse = _build_msa_load_vector(contexts[0][0].route_sequences, stops=False)
-    smoothed_stop = _build_msa_load_vector(contexts[0][0].route_sequences, stops=True)
+    route_sequences = contexts[0][0].route_sequences
+    smoothed_seg_forward = _build_msa_load_vector(route_sequences, stops=False)
+    smoothed_seg_reverse = _build_msa_load_vector(route_sequences, stops=False)
+    smoothed_stop = _build_msa_load_vector(route_sequences, stops=True)
     wait_extra = dict(reliability_extra) if reliability_extra else None
     crowd_state = None
     agg: dict[str, Any] = _empty_accumulator()
     final_gap = gap_tol
     ride_edge_cache = contexts[0][0].ride_edge_cache
-    for iteration in range(1, max_iterations + 1):
-        journey_cache = {} if len(contexts) > 1 else None
-        agg = _assign_layer_contexts(
-            contexts,
-            period_index=period_index,
-            wait_extra=wait_extra,
-            crowd_state=crowd_state,
-            ride_edge_cache=ride_edge_cache,
-            perf_stats=perf_stats,
-            journey_cache=journey_cache,
-        )
-        alpha = 1.0 / iteration
-        gap_num = 0.0
-        gap_total = 0.0
-        for target, source in (
-            (smoothed_seg_forward, agg.get("seg_forward_totals", {})),
-            (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
-            (smoothed_stop, agg.get("seq_stop_totals", {})),
-        ):
-            num, total = _msa_smooth_vector(target, source, alpha)
-            gap_num += num
-            gap_total += total
-
-        crowd_started = perf_counter() if perf_stats is not None else 0.0
-        crowd_state=_build_crowd_state(
-            contexts[0][0].route_sequences, smoothed_seg_forward, smoothed_seg_reverse,
-            smoothed_stop, contexts[0][0].seq_headway_min, contexts[0][0].vehicle_specs,
-            period_hours, period_index=period_index,
-        )
-        if perf_stats is not None:
-            perf_stats.setdefault("crowd_state_s", 0.0)
-            perf_stats["crowd_state_s"] += perf_counter() - crowd_started
-        final_gap = gap_num / max(gap_total, 1.0)
-        if iteration>1 and final_gap<=gap_tol:
-            break
+    task_count = sum(max(1, (len(ctx.od_rows) + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE) for ctx, _out, _ret in contexts)
+    workers = _resolve_p6_task_workers(task_count)
+    pool = _create_p6_process_pool(contexts, workers) if workers > 1 else None
+    try:
+        for iteration in range(1, max_iterations + 1):
+            agg = _assign_layer_contexts(
+                contexts,
+                period_index=period_index,
+                wait_extra=wait_extra,
+                crowd_state=crowd_state,
+                ride_edge_cache=ride_edge_cache,
+                perf_stats=perf_stats,
+                executor=pool,
+                journey_cache_token=("msa", period_index, iteration),
+            )
+            alpha = 1.0 / iteration
+            gap_num = 0.0
+            gap_total = 0.0
+            for target, source in (
+                (smoothed_seg_forward, agg.get("seg_forward_totals", {})),
+                (smoothed_seg_reverse, agg.get("seg_reverse_totals", {})),
+                (smoothed_stop, agg.get("seq_stop_totals", {})),
+            ):
+                num, total = _msa_smooth_vector(target, source, alpha)
+                gap_num += num
+                gap_total += total
+            crowd_started = perf_counter() if perf_stats is not None else 0.0
+            crowd_state = _build_crowd_state(
+                route_sequences,
+                smoothed_seg_forward,
+                smoothed_seg_reverse,
+                smoothed_stop,
+                contexts[0][0].seq_headway_min,
+                contexts[0][0].vehicle_specs,
+                period_hours,
+                period_index=period_index,
+            )
+            if perf_stats is not None:
+                perf_stats.setdefault("crowd_state_s", 0.0)
+                perf_stats["crowd_state_s"] += perf_counter() - crowd_started
+            final_gap = gap_num / max(gap_total, 1.0)
+            if iteration > 1 and final_gap <= gap_tol:
+                break
+            wait_extra = dict(reliability_extra) if reliability_extra else None
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
     agg["seg_forward_totals"] = smoothed_seg_forward.as_dict()
     agg["seg_reverse_totals"] = smoothed_seg_reverse.as_dict()
     agg["seq_stop_totals"] = smoothed_stop.as_dict()
@@ -1214,7 +1395,7 @@ def _run_period(
     contexts = list(layer_contexts or ((ctx, out_factor, ret_factor),))
     journey_cache = {} if len(contexts) > 1 else None
 
-    if len(contexts) > 1 and wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
+    if wait_crowding_per_100_min > 0 and msa_max_iterations is not None:
         pass_agg, msa_iters, msa_final_gap = _run_msa_period_layers(
             contexts,
             wait_crowding_per_100_min=wait_crowding_per_100_min,
