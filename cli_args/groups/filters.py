@@ -99,6 +99,12 @@ def add_filter_args(parser: argparse.ArgumentParser) -> None:
         ).format(", ".join(DEFAULT_UCDB_PATHS)),
     )
     parser.add_argument(
+        "--boundary-geojson",
+        dest="boundary_geojson",
+        action="store_true",
+        help="Экспортировать использованную границу города в отдельный GeoJSON-файл.",
+    )
+    parser.add_argument(
         "--boundary-raster",
         dest="boundary_raster",
         type=str,
