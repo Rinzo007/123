@@ -1072,6 +1072,17 @@ def _run_generated_od(
             reporter,
             attraction=attraction,
         )
+        if getattr(config, "passenger_flow", False) and float(matrix.sum()) <= 0.0:
+            purpose_totals = ", ".join(
+                f"{key}={value:,.0f}"
+                for key, value in zip(purpose_keys or (), purpose_trips or ())
+            )
+            raise OdMatrixError(
+                "Генерация OD дала 0 поездок для --passenger-flow. "
+                "Проверьте population-растр и его единицы измерения; "
+                "Takt OD требует не менее 40 жителей на зону-источник. "
+                f"Цели: {purpose_totals or 'нет данных'}."
+            )
     else:
         # Единый OD-движок: Takt. Без разложения по целям
         # используется та же модель с профилями PURPOSE_DEFAULTS.
