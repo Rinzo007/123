@@ -1,4 +1,0 @@
-# Canonical P6 runtime
-# The Python entry point is an stdlib orchestrator.
-# The calculation runs in the pinned Node.js Takt bundle and reads JSON inputs.
-# No NumPy/SciPy/networkx/shapely/passenger_flow/od installation is required.
