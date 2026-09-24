@@ -1248,9 +1248,6 @@ def _assign_layer_contexts(
         ])
 
     def run_parallel(pool: ProcessPoolExecutor) -> dict[str, Any]:
-        state = (wait_extra, crowd_state)
-        worker_count = min(workers, max(1, task_count))
-        list(pool.map(_p6_worker_set_dynamic_state, [state] * worker_count))
         tasks: list[tuple[Any, ...]] = []
         token = journey_cache_token if journey_cache_token is not None else ("assign", period_index, id(crowd_state))
         for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
