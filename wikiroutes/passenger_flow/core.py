@@ -1152,85 +1152,67 @@ def _resolve_p6_task_workers(task_count: int) -> int:
 
 _P6_WORKER_CONTEXTS: tuple[_AssignContext, ...] | None = None
 _P6_WORKER_JOURNEY_CACHE: dict[tuple[int, Any], dict[tuple[Any, ...], list[Any]]] = {}
-_P6_WORKER_CROWD_STATE: Mapping[str, Any] | None = None
-_P6_WORKER_WAIT_EXTRA: Mapping[int, float] | None = None
 
 
 def _p6_worker_init(contexts: Sequence[_AssignContext]) -> None:
     global _P6_WORKER_CONTEXTS, _P6_WORKER_JOURNEY_CACHE
-    global _P6_WORKER_CROWD_STATE, _P6_WORKER_WAIT_EXTRA
     _P6_WORKER_CONTEXTS = tuple(contexts)
     _P6_WORKER_JOURNEY_CACHE = {}
-    _P6_WORKER_CROWD_STATE = None
-    _P6_WORKER_WAIT_EXTRA = None
 
 
-def _p6_worker_set_dynamic_state(
-    state: tuple[Mapping[int, float] | None, Mapping[str, Any] | None],
-) -> None:
-    global _P6_WORKER_WAIT_EXTRA, _P6_WORKER_CROWD_STATE
-    _P6_WORKER_WAIT_EXTRA, _P6_WORKER_CROWD_STATE = state
-
-
-def _create_p6_process_pool(
-    contexts: Sequence[tuple[_AssignContext, float, float]],
-    workers: int,
-) -> ProcessPoolExecutor:
-    requested = os.getenv("TAKT_P6_MP_START")
-    start_method = requested or ("fork" if os.name == "posix" else "spawn")
-    try:
-        mp_context = mp.get_context(start_method)
-    except ValueError:
-        mp_context = mp.get_context("spawn")
-    return ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=mp_context,
-        initializer=_p6_worker_init,
-        initargs=(tuple(item[0] for item in contexts),),
-    )
-
-
-def _assign_layer_process(
-    task: tuple[
-        int, int, int, int, float, float,
-        bool,
-        Any,
+def _assign_layer_process_group(
+    payload: tuple[
+        Sequence[tuple[int, int, int, int, float, float, bool, Any]],
+        Mapping[int, float] | None,
+        Mapping[str, Any] | None,
     ],
 ) -> tuple[dict[str, Any], dict[str, float]]:
-    (
-        context_index, start, end, period_index,
-        out_factor, ret_factor,
-        profile_timings, journey_cache_token,
-    ) = task
+    """Обрабатывает пачку OD-chunk'ов одним процессом.
+
+    Большие crowd-state и wait-state сериализуются один раз на worker,
+    а промежуточные агрегаты объединяются внутри процесса.
+    """
+    tasks, wait_extra, crowd_state = payload
     if _P6_WORKER_CONTEXTS is None:
         raise RuntimeError("P6 worker context is not initialized")
-    crowd_state = _P6_WORKER_CROWD_STATE
-    wait_extra = _P6_WORKER_WAIT_EXTRA
-    cache_key = (context_index, journey_cache_token)
-    stale_keys = [
-        key for key in _P6_WORKER_JOURNEY_CACHE
-        if key[0] == context_index and key != cache_key
-    ]
-    for key in stale_keys:
-        del _P6_WORKER_JOURNEY_CACHE[key]
-    worker_cache = _P6_WORKER_JOURNEY_CACHE.get(cache_key)
-    if worker_cache is None:
-        worker_cache = {}
-        _P6_WORKER_JOURNEY_CACHE[cache_key] = worker_cache
-    ctx = _P6_WORKER_CONTEXTS[context_index]
-    local_perf = {} if profile_timings else None
-    result = ctx.assign(
-        out_factor=out_factor,
-        ret_factor=ret_factor,
-        wait_extra=wait_extra,
-        period_index=period_index,
-        crowd_state=crowd_state,
-        perf_stats=local_perf,
-        journey_cache=worker_cache,
-        pair_slice=(start, end),
-        journey_cache_token=journey_cache_token,
-    )
-    return result, local_perf or {}
+
+    results: list[dict[str, Any]] = []
+    total_perf: dict[str, float] = {}
+    for (
+        context_index, start, end, period_index,
+        out_factor, ret_factor, profile_timings, journey_cache_token,
+    ) in tasks:
+        cache_key = (context_index, journey_cache_token)
+        stale_keys = [
+            key for key in _P6_WORKER_JOURNEY_CACHE
+            if key[0] == context_index and key != cache_key
+        ]
+        for key in stale_keys:
+            del _P6_WORKER_JOURNEY_CACHE[key]
+        worker_cache = _P6_WORKER_JOURNEY_CACHE.get(cache_key)
+        if worker_cache is None:
+            worker_cache = {}
+            _P6_WORKER_JOURNEY_CACHE[cache_key] = worker_cache
+
+        ctx = _P6_WORKER_CONTEXTS[context_index]
+        local_perf = {} if profile_timings else None
+        result = ctx.assign(
+            out_factor=out_factor,
+            ret_factor=ret_factor,
+            wait_extra=wait_extra,
+            period_index=period_index,
+            crowd_state=crowd_state,
+            perf_stats=local_perf,
+            journey_cache=worker_cache,
+            pair_slice=(start, end),
+            journey_cache_token=journey_cache_token,
+        )
+        results.append(result)
+        if local_perf:
+            for key, value in local_perf.items():
+                total_perf[key] = total_perf.get(key, 0.0) + float(value)
+
+    return _merge_period_aggregates(results), total_perf
 
 
 def _assign_layer_contexts(
@@ -1273,7 +1255,10 @@ def _assign_layer_contexts(
         token = journey_cache_token if journey_cache_token is not None else ("assign", period_index, id(crowd_state))
         for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
             n_rows = len(ctx.od_rows)
-            parts = min(workers, max(1, (n_rows + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE))
+            parts = min(
+                workers,
+                max(1, (n_rows + _P6_PAIR_CHUNK_SIZE - 1) // _P6_PAIR_CHUNK_SIZE),
+            )
             for part in range(parts):
                 start = (n_rows * part) // parts
                 end = (n_rows * (part + 1)) // parts
@@ -1284,7 +1269,10 @@ def _assign_layer_contexts(
                     out_factor, ret_factor,
                     perf_stats is not None, token,
                 ))
-        completed = list(pool.map(_assign_layer_process, tasks))
+        group_count = min(workers, len(tasks))
+        groups = [tasks[i::group_count] for i in range(group_count)] if group_count else []
+        payloads = [(group, wait_extra, crowd_state) for group in groups]
+        completed = list(pool.map(_assign_layer_process_group, payloads))
         results = [item[0] for item in completed]
         if perf_stats is not None:
             for local in (item[1] for item in completed):
