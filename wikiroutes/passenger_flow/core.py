@@ -1152,12 +1152,24 @@ def _resolve_p6_task_workers(task_count: int) -> int:
 
 _P6_WORKER_CONTEXTS: tuple[_AssignContext, ...] | None = None
 _P6_WORKER_JOURNEY_CACHE: dict[tuple[int, Any], dict[tuple[Any, ...], list[Any]]] = {}
+_P6_WORKER_CROWD_STATE: Mapping[str, Any] | None = None
+_P6_WORKER_WAIT_EXTRA: Mapping[int, float] | None = None
 
 
 def _p6_worker_init(contexts: Sequence[_AssignContext]) -> None:
     global _P6_WORKER_CONTEXTS, _P6_WORKER_JOURNEY_CACHE
+    global _P6_WORKER_CROWD_STATE, _P6_WORKER_WAIT_EXTRA
     _P6_WORKER_CONTEXTS = tuple(contexts)
     _P6_WORKER_JOURNEY_CACHE = {}
+    _P6_WORKER_CROWD_STATE = None
+    _P6_WORKER_WAIT_EXTRA = None
+
+
+def _p6_worker_set_dynamic_state(
+    state: tuple[Mapping[int, float] | None, Mapping[str, Any] | None],
+) -> None:
+    global _P6_WORKER_WAIT_EXTRA, _P6_WORKER_CROWD_STATE
+    _P6_WORKER_WAIT_EXTRA, _P6_WORKER_CROWD_STATE = state
 
 
 def _create_p6_process_pool(
@@ -1181,19 +1193,19 @@ def _create_p6_process_pool(
 def _assign_layer_process(
     task: tuple[
         int, int, int, int, float, float,
-        Mapping[int, float] | None,
-        Mapping[str, Any] | None,
         bool,
         Any,
     ],
 ) -> tuple[dict[str, Any], dict[str, float]]:
     (
         context_index, start, end, period_index,
-        out_factor, ret_factor, wait_extra, crowd_state,
+        out_factor, ret_factor,
         profile_timings, journey_cache_token,
     ) = task
     if _P6_WORKER_CONTEXTS is None:
         raise RuntimeError("P6 worker context is not initialized")
+    crowd_state = _P6_WORKER_CROWD_STATE
+    wait_extra = _P6_WORKER_WAIT_EXTRA
     cache_key = (context_index, journey_cache_token)
     stale_keys = [
         key for key in _P6_WORKER_JOURNEY_CACHE
@@ -1254,6 +1266,9 @@ def _assign_layer_contexts(
         ])
 
     def run_parallel(pool: ProcessPoolExecutor) -> dict[str, Any]:
+        state = (wait_extra, crowd_state)
+        worker_count = min(workers, max(1, task_count))
+        list(pool.map(_p6_worker_set_dynamic_state, [state] * worker_count))
         tasks: list[tuple[Any, ...]] = []
         token = journey_cache_token if journey_cache_token is not None else ("assign", period_index, id(crowd_state))
         for context_index, (ctx, out_factor, ret_factor) in enumerate(contexts):
@@ -1266,7 +1281,7 @@ def _assign_layer_contexts(
                     continue
                 tasks.append((
                     context_index, start, end, period_index,
-                    out_factor, ret_factor, wait_extra, crowd_state,
+                    out_factor, ret_factor,
                     perf_stats is not None, token,
                 ))
         completed = list(pool.map(_assign_layer_process, tasks))
