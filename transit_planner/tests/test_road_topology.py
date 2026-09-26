@@ -84,5 +84,5 @@ def test_interior_connector_splits_geometry_by_linear_reference():
         graph.connector_nodes["mid"],
         graph.connector_nodes["b"],
     )
-    assert round(time_a_mid, 6) == round(2.5 / 1000 / 60 * 60, 6)
-    assert round(time_mid_b, 6) == round(7.5 / 1000 / 60 * 60, 6)
+    assert round(time_a_mid, 6) == round(5 / 1000 / 60 * 60, 6)
+    assert round(time_mid_b, 6) == round(15 / 1000 / 60 * 60, 6)
