@@ -259,9 +259,11 @@ def _assign_once(
                 walk_time_min=walk_time,
                 car_time_min=car_time,
                 transit_time_min=transit_time,
+                transit_wait_min=journey_wait,
                 bike_time_min=bike_time,
                 transit_fare=config.transit_fare,
                 car_distance_km=distance_m / 1000.0,
+                bike_distance_km=distance_m / 1000.0,
                 config=config.choice,
             )
         )
