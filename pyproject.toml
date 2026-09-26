@@ -1,0 +1,4 @@
+[tool.vulture]
+# FastAPI registers these functions through decorators; they are intentionally
+# discovered at runtime rather than referenced by Python code.
+ignore_decorators = ["@app.get", "@app.post"]
