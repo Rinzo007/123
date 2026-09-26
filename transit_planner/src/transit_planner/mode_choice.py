@@ -30,7 +30,7 @@ def utilities(
     walk_time_min: float,
     car_time_min: float,
     transit_time_min: float | None,
-    bike_time_min: float,
+    bike_time_min: float = float('inf'),
     config: ModeChoiceConfig = ModeChoiceConfig(),
 ) -> ModeUtilities:
     transit = (
