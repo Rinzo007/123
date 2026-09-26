@@ -127,8 +127,8 @@
   }
 
   function buildNetworkPayload(): NetworkPayload {
-    const origin = $stopsStoreRef[0] ?? { lon: DEFAULT_CENTER[0], lat: DEFAULT_CENTER[1] };
-    const metricStops = $stopsStoreRef.map((stop) => ({
+    const origin = $stopsStore[0] ?? { lon: DEFAULT_CENTER[0], lat: DEFAULT_CENTER[1] };
+    const metricStops = $stopsStore.map((stop) => ({
       id: stop.id,
       name: stop.name,
       location: toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat),
@@ -143,10 +143,10 @@
         : null;
 
     const vehicleType = {
-      id: `vehicle-${$modeStoreRef}`,
-      name: MODE_LABELS[$modeStoreRef],
-      $modeStoreRef,
-      capacity: MODE_CAPACITY[$modeStoreRef],
+      id: `vehicle-${$modeStore}`,
+      name: MODE_LABELS[$modeStore],
+      $modeStore,
+      capacity: MODE_CAPACITY[$modeStore],
       operating_cost_per_km: 0,
     };
 
@@ -154,17 +154,17 @@
       origin_lon: origin.lon,
       origin_lat: origin.lat,
       stops: metricStops,
-      routes: $stopsStoreRef.length >= 2
-        ? [{ id: "draft-route", name: $routeNameStoreRef, $modeStoreRef, stop_ids: $stopsStoreRef.map((stop) => stop.id), geometry }]
+      routes: $stopsStore.length >= 2
+        ? [{ id: "draft-route", name: $routeNameStore, $modeStore, stop_ids: $stopsStore.map((stop) => stop.id), geometry }]
         : [],
       vehicle_types: [vehicleType],
       periods: PERIODS,
-      services: $stopsStoreRef.length >= 2
+      services: $stopsStore.length >= 2
         ? [{
             id: "draft-service",
             route_id: "draft-route",
             vehicle_type_id: vehicleType.id,
-            headway_by_period: { ...$headwaysStoreRef },
+            headway_by_period: { ...$headwaysStore },
           }]
         : [],
     };
@@ -189,7 +189,7 @@
   function stopsGeoJSON(): FeatureCollection<GeoJSONPoint, { id: string; name: string }> {
     return {
       type: "FeatureCollection",
-      features: $stopsStoreRef.map((stop) => ({
+      features: $stopsStore.map((stop) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [stop.lon, stop.lat] },
         properties: { id: stop.id, name: stop.name },
@@ -200,10 +200,10 @@
   function routeGeoJSON(): FeatureCollection<LineString, object> {
     return {
       type: "FeatureCollection",
-      features: $stopsStoreRef.length >= 2
+      features: $stopsStore.length >= 2
         ? [{
             type: "Feature",
-            geometry: { type: "LineString", coordinates: $stopsStoreRef.map((stop) => [stop.lon, stop.lat]) },
+            geometry: { type: "LineString", coordinates: $stopsStore.map((stop) => [stop.lon, stop.lat]) },
             properties: {},
           }]
         : [],
@@ -212,7 +212,7 @@
 
   function assignmentSectionGeoJSON(): FeatureCollection<LineString, Record<string, unknown>> {
     if (!assignmentResult) return { type: "FeatureCollection", features: [] };
-    const byId = new Map($stopsStoreRef.map((stop) => [stop.id, stop]));
+    const byId = new Map($stopsStore.map((stop) => [stop.id, stop]));
     return {
       type: "FeatureCollection",
       features: assignmentResult.section_loads.flatMap((section) => {
@@ -231,7 +231,7 @@
 
   function assignmentStopGeoJSON(): FeatureCollection<GeoJSONPoint, Record<string, unknown>> {
     if (!assignmentResult) return { type: "FeatureCollection", features: [] };
-    const byId = new Map($stopsStoreRef.map((stop) => [stop.id, stop]));
+    const byId = new Map($stopsStore.map((stop) => [stop.id, stop]));
     return {
       type: "FeatureCollection",
       features: assignmentResult.stop_flows.flatMap((flow) => {
@@ -252,7 +252,7 @@
   }
 
   function commitStops(next: StopDraft[]) {
-    $stopsStoreRef = next;
+    $stopsStore = next;
     roadRoute = null;
     assignmentResult = null;
     demandStreets = null;
@@ -261,8 +261,8 @@
 
   function addStop(event: MapMouseEvent) {
     if (!drawMode) return;
-    const index = $stopsStoreRef.length + 1;
-    commitStops([...$stopsStoreRef, {
+    const index = $stopsStore.length + 1;
+    commitStops([...$stopsStore, {
       id: `stop-${Date.now()}-${index}`,
       name: `Остановка ${index}`,
       lon: event.lngLat.lng,
@@ -271,11 +271,11 @@
   }
 
   function removeStop(id: string) {
-    commitStops($stopsStoreRef.filter((stop) => stop.id !== id));
+    commitStops($stopsStore.filter((stop) => stop.id !== id));
   }
 
   function clearRoute() {
-    $stopsStoreRef = [];
+    $stopsStore = [];
     roadRoute = null;
     assignmentResult = null;
     demandStreets = null;
@@ -307,7 +307,7 @@
 
       cityRoads = data.roads;
       cityConnectors = data.connectors;
-      cityStops = data.$stopsStoreRef;
+      cityStops = data.$stopsStore;
       cityPlaces = data.places;
 
       const populationKey = datasetCacheKey("population-zones", {
@@ -328,7 +328,7 @@
         }
       }
 
-      message = `${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.$stopsStoreRef} остановок`;
+      message = `${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.$stopsStore} остановок`;
     } catch (error) {
       message = error instanceof Error ? error.message : "Ошибка загрузки Overture";
     } finally {
@@ -337,12 +337,12 @@
   }
 
   async function buildRoadRoute() {
-    if (!mapRef || $stopsStoreRef.length < 2) return;
+    if (!mapRef || $stopsStore.length < 2) return;
     busy = true;
     message = "Построение маршрута по Overture…";
     try {
       const bounds = mapRef.getBounds();
-      const routePoints = $stopsStoreRef.map((stop) => ({ lon: stop.lon, lat: stop.lat }));
+      const routePoints = $stopsStore.map((stop) => ({ lon: stop.lon, lat: stop.lat }));
       const routeKey = datasetCacheKey("overture-route", {
         south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
       }) + ":" + routePoints.map((point) => `${point.lon.toFixed(5)},${point.lat.toFixed(5)}`).join(";");
@@ -366,28 +366,28 @@
   }
 
   function previewZones() {
-    const origin = $stopsStoreRef[0];
+    const origin = $stopsStore[0];
     if (!origin) return [];
-    return $stopsStoreRef.map((stop) => {
+    return $stopsStore.map((stop) => {
       const point = toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat);
       return { id: stop.id, centroid_x: point.x, centroid_y: point.y };
     });
   }
 
   async function runPreviewAssignment() {
-    if ($stopsStoreRef.length < 2) return;
+    if ($stopsStore.length < 2) return;
     busy = true;
     message = "Расчёт проверочного пассажиропотока…";
     try {
       const demand = [{
-        origin_zone_id: $stopsStoreRef[0].id,
-        destination_zone_id: $stopsStoreRef[$stopsStoreRef.length - 1].id,
+        origin_zone_id: $stopsStore[0].id,
+        destination_zone_id: $stopsStore[$stopsStore.length - 1].id,
         trips_per_day: previewTrips,
         purpose: "all",
       }];
       const result = await calculateAssignment(network, demand, previewZones(), "am");
       assignmentResult = result;
-      demandStreets = await loadDemandStreets(demand, previewZones(), $stopsStoreRef[0].lon, $stopsStoreRef[0].lat);
+      demandStreets = await loadDemandStreets(demand, previewZones(), $stopsStore[0].lon, $stopsStore[0].lat);
       message = `Пассажиропоток рассчитан: transit ${(result.metrics.transit_share * 100).toFixed(1)}%`;
     } catch (error) {
       message = error instanceof Error ? error.message : "Ошибка расчёта пассажиропотока";
@@ -397,7 +397,7 @@
   }
 
   async function runCityAssignment() {
-    if (!mapRef || $stopsStoreRef.length < 2) return;
+    if (!mapRef || $stopsStore.length < 2) return;
     busy = true;
     message = "Расчёт городской сети по WorldPop + Overture…";
     try {
@@ -428,15 +428,15 @@
   }
 
   async function runEconomics() {
-    if ($stopsStoreRef.length < 2) return;
+    if ($stopsStore.length < 2) return;
     busy = true;
     message = "Расчёт экономики…";
     try {
       const result = await calculateEconomics(
         network,
         [{
-          origin_zone_id: $stopsStoreRef[0].id,
-          destination_zone_id: $stopsStoreRef[$stopsStoreRef.length - 1].id,
+          origin_zone_id: $stopsStore[0].id,
+          destination_zone_id: $stopsStore[$stopsStore.length - 1].id,
           trips_per_day: previewTrips,
           purpose: "all",
         }],
@@ -485,11 +485,11 @@
   }
 
   function captureScenarioBase() {
-    if ($stopsStoreRef.length < 2) return;
+    if ($stopsStore.length < 2) return;
     scenarioBase = {
       network: structuredClone(network),
-      origin: { lon: $stopsStoreRef[0].lon, lat: $stopsStoreRef[0].lat },
-      destination: { lon: $stopsStoreRef[$stopsStoreRef.length - 1].lon, lat: $stopsStoreRef[$stopsStoreRef.length - 1].lat },
+      origin: { lon: $stopsStore[0].lon, lat: $stopsStore[0].lat },
+      destination: { lon: $stopsStore[$stopsStore.length - 1].lon, lat: $stopsStore[$stopsStore.length - 1].lat },
       trips: previewTrips,
       farePerTransitTrip,
       annualDays,
@@ -499,7 +499,7 @@
   }
 
   async function compareWithScenarioBase() {
-    if (!scenarioBase || $stopsStoreRef.length < 2) return;
+    if (!scenarioBase || $stopsStore.length < 2) return;
     busy = true;
     message = "Сравнение базового и текущего сценариев…";
     try {
@@ -537,10 +537,10 @@
     return {
       format: "transit-planner-project",
       version: 3,
-      $routeNameStoreRef,
-      $modeStoreRef,
-      $headwaysStoreRef,
-      $stopsStoreRef,
+      $routeNameStore,
+      $modeStore,
+      $headwaysStore,
+      $stopsStore,
       network,
       roadRoute,
       economics: { farePerTransitTrip, annualDays },
@@ -564,10 +564,10 @@
     if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
     const version = Number(project.version ?? 1);
     if (version < 1 || version > 3) throw new Error("Неподдерживаемая версия проекта");
-    $routeNameStoreRef = String(project.$routeNameStoreRef ?? "Новый маршрут");
-    $modeStoreRef = (project.$modeStoreRef ?? "bus") as TransitMode;
-    $headwaysStoreRef = { ...$headwaysStoreRef, ...(project.$headwaysStoreRef ?? {}) };
-    $stopsStoreRef = Array.isArray(project.$stopsStoreRef) ? project.stops: [];
+    $routeNameStore = String(project.$routeNameStore ?? "Новый маршрут");
+    $modeStore = (project.$modeStore ?? "bus") as TransitMode;
+    $headwaysStore = { ...$headwaysStore, ...(project.$headwaysStore ?? {}) };
+    $stopsStore = Array.isArray(project.$stopsStore) ? project.stops: [];
     roadRoute = version >= 3 && project.roadRoute?.type === "FeatureCollection" ? project.roadRoute : null;
     const economics = project.economics ?? {};
     farePerTransitTrip = Number.isFinite(Number(economics.farePerTransitTrip)) ? Math.max(0, Number(economics.farePerTransitTrip)) : 0;
@@ -638,20 +638,20 @@
       map.addLayer({ id: "city-connector-circles", type: "circle", source: "city-connectors", paint: { "circle-radius": 2.5, "circle-color": "#f59e0b", "circle-opacity": 0.7 } });
       map.addSource("city-places", { type: "geojson", data: emptyPoints() });
       map.addLayer({ id: "city-place-circles", type: "circle", source: "city-places", paint: { "circle-radius": 3, "circle-color": "#8b5cf6", "circle-opacity": 0.5 } });
-      map.addSource("city-$stopsStoreRef", { type: "geojson", data: emptyPoints() });
-      map.addLayer({ id: "city-stop-circles", type: "circle", source: "city-$stopsStoreRef", paint: { "circle-radius": 3.5, "circle-color": "#6b7280", "circle-opacity": 0.65, "circle-stroke-width": 1, "circle-stroke-color": "#fff" } });
+      map.addSource("city-$stopsStore", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "city-stop-circles", type: "circle", source: "city-$stopsStore", paint: { "circle-radius": 3.5, "circle-color": "#6b7280", "circle-opacity": 0.65, "circle-stroke-width": 1, "circle-stroke-color": "#fff" } });
       map.addSource("population-zones", { type: "geojson", data: blank });
       map.addLayer({ id: "population-zone-points", type: "circle", source: "population-zones", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "population"], 0, 2, 500, 5, 2000, 9, 5000, 15], "circle-opacity": 0.28, "circle-color": "#0f766e" } });
       map.addSource("demand-streets", { type: "geojson", data: blank });
       map.addLayer({ id: "demand-street-lines", type: "line", source: "demand-streets", paint: { "line-width": ["interpolate", ["linear"], ["get", "flow_weight"], 0, 1, 100, 3, 500, 7, 1000, 11], "line-opacity": 0.45, "line-color": "#7c3aed" } });
       map.addSource("analysis-sections", { type: "geojson", data: blank });
       map.addLayer({ id: "analysis-section-loads", type: "line", source: "analysis-sections", paint: { "line-width": 6, "line-opacity": 0.82, "line-color": ["interpolate", ["linear"], ["get", "load_ratio"], 0, "#22c55e", 0.7, "#eab308", 1, "#f97316", 1.5, "#dc2626"] } });
-      map.addSource("analysis-$stopsStoreRef", { type: "geojson", data: emptyPoints() });
-      map.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-$stopsStoreRef", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      map.addSource("analysis-$stopsStore", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-$stopsStore", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
       map.addSource("draft-route", { type: "geojson", data: routeGeoJSON() });
       map.addLayer({ id: "draft-route-line", type: "line", source: "draft-route", paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2563eb" } });
-      map.addSource("draft-$stopsStoreRef", { type: "geojson", data: stopsGeoJSON() });
-      map.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-$stopsStoreRef", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      map.addSource("draft-$stopsStore", { type: "geojson", data: stopsGeoJSON() });
+      map.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-$stopsStore", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
       mapReady = true;
     });
     map.on("click", addStop);
@@ -694,15 +694,15 @@
   $: if (mapRef && mapReady) {
     const source = (id: string) => mapRef?.getSource(id) as GeoJSONSource | undefined;
     source("draft-route")?.setData(roadRoute ?? routeGeoJSON());
-    source("draft-$stopsStoreRef")?.setData(stopsGeoJSON());
+    source("draft-$stopsStore")?.setData(stopsGeoJSON());
     if (cityRoads) source("city-roads")?.setData(cityRoads as any);
     if (cityConnectors) source("city-connectors")?.setData(cityConnectors as any);
-    if (cityStops) source("city-$stopsStoreRef")?.setData(cityStops as any);
+    if (cityStops) source("city-$stopsStore")?.setData(cityStops as any);
     if (cityPlaces) source("city-places")?.setData(cityPlaces as any);
     if (populationZones) source("population-zones")?.setData(populationZones as any);
     if (demandStreets) source("demand-streets")?.setData(demandStreets as any);
     source("analysis-sections")?.setData(assignmentSectionGeoJSON() as any);
-    source("analysis-$stopsStoreRef")?.setData(assignmentStopGeoJSON() as any);
+    source("analysis-$stopsStore")?.setData(assignmentStopGeoJSON() as any);
 
     const setVisibility = (id: string, visible: boolean) => {
       if (mapRef?.getLayer(id)) mapRef.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
@@ -743,7 +743,7 @@
       <button class:active-toggle={viewMode === "map"} on:click={() => viewMode = "map"}>Карта</button>
       <button class:active-toggle={viewMode === "network"} on:click={() => viewMode = "network"}>Сеть</button>
       <button on:click={loadCityData} disabled={busy}>Загрузить Overture</button>
-      <button on:click={buildRoadRoute} disabled={busy || $stopsStoreRef.length < 2}>Построить по дорогам</button>
+      <button on:click={buildRoadRoute} disabled={busy || $stopsStore.length < 2}>Построить по дорогам</button>
       <button class="primary" class:active={drawMode} on:click={() => drawMode = !drawMode}>
         {drawMode ? "Завершить рисование" : "Добавить остановки"}
       </button>
@@ -757,9 +757,9 @@
         } finally {
           busy = false;
         }
-      }} disabled={busy || $stopsStoreRef.length < 2}>Проверить сеть</button>
-      <button on:click={captureScenarioBase} disabled={busy || $stopsStoreRef.length < 2}>Зафиксировать базовый</button>
-      <button on:click={compareWithScenarioBase} disabled={busy || !scenarioBase || $stopsStoreRef.length < 2}>Сравнить</button>
+      }} disabled={busy || $stopsStore.length < 2}>Проверить сеть</button>
+      <button on:click={captureScenarioBase} disabled={busy || $stopsStore.length < 2}>Зафиксировать базовый</button>
+      <button on:click={compareWithScenarioBase} disabled={busy || !scenarioBase || $stopsStore.length < 2}>Сравнить</button>
       <button on:click={exportJson}>Сохранить</button>
       <button on:click={() => fileInput?.click()}>Открыть</button>
       <input bind:this={fileInput} type="file" accept="application/json" hidden on:change={(event) => {
@@ -772,15 +772,15 @@
 
   <div class="workspace">
     <ControlPanel
-      bind:$routeNameStoreRef
-      bind:$modeStoreRef
+      bind:$routeNameStore
+      bind:$modeStore
       modeLabels={MODE_LABELS}
       bind:previewTrips
       bind:farePerTransitTrip
       bind:annualDays
       periods={PERIODS}
-      bind:$headwaysStoreRef
-      $stopsStoreRef={$stopsStoreRef}
+      bind:$headwaysStore
+      $stopsStore={$stopsStore}
       busy={busy}
       message={message}
       bind:showRoads
