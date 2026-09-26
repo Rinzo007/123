@@ -96,3 +96,42 @@ def test_analytics_uses_physical_segment_length_for_passenger_km():
     forward = next(section for section in result.sections if section.from_stop_id == "a")
     assert forward.distance_km == 3.0
     assert result.passenger_km == forward.passengers * 3.0
+
+def test_analytics_keeps_distinct_closed_reverse_segments():
+    from transit_planner.infrastructure import TrackSection
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_track_section(TrackSection("ab", 1.0))
+    network.add_track_section(TrackSection("ba", 3.0))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(
+        Route(
+            "loop",
+            "Loop",
+            TransitMode.TRAM,
+            ("a", "b"),
+            track_section_ids=("ab", "ba"),
+            closed=True,
+        )
+    )
+    network.add_service(Service("svc", "loop", "tram", {"peak": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix(
+            (
+                ODPairDemand("a", "b", 10),
+                ODPairDemand("b", "a", 10),
+            )
+        ),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = analyze_network(network, assignment)
+
+    forward = next(section for section in result.sections if section.from_stop_id == "a")
+    reverse = next(section for section in result.sections if section.from_stop_id == "b")
+    assert forward.distance_km == 1.0
+    assert reverse.distance_km == 3.0
