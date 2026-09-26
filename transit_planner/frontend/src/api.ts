@@ -295,3 +295,73 @@ export function calculateCityAssignment(
     return response.json() as Promise<CityAssignmentResponse>;
   });
 }
+
+export interface ScenarioComparisonResponse {
+  base: {
+    scenario_id: string;
+    name: string;
+    metrics: Record<string, number>;
+  };
+  alternative: {
+    scenario_id: string;
+    name: string;
+    metrics: Record<string, number>;
+  };
+  comparison: {
+    base_scenario_id: string;
+    alternative_scenario_id: string;
+    metrics: Array<{
+      metric: string;
+      base: number;
+      alternative: number;
+      delta: number;
+      relative_delta: number;
+    }>;
+    sections: Array<{
+      route_id: string;
+      from_stop_id: string;
+      to_stop_id: string;
+      base_passengers: number;
+      alternative_passengers: number;
+      delta: number;
+    }>;
+  };
+}
+
+export interface ScenarioPayload {
+  id: string;
+  name: string;
+  network: NetworkPayload;
+  demand: Array<{
+    origin_zone_id: string;
+    destination_zone_id: string;
+    trips_per_day: number;
+    purpose?: string;
+    base_time_min?: number;
+  }>;
+  zones: Array<{
+    id: string;
+    centroid_x: number;
+    centroid_y: number;
+    population?: number;
+    jobs?: number;
+    no_car_share?: number;
+  }>;
+  config: { period_id: string };
+}
+
+export function compareScenarios(
+  base: ScenarioPayload,
+  alternative: ScenarioPayload,
+): Promise<ScenarioComparisonResponse> {
+  return fetch("/api/v1/scenario/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base, alternative }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(await response.text() || "Не удалось сравнить сценарии");
+    }
+    return response.json() as Promise<ScenarioComparisonResponse>;
+  });
+}
