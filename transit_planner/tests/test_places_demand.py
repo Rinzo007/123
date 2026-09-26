@@ -27,8 +27,8 @@ def test_places_are_aggregated_to_nearest_zone_by_purpose():
     )
 
     result = aggregate_place_attractions(zones, places)
-    assert result[1].attractions["education"] == 2.0
-    assert result[0].attractions["shopping"] == 3.0
+    assert result[1].attractions["edu"] == 2.0
+    assert result[0].attractions["shop"] == 3.0
 
 
 def test_canonical_demand_uses_place_purpose_aliases():
