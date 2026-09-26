@@ -2,7 +2,7 @@ from transit_planner.assignment import AssignmentConfig, assign_demand
 from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.geo import Point
-from transit_planner.choice import ChoiceConfig, utilities
+from transit_planner.choice import ChoiceConfig, probabilities, utilities
 from transit_planner.network import Network, ServicePeriod, Stop
 
 
