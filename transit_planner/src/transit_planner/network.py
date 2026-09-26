@@ -6,7 +6,11 @@ from math import ceil, hypot
 
 from .geo import LineString, Point
 from .infrastructure import TrackSection
-from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_PERIODS
+from .reference_model import (
+    REFERENCE_MODE_PROFILES,
+    REFERENCE_PERIODS,
+    TrackRow,
+)
 
 
 class TransitMode(StrEnum):
@@ -49,6 +53,7 @@ class Route:
     stop_ids: tuple[str, ...]
     geometry: LineString | None = None
     track_section_ids: tuple[str, ...] = ()
+    row_by_segment: tuple[TrackRow, ...] = ()
     both_ways: bool = True
     closed: bool = False
 
@@ -60,6 +65,8 @@ class Route:
         expected_segments = len(self.stop_ids) if self.closed else len(self.stop_ids) - 1
         if self.track_section_ids and len(self.track_section_ids) != expected_segments:
             raise ValueError("track_section_ids must match route segments")
+        if self.row_by_segment and len(self.row_by_segment) != expected_segments:
+            raise ValueError("row_by_segment must match route segments")
 
     def segment_pairs(self) -> tuple[tuple[str, str], ...]:
         pairs = list(zip(self.stop_ids, self.stop_ids[1:]))
@@ -180,10 +187,24 @@ class Network:
             self.stops[right_id].location,
         )
 
+    def route_segment_row(self, route: Route, index: int) -> TrackRow:
+        """Return the reference infrastructure row for a route segment."""
+        if index < 0 or index >= len(route.segment_pairs()):
+            raise IndexError("segment index out of range")
+        if route.row_by_segment:
+            return route.row_by_segment[index]
+        return REFERENCE_MODE_PROFILES[route.mode.value].default_row
+
+    def route_segment_cost_per_km(self, route: Route, index: int) -> float:
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        row = self.route_segment_row(route, index)
+        return profile.rows[row].cost_per_km
+
     def route_segment_run_time_min(self, route: Route, index: int) -> float:
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
         section_id = route.track_section_for_segment(index)
-        speed = profile.rows[profile.default_row].speed_kph
+        row = self.route_segment_row(route, index)
+        speed = profile.rows[row].speed_kph
         if section_id is not None:
             section = self.track_sections[section_id]
             if section.speed_limit_kph is not None:
