@@ -24,7 +24,7 @@
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
   import EvaluationPanel from "./components/EvaluationPanel.svelte";
-  import { stops as stopsStore, mode as modeStore, routeName as routeNameStore, headways as headwaysStore } from "./stores/network";
+  import { stops as stopsStore, mode as modeStore, routeName as routeNameStore, headways as headwaysStore, networkPayload as networkPayloadStore } from "./stores/network";
   import { project as projectStore, markProjectDirty, markProjectClean } from "./stores/project";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
@@ -61,6 +61,7 @@
     stops: StopDraft[];
     network: NetworkPayload;
     roadRoute?: FeatureCollection<LineString, object> | null;
+    previewTrips?: number;
     economics?: { farePerTransitTrip?: number; annualDays?: number };
     scenarioBase?: {
       network: NetworkPayload;
@@ -259,6 +260,9 @@
       id: "current",
       network: buildNetworkPayload(),
       scenarioBase: structuredClone(scenarioBase),
+      previewTrips,
+      farePerTransitTrip,
+      annualDays,
       initialized,
       dirty,
     });
@@ -582,6 +586,7 @@
       mode: $modeStore,
       headways: $headwaysStore,
       stops: $stopsStore,
+      previewTrips,
       network,
       roadRoute,
       economics: { farePerTransitTrip, annualDays },
@@ -611,7 +616,8 @@
     $routeNameStore = String(project.routeName ?? "Новый маршрут");
     $modeStore = (project.mode ?? "bus") as TransitMode;
     $headwaysStore = { ...$headwaysStore, ...(project.headways ?? {}) };
-    $stopsStore = Array.isArray(project.stops) ? project.stops: [];
+    $stopsStore = Array.isArray(project.stops) ? project.stops : [];
+    previewTrips = Number.isFinite(Number(project.previewTrips)) ? Math.max(1, Math.min(100000, Math.round(Number(project.previewTrips)))) : 1000;
     roadRoute = version >= 3 && project.roadRoute?.type === "FeatureCollection" ? project.roadRoute : null;
     const economics = project.economics ?? {};
     farePerTransitTrip = Number.isFinite(Number(economics.farePerTransitTrip)) ? Math.max(0, Number(economics.farePerTransitTrip)) : 0;
@@ -718,6 +724,8 @@
       // Worker errors must not block map editing.
     }
   }
+
+  $: networkPayloadStore.set(network);
 
   $: if (initialized) {
     void refreshEvaluation(network);
