@@ -65,7 +65,14 @@ def gravity_od(
             if isclose(total, 0.0, abs_tol=1e-12)
             else productions[origin_id] * weight / total
         )
-        pairs.append(ODPairDemand(origin_id, destination_id, trips))
+        pairs.append(
+            ODPairDemand(
+                origin_id,
+                destination_id,
+                trips,
+                base_time_min=impedance_minutes,
+            )
+        )
 
     return DemandMatrix(tuple(pairs))
 
