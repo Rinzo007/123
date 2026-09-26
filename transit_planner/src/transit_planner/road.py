@@ -20,6 +20,7 @@ class RoadEdge:
     length_m: float
     speed_kph: float
     road_type: str = "unknown"
+    segment_id: str | None = None
 
     @property
     def travel_time_minutes(self) -> float:
@@ -35,12 +36,26 @@ class RoadGraph:
     nodes: dict[int, RoadNode] = field(default_factory=dict)
     edges: dict[str, RoadEdge] = field(default_factory=dict)
     outgoing: dict[int, list[str]] = field(default_factory=dict)
+    connector_nodes: dict[str, int] = field(default_factory=dict)
 
     def add_node(self, node: RoadNode) -> None:
         if node.id in self.nodes:
             raise ValueError(f"Duplicate road node: {node.id}")
         self.nodes[node.id] = node
         self.outgoing.setdefault(node.id, [])
+
+    def add_connector_node(self, connector_id: str, node: RoadNode) -> int:
+        existing = self.connector_nodes.get(connector_id)
+        if existing is not None:
+            old = self.nodes[existing]
+            if abs(old.x - node.x) > 1e-7 or abs(old.y - node.y) > 1e-7:
+                raise ValueError(
+                    f"Connector {connector_id} resolves to conflicting coordinates"
+                )
+            return existing
+        self.add_node(node)
+        self.connector_nodes[connector_id] = node.id
+        return node.id
 
     def add_edge(self, edge: RoadEdge) -> None:
         if edge.id in self.edges:
