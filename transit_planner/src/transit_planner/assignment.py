@@ -102,7 +102,7 @@ class AssignmentConfig:
     choice: ChoiceConfig = ChoiceConfig()
     transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
     crowding_penalty_min: float = 20.0
-    crowding_start_ratio: float = 1.0
+    crowding_start_ratio: float = 0.85
     iterations: int = 6
     damping: float = 0.5
     transit_fare: float = 0.0
