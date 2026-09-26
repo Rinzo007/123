@@ -80,6 +80,7 @@ def build_road_graph(
                     None,
                     None,
                     "backward",
+                    tuple(reversed(record.geometry.points)),
                 )
             )
 
