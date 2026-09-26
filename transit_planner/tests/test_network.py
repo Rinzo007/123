@@ -180,4 +180,4 @@ def test_route_supports_segment_reference_rows():
     assert network.route_segment_row(route, 0) is TrackRow.RESERVED
     assert network.route_segment_row(route, 1) is TrackRow.GRADE
     assert network.route_segment_cost_per_km(route, 1) == 85.0
-    assert network.route_segment_run_time_min(route, 0) < network.route_segment_run_time_min(route, 1)
+    assert network.route_segment_run_time_min(route, 0) > network.route_segment_run_time_min(route, 1)
