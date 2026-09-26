@@ -266,3 +266,21 @@ def test_router_uses_route_geometry_curve_runtime():
 
     assert journey is not None
     assert journey.duration_min > network.route_length_km(network.routes["curve"]) / 18.0 * 60.0
+
+
+def test_router_includes_intermediate_dwell_once():
+    network = make_network()
+    router = TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0))
+    journey = router.shortest(
+        network.stops["a"],
+        network.stops["c"],
+        period_id="am",
+    )
+
+    assert journey is not None
+    run_only = (
+        network.route_segment_run_time_min(network.routes["r1"], 0)
+        + network.route_segment_run_time_min(network.routes["r1"], 1)
+    )
+    expected = run_only + 20.0 / 60.0
+    assert abs(journey.duration_min - expected) < 1e-9
