@@ -220,6 +220,7 @@ def _assign_once(
     zones: dict[str, DemandZone],
     zone_stops: dict[str, str | None],
     route_penalties: dict[str, float],
+    service_headway_factors: dict[str, float],
 ) -> _FlowSnapshot:
     section_flow: dict[tuple[str, str, str], float] = {}
     service_stop_boardings: dict[tuple[str, str], float] = {}
