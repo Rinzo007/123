@@ -44,3 +44,23 @@ def test_serialization_round_trips_reference_route_rows_and_service_phase():
     restored = network_from_dict(network_to_dict(network))
     assert restored.routes["r1"].row_by_segment == (TrackRow.RESERVED, TrackRow.GRADE)
     assert restored.services["svc"].phase_by_period == {"am": 12.0}
+
+
+def test_serialization_round_trips_open_stops():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.BUS,
+            ("a", "b", "c"),
+            open_stop_ids=("a", "c"),
+        )
+    )
+    restored = network_from_dict(network_to_dict(network))
+    assert restored.routes["r1"].open_stop_ids == ("a", "c")
