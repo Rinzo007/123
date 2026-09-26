@@ -338,7 +338,11 @@ def population_zones(
         )
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"Не удалось прочитать population raster: {exc}") from exc
-    return zones_to_geojson(zones)
+    return zones_to_geojson(
+        zones,
+        origin_lon=(west + east) / 2.0,
+        origin_lat=(south + north) / 2.0,
+    )
 
 @app.post("/api/v1/demand/city")
 def city_demand(payload: dict) -> dict:
