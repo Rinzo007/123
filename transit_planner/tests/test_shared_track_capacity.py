@@ -44,3 +44,26 @@ def test_shared_track_limits_combined_service_departures():
     capacities = {item[:3]: item[3] for item in sections}
     assert capacities[("r1", "a", "b")] == 7500.0
     assert capacities[("r2", "c", "d")] == 7500.0
+
+
+def test_one_way_route_has_no_reverse_capacity() -> None:
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "ow",
+            "OW",
+            TransitMode.BUS,
+            ("a", "b"),
+            both_ways=False,
+        )
+    )
+    network.add_service(Service("ow-service", "ow", "bus", {"am": 10}))
+
+    sections, _ = _section_capacity_and_platforms(network, "am")
+    keys = {item[:3] for item in sections}
+    assert ("ow", "a", "b") in keys
+    assert ("ow", "b", "a") not in keys
