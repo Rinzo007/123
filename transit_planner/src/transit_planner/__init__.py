@@ -30,7 +30,7 @@ from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import DemandStreet, build_demand_streets, demand_streets_to_geojson
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
 from .places import CityPlace, PlacePurpose, PlacePurposeMapper, aggregate_place_attractions
-from .network import Network, default_service_periods
+from .network import Network, default_service_periods, default_vehicle_type
 from .od import GravityParameters, gravity_od
 from .choice import ChoiceConfig
 from .temporal_assignment import (
@@ -127,6 +127,7 @@ __all__ = [
     "calculate_economics",
     "Network",
     "default_service_periods",
+    "default_vehicle_type",
     "GravityParameters",
     "gravity_od",
     "ConstructionProject",
