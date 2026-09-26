@@ -1,3 +1,4 @@
+export {};
 type Zone={id:string;centroid_x:number;centroid_y:number};
 type Request={kind:"matrix";zones:Zone[]};
 type Response={kind:"matrix";ids:string[];times:number[]};
