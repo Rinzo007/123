@@ -813,6 +813,22 @@ export function App() {
               <span>Места</span>
               <b>{cityPlaces?.features.length ?? 0}</b>
             </div>
+            <div className="metric">
+              <span>Проверочный спрос</span>
+              <b>{assignmentResult ? `${previewTrips}/сутки` : "—"}</b>
+            </div>
+            {assignmentResult && (
+              <>
+                <div className="metric">
+                  <span>Transit share</span>
+                  <b>{(assignmentResult.metrics.transit_share * 100).toFixed(1)}%</b>
+                </div>
+                <div className="metric">
+                  <span>Макс. загрузка</span>
+                  <b>{(assignmentResult.max_load_ratio * 100).toFixed(0)}%</b>
+                </div>
+              </>
+            )}
           </section>
 
           <footer>{message}</footer>
