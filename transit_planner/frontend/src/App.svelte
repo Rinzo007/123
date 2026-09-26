@@ -19,7 +19,8 @@
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
-  import { disposeComputationWorkers, evaluateNetwork, runClientPreview } from "./workers";
+  import { createReferenceEvaluationClient, disposeComputationWorkers, evaluateNetwork, runClientPreview } from "./workers";
+  import { runReferencePreview } from "./workers/reference-runtime";
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
@@ -120,6 +121,7 @@
   let initialized = false;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let projectRevision = 0;
+  let referenceEvaluationClient: ReturnType<typeof createReferenceEvaluationClient> | null = null;
 
   function toLocalMeters(lon: number, lat: number, originLon: number, originLat: number) {
     const earthRadius = 6378137;
@@ -422,6 +424,16 @@
     try {
       const clientPreview = await runClientPreview(network);
       evaluationSummary = clientPreview.evaluation;
+      if (!referenceEvaluationClient) referenceEvaluationClient = createReferenceEvaluationClient();
+      const referencePreview = await runReferencePreview(referenceEvaluationClient, network, previewTrips);
+      const referenceResult = referencePreview.result as { lines?: unknown[]; stops?: number; };
+      if (Array.isArray(referenceResult.lines)) {
+        evaluationSummary = {
+          lines: referenceResult.lines.length,
+          stops: Number(referenceResult.stops ?? network.stops.length),
+          dailyDepartures: clientPreview.operations.dailyDepartures,
+        };
+      }
       const demand = [{
         origin_zone_id: $stopsStore[0].id,
         destination_zone_id: $stopsStore[$stopsStore.length - 1].id,
@@ -713,6 +725,8 @@
 
   onDestroy(() => {
     if (autosaveTimer) clearTimeout(autosaveTimer);
+    referenceEvaluationClient?.close();
+    referenceEvaluationClient = null;
     disposeComputationWorkers();
     mapRef?.remove();
   });
