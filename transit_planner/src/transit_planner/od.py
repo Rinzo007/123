@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from math import exp, isclose
 
 from .city import DemandZone
-from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfile, TripPurpose
 from .demand import DemandMatrix, ODPairDemand
 
 
