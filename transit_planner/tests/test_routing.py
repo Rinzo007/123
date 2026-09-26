@@ -303,3 +303,36 @@ def test_router_applies_segment_crowding_penalty_to_runtime():
 
     assert base is not None and crowded is not None
     assert abs(crowded.duration_min - base.duration_min - 5.0) < 1e-9
+
+
+def test_router_allows_through_running_stop_but_not_boarding_at_closed_stop():
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 2000)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.BUS,
+            ("a", "b", "c"),
+            open_stop_ids=("a", "c"),
+        )
+    )
+    network.add_service(Service("svc", "r1", "bus", {"am": 10}))
+    router = TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0))
+
+    through = router.shortest(
+        network.stops["a"],
+        network.stops["c"],
+        period_id="am",
+    )
+    closed_origin = router.shortest(
+        network.stops["b"],
+        network.stops["c"],
+        period_id="am",
+    )
+
+    assert through is not None
+    assert closed_origin is None
