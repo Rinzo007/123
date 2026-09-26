@@ -493,6 +493,7 @@ def city_assignment(payload: dict) -> dict:
                 "transit_share": result.metrics.transit_share,
                 "average_transit_time_min": result.metrics.average_transit_time_min,
                 "average_transfers": result.metrics.average_transfers,
+                "average_wait_time_min": result.metrics.average_wait_time_min,
             },
             "max_load_ratio": result.max_load_ratio,
             "unserved_transit_demand": result.unserved_transit_demand,
@@ -522,6 +523,7 @@ def city_assignment(payload: dict) -> dict:
                 "transit_share": item.result.metrics.transit_share,
                 "average_transit_time_min": item.result.metrics.average_transit_time_min,
                 "average_transfers": item.result.metrics.average_transfers,
+                "average_wait_time_min": item.result.metrics.average_wait_time_min,
                 "max_load_ratio": item.result.max_load_ratio,
             }
             for item in temporal_result.periods
