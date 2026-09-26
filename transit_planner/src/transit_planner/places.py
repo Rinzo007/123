@@ -8,11 +8,11 @@ from .geo import Point
 
 class PlacePurpose(StrEnum):
     WORK = "work"
-    EDUCATION = "education"
-    SHOPPING = "shopping"
+    EDUCATION = "edu"
+    SHOPPING = "shop"
     HEALTH = "health"
-    LEISURE = "leisure"
-    AIRPORT = "airport"
+    LEISURE = "night"
+    AIRPORT = "air"
 
 
 @dataclass(frozen=True, slots=True)
