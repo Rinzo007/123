@@ -118,7 +118,7 @@ class OvertureTransportationProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(geometry) AS geojson,
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
                 class,
                 subclass,
                 FALSE AS oneway,
@@ -173,7 +173,7 @@ class OvertureConnectorProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(geometry) AS geojson
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson
             FROM read_parquet('{_sql_quote(self.source.transportation_connectors())}')
             WHERE TRUE
               {bbox_filter}
@@ -241,7 +241,7 @@ class OvertureTransitProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(geometry) AS geojson,
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
                 names.primary AS name,
                 class
             FROM read_parquet('{_sql_quote(self.source.infrastructure())}')
