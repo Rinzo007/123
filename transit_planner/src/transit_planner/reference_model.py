@@ -9,16 +9,14 @@ class ReferencePeriod:
     key: str
     start_minute: int
     end_minute: int
-    outbound_share: float
-    return_share: float
 
 
 REFERENCE_PERIODS = (
-    ReferencePeriod("early", 240, 360, 0.06, 0.01),
-    ReferencePeriod("am", 360, 540, 0.60, 0.06),
-    ReferencePeriod("mid", 540, 900, 0.20, 0.18),
-    ReferencePeriod("pm", 900, 1140, 0.10, 0.55),
-    ReferencePeriod("eve", 1140, 1440, 0.04, 0.20),
+    ReferencePeriod("early", 240, 360),
+    ReferencePeriod("am", 360, 540),
+    ReferencePeriod("mid", 540, 900),
+    ReferencePeriod("pm", 900, 1140),
+    ReferencePeriod("eve", 1140, 1440),
 )
 
 
@@ -170,18 +168,6 @@ REFERENCE_MODE_PROFILES = {
         TrackRow.RESERVED,
     ),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class ReferenceMobilityModel:
-    no_car_share: float = 0.35
-    two_wheel_share: float = 0.30
-    two_wheel_speed_kph: float = 4.2
-    two_wheel_reach_m: float = 7000.0
-    two_wheel_cost_per_km: float = 0.03
-
-
-REFERENCE_MOBILITY_MODEL = ReferenceMobilityModel()
 
 
 CROWDED_LOAD_RATIO = 1.0
