@@ -105,3 +105,26 @@ def places_to_geojson(places: tuple[CityPlace, ...]) -> dict:
             for place in places
         ],
     }
+
+
+def zones_to_geojson(zones) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": zone.id,
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [zone.centroid_x, zone.centroid_y],
+                },
+                "properties": {
+                    "id": zone.id,
+                    "population": zone.population,
+                    "jobs": zone.jobs,
+                    "purpose_attractions": dict(zone.purpose_attractions),
+                },
+            }
+            for zone in zones
+        ],
+    }
