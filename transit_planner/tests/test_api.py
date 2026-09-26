@@ -135,7 +135,7 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
         PeriodAssignment("pm", 100.0, pm),
     ))
 
-    def fake_temporal(*args, **kwargs):
+    def fake_temporal(_network, _demand, *, config, zones=None, router=None):
         return temporal
 
     monkeypatch.setenv("TRANSIT_PLANNER_POPULATION_RASTER", "synthetic.tif")
