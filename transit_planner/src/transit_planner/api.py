@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .assignment import AssignmentConfig, assign_demand
 from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
-from .city_demand import build_city_demand, build_city_temporal_demand
+from .city_demand import CityDemandConfig, build_city_demand, build_city_temporal_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
@@ -370,11 +370,17 @@ def city_demand(payload: dict) -> dict:
         )
         for item in payload.get("places", [])
     )
+    demand_config = CityDemandConfig(
+        trip_rate=float(payload.get("trip_rate", 0.12)),
+        decay=float(payload.get("decay", 0.08)),
+        reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
+    )
     demand = build_city_demand(
         zones,
         places,
         origin_lon=payload.get("origin_lon"),
         origin_lat=payload.get("origin_lat"),
+        config=demand_config,
     )
     return {
         "model": "main",
@@ -446,11 +452,17 @@ def city_assignment(payload: dict) -> dict:
             source=_overture_source(payload.get("release")),
             bbox=bounds,
         ).load_places()
+        demand_config = CityDemandConfig(**{
+            "trip_rate": float(payload.get("demand_config", {}).get("trip_rate", 0.12)),
+            "decay": float(payload.get("demand_config", {}).get("decay", 0.08)),
+            "reference_speed_kph": float(payload.get("demand_config", {}).get("reference_speed_kph", 30.0)),
+        })
         temporal_demand = build_city_temporal_demand(
             zones,
             places,
             origin_lon=origin_lon,
             origin_lat=origin_lat,
+            config=demand_config,
         )
         temporal_result = assign_temporal_demand(
             network,
@@ -487,7 +499,17 @@ def city_assignment(payload: dict) -> dict:
             "loss_reasons": [{"reason": item.reason, "trips": item.trips} for item in result.loss_reasons],
             "route_flows": [{"route_id": item.route_id, "boardings": item.boardings, "passenger_section_traversals": item.passenger_section_traversals} for item in result.route_flows],
             "section_loads": [{"route_id": item.route_id, "from_stop_id": item.from_stop_id, "to_stop_id": item.to_stop_id, "passengers": item.passengers, "capacity": item.capacity, "load_ratio": item.load_ratio} for item in result.section_loads],
-            "stop_flows": [{"stop_id": item.stop_id, "boardings": item.boardings, "alightings": item.alightings, "transfers": item.transfers} for item in result.stop_flows],
+            "stop_flows": [
+                {
+                    "stop_id": item.stop_id,
+                    "boardings": item.boardings,
+                    "alightings": item.alightings,
+                    "transfers": item.transfers,
+                    "dwell_seconds": item.dwell_seconds,
+                    "platform_m": item.platform_m,
+                }
+                for item in result.stop_flows
+            ],
         },
         "periods": [
             {
