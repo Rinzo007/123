@@ -5,6 +5,7 @@ from transit_planner.overture import (
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
+    _haversine_linestring_m,
     _parse_connector_refs,
 )
 
@@ -57,3 +58,10 @@ def test_overture_transit_sql_filters_transit_classes():
     assert "subtype = 'transit'" in sql
     assert "bus_stop" in sql
     assert "subway_station" in sql
+
+
+def test_overture_length_helper_returns_metric_polyline_length():
+    from transit_planner.geo import Point
+
+    length = _haversine_linestring_m((Point(39.2, 51.7), Point(39.21, 51.7)))
+    assert 650.0 < length < 750.0
