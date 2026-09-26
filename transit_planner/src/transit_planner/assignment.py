@@ -47,6 +47,7 @@ class AssignmentMetrics:
     transit_share: float
     average_transit_time_min: float
     average_transfers: float
+    bike_trips: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +66,7 @@ class AssignmentConfig:
     period_id: str
     car_speed_kph: float = 30.0
     walking_speed_kph: float = 5.0
+    bike_speed_kph: float = 15.0
     mode_choice: ModeChoiceConfig = ModeChoiceConfig()
     transfer_penalty_min: float = 5.0
     crowding_penalty_min: float = 20.0
@@ -75,7 +77,7 @@ class AssignmentConfig:
     max_access_distance_m: float = 1500.0
 
     def __post_init__(self) -> None:
-        if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0:
+        if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0 or self.bike_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
         if self.transfer_penalty_min < 0:
             raise ValueError("transfer_penalty_min cannot be negative")
@@ -172,7 +174,7 @@ def _assign_once(
     stop_boardings: dict[str, float] = {}
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
-    total_transit = total_car = total_walk = 0.0
+    total_transit = total_car = total_walk = total_bike = 0.0
     weighted_transit_time = weighted_transfers = 0.0
     unserved = 0.0
 
@@ -184,6 +186,7 @@ def _assign_once(
         distance_m = _distance_between_zones(pair, zones)
         walk_time = distance_m / 1000.0 / config.walking_speed_kph * 60.0
         car_time = distance_m / 1000.0 / config.car_speed_kph * 60.0
+        bike_time = distance_m / 1000.0 / config.bike_speed_kph * 60.0
 
         origin_stop_id = zone_stops.get(pair.origin_zone_id) or _resolve_stop(network, pair.origin_zone_id)
         destination_stop_id = zone_stops.get(pair.destination_zone_id) or _resolve_stop(network, pair.destination_zone_id)
@@ -207,6 +210,7 @@ def _assign_once(
                 walk_time_min=walk_time,
                 car_time_min=car_time,
                 transit_time_min=transit_time,
+                bike_time_min=bike_time,
                 config=config.mode_choice,
             )
         )
@@ -214,9 +218,11 @@ def _assign_once(
         transit_trips = trips * probs["transit"]
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
+        bike_trips = trips * probs["bike"]
         total_transit += transit_trips
         total_car += car_trips
         total_walk += walk_trips
+        total_bike += bike_trips
 
         if journey is None:
             unserved += transit_trips
@@ -293,6 +299,7 @@ def _assign_once(
         transit_share=0.0 if total <= 0 else total_transit / total,
         average_transit_time_min=0.0 if total_transit <= 0 else weighted_transit_time / total_transit,
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
+        bike_trips=total_bike,
     )
     return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved)
 
