@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, sqrt
+from math import ceil
 
 from .assignment import AssignmentResult
 from .infrastructure import TrackType
@@ -72,12 +72,11 @@ def calculate_economics(
         departures = ceil(duration / headway)
         route = network.routes[service.route_id]
         active_routes.add(route.id)
-        length_km = _route_length_km(network, route)
+        length_km = network.route_length_km(route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
-        speed_kph = profile.rows[profile.default_row].speed_kph
         direction_factor = 1.0 if not route.both_ways else 2.0
-        cycle_run_min = direction_factor * length_km / speed_kph * 60.0
+        cycle_run_min = direction_factor * network.route_run_time_min(route)
         cycle_dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
         cycle_turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
         cycle_time_min = cycle_run_min + cycle_dwell_min + cycle_turnback_min
@@ -123,19 +122,6 @@ def calculate_economics(
             0.0 if transit_trips <= 0 else daily_fare_revenue / transit_trips
         ),
     )
-
-
-def _route_length_km(network: Network, route) -> float:
-    total_m = 0.0
-    for left_id, right_id in route.segment_pairs():
-        left = network.stops[left_id]
-        right = network.stops[right_id]
-        total_m += sqrt(
-            (left.location.x - right.location.x) ** 2
-            + (left.location.y - right.location.y) ** 2
-        )
-    return total_m / 1000.0
-
 
 
 def _route_capital_cost(
