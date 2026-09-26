@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
 import {
-  loadOvertureConnectors,
-  loadOvertureRoads,
-  loadOvertureStops,
+  loadOvertureNetwork,
   validateNetwork,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
@@ -313,31 +311,17 @@ export function App() {
     setMessage("Загрузка Overture для текущей области…");
     try {
       const bounds = map.getBounds();
-      const [roads, connectors, stopsData] = await Promise.all([
-        loadOvertureRoads(
-          bounds.getSouth(),
-          bounds.getWest(),
-          bounds.getNorth(),
-          bounds.getEast(),
-        ),
-        loadOvertureConnectors(
-          bounds.getSouth(),
-          bounds.getWest(),
-          bounds.getNorth(),
-          bounds.getEast(),
-        ),
-        loadOvertureStops(
-          bounds.getSouth(),
-          bounds.getWest(),
-          bounds.getNorth(),
-          bounds.getEast(),
-        ),
-      ]);
-      setCityRoads(roads);
-      setCityConnectors(connectors);
-      setCityStops(stopsData);
+      const data = await loadOvertureNetwork(
+        bounds.getSouth(),
+        bounds.getWest(),
+        bounds.getNorth(),
+        bounds.getEast(),
+      );
+      setCityRoads(data.roads);
+      setCityConnectors(data.connectors);
+      setCityStops(data.stops);
       setMessage(
-        `Overture загружен: ${roads.features.length} участков, ${connectors.features.length} коннекторов, ${stopsData.features.length} остановок`,
+        `Overture ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`,
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка загрузки Overture");
