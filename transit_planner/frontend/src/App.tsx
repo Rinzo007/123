@@ -118,7 +118,7 @@ function buildNetworkPayload(
 
 
 function assignmentSectionGeoJSON(
-  result: { section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }> },
+  result: { section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number; crowding_level: string }> },
   stops: StopDraft[],
 ): FeatureCollection<LineString, { route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }> {
   const byId = new Map(stops.map((stop) => [stop.id, stop]));
@@ -138,7 +138,7 @@ function assignmentSectionGeoJSON(
 }
 
 function assignmentStopGeoJSON(
-  result: { stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number }> },
+  result: { stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number; dwell_seconds: number; platform_m: number }> },
   stops: StopDraft[],
 ) : FeatureCollection<GeoJSONPoint, { stop_id: string; boardings: number; alightings: number; transfers: number }> {
   const byId = new Map(stops.map((stop) => [stop.id, stop]));
