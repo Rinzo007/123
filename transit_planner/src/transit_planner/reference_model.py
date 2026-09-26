@@ -183,6 +183,9 @@ REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
 
+# Standalone reference calibration constant used by the compatibility tests.
+REFERENCE_NO_CAR_EFFECTIVENESS = 0.78
+
 
 def headway_unevenness_factor(
     mode: str,
