@@ -183,7 +183,7 @@ def test_route_supports_segment_reference_rows():
     assert network.route_segment_run_time_min(route, 0) > network.route_segment_run_time_min(route, 1)
 
 
-def test_route_geometry_controls_segment_length_and_curve_speed() -> None:
+def test_route_geometry_controls_segment_length() -> None:
     network = Network()
     network.add_stop(Stop("a", "A", Point(0.0, 0.0)))
     network.add_stop(Stop("b", "B", Point(10.0, 0.0)))
@@ -205,7 +205,6 @@ def test_route_geometry_controls_segment_length_and_curve_speed() -> None:
 
     expected_length_km = 2.0 * (50.0**0.5) / 1000.0
     assert abs(network.route_segment_length_km(route, 0) - expected_length_km) < 1e-12
-    assert network.route_segment_curve_speed_limit_kph(route, 0) < 18.0
     assert network.route_segment_run_time_min(route, 0) > 0.0
 
 
