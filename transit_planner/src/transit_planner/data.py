@@ -87,6 +87,7 @@ class GeoJSONRoadProvider:
                     speed_kph=speed,
                     road_type=str(props.get("highway", "unknown")),
                     oneway=bool(props.get("oneway", False)),
+                    length_m=(None if props.get("length_m") in (None, "") else float(props.get("length_m"))),
                 )
             )
         return tuple(roads)
