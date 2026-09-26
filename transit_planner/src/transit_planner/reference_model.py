@@ -156,6 +156,7 @@ class ReferenceCarProfile:
 @dataclass(frozen=True, slots=True)
 class ReferenceMobilityProfile:
     no_car_share: float = 0.35
+    two_wheel_share: float = 0.30
     two_wheel_speed_kph: float = 15.12
     two_wheel_reach_m: float = 7000.0
     two_wheel_per_km_eur: float = 0.03
@@ -163,6 +164,8 @@ class ReferenceMobilityProfile:
     def __post_init__(self) -> None:
         if not 0.0 <= self.no_car_share <= 1.0:
             raise ValueError("no_car_share must be in [0, 1]")
+        if not 0.0 <= self.two_wheel_share <= 1.0:
+            raise ValueError("two_wheel_share must be in [0, 1]")
         if self.two_wheel_speed_kph <= 0:
             raise ValueError("two_wheel_speed_kph must be positive")
         if self.two_wheel_reach_m < 0:
