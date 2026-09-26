@@ -22,6 +22,7 @@ class CityPlace:
     location: Point
     basic_category: str | None = None
     taxonomy_primary: str | None = None
+    taxonomy_hierarchy: tuple[str, ...] = ()
     importance: float = 1.0
 
     def __post_init__(self) -> None:
@@ -87,6 +88,7 @@ class PlacePurposeMapper:
         categories = {
             place.basic_category,
             place.taxonomy_primary,
+            *place.taxonomy_hierarchy,
         }
         for purpose, values in self.categories.items():
             if any(value in categories for value in values):
