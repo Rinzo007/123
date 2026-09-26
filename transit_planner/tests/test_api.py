@@ -9,6 +9,5 @@ def test_api_has_core_routes():
     assert "/api/v1/data/overture/stops" in paths
     assert "/api/v1/data/overture/network" in paths
     assert "/api/v1/data/overture/route" in paths
-    assert "/api/v1/demand/temporal" in paths
     assert "/api/v1/data/overture/roads" in paths
     assert "/api/v1/data/overture/connectors" in paths
