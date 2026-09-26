@@ -960,6 +960,29 @@ export function App() {
                   </table>
                 </div>
               )}
+              {assignmentResult && (
+                <div className="analytics-panel">
+                  <div className="section-title">Результат расчёта</div>
+                  <div className="analytics-grid">
+                    <div><span>Transit</span><b>{assignmentResult.metrics.transit_trips.toFixed(1)}</b></div>
+                    <div><span>Car</span><b>{assignmentResult.metrics.car_trips.toFixed(1)}</b></div>
+                    <div><span>Walk</span><b>{assignmentResult.metrics.walk_trips.toFixed(1)}</b></div>
+                    <div><span>Bike</span><b>{assignmentResult.metrics.bike_trips.toFixed(1)}</b></div>
+                  </div>
+                  {assignmentResult.loss_reasons.length > 0 && (
+                    <div className="loss-list">
+                      <div className="small-label">Причины неперехода в transit</div>
+                      {assignmentResult.loss_reasons.map((loss) => (
+                        <div className="loss-row" key={loss.reason}>
+                          <span>{loss.reason}</span>
+                          <b>{loss.trips.toFixed(1)}</b>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {timetable && (
                 <div className="timetable-panel">
                   <div className="section-title">Отправления сервиса {timetable.service_id}</div>
