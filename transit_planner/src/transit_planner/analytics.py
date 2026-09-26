@@ -217,7 +217,7 @@ def _service_analytics(
         ),
         default=float("inf"),
     )
-    if track_headway >= station_headway:
+    if track_headway < station_headway:
         minimum_headway = track_headway
         headway_why = "track"
     else:
