@@ -79,3 +79,31 @@ def test_router_waits_once_on_continuation():
     assert journey.transfers == 0
     assert len(journey.legs) == 2
     assert abs(journey.duration_min - 11.0) < 1e-9
+
+
+def test_router_can_use_road_graph_for_section_runtime():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    graph = RoadGraph()
+    graph.add_node(RoadNode(1, 0, 0))
+    graph.add_node(RoadNode(2, 1000, 0))
+    graph.add_node(RoadNode(3, 2000, 0))
+    graph.add_edge(RoadEdge("e1", 1, 2, 1000, 60))
+    graph.add_edge(RoadEdge("e2", 2, 3, 1000, 30))
+
+    router = TransitRouter(
+        network,
+        config=RouterConfig(walk_transfer_radius_m=0),
+        road_graph=graph,
+        stop_road_nodes={"a": 1, "b": 3},
+    )
+    journey = router.shortest(network.stops["a"], network.stops["b"], period_id="peak")
+
+    assert journey is not None
+    assert abs(journey.duration_min - (5.0 + 5.0)) < 1e-9
