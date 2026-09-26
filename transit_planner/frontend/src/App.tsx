@@ -668,7 +668,7 @@ export function App() {
         network,
         [{ origin_zone_id: stops[0].id, destination_zone_id: stops[stops.length - 1].id, trips_per_day: previewTrips, purpose: "all" }],
         stops.map((stop) => ({ id: stop.id, centroid_x: toLocalMeters(stop.lon, stop.lat, stops[0].lon, stops[0].lat).x, centroid_y: toLocalMeters(stop.lon, stop.lat, stops[0].lon, stops[0].lat).y })),
-        "morning_peak",
+        "am",
       );
       setAssignmentResult(result);
       const zones = stops.map((stop) => {
