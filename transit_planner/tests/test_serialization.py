@@ -12,7 +12,7 @@ def test_round_trip_preserves_network():
     network.add_stop(Stop("b", "B", Point(11, 21), True))
     network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 200))
     network.add_period(ServicePeriod("day", 540, 960))
-    network.add_track_section(TrackSection("track-1", 1.0))
+    network.add_track_section(TrackSection("track-1", 1.0, speed_limit_kph=12.5))
     network.add_route(
         Route("r1", "1", TransitMode.TRAM, ("a", "b"), track_section_ids=("track-1",))
     )
@@ -24,5 +24,6 @@ def test_round_trip_preserves_network():
     assert restored.routes["r1"].mode == TransitMode.TRAM
     assert restored.routes["r1"].track_section_ids == ("track-1",)
     assert restored.track_sections["track-1"].length_km == 1.0
+    assert restored.track_sections["track-1"].speed_limit_kph == 12.5
     assert restored.services["svc"].headway_by_period["day"] == 8
     assert restored.services["svc"].departure_offset_by_period["day"] == 545.0
