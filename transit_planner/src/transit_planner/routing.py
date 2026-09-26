@@ -241,6 +241,13 @@ class TransitRouter:
         self._road_run_time_cache[cache_key] = direct_time
         return direct_time
 
+    @staticmethod
+    def _point_distance(a: Stop, b: Stop) -> float:
+        return sqrt(
+            (a.location.x - b.location.x) ** 2
+            + (a.location.y - b.location.y) ** 2
+        )
+
     def _build_walking_neighbors(self) -> dict[str, tuple[tuple[str, float], ...]]:
         if self.config.walk_transfer_radius_m <= 0:
             return {stop_id: () for stop_id in self.network.stops}
@@ -310,10 +317,3 @@ def _scheduled_wait_minutes(
     if first_departure >= period_end:
         return None
     return max(0.0, first_departure - arrival_minute)
-
-    @staticmethod
-    def _point_distance(a: Stop, b: Stop) -> float:
-        return sqrt(
-            (a.location.x - b.location.x) ** 2
-            + (a.location.y - b.location.y) ** 2
-        )
