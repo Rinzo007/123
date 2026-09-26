@@ -22,6 +22,7 @@
   import { disposeComputationWorkers, evaluateNetwork } from "./workers";
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
+  import NetworkView from "./components/NetworkView.svelte";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
   const MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
@@ -801,156 +802,19 @@
       {#if viewMode === "map"}
         <MapView bind:mapElement={mapContainer} drawMode={drawMode} />
       {:else}
-        <div class="network-view">
-          <div class="network-header">
-            <div>
-              <h2>Сеть</h2>
-              <p>Линии, частота, парк и результаты расчёта</p>
-              <button on:click={generateTimetable} disabled={busy || network.services.length === 0}>Сформировать расписание</button>
-            </div>
-            <div class="network-kpis">
-              <div><span>Линий</span><b>{evaluationSummary.lines}</b></div>
-              <div><span>Отправлений/сутки</span><b>{evaluationSummary.dailyDepartures}</b></div>
-              <div><span>Остановок</span><b>{evaluationSummary.stops}</b></div>
-            </div>
-          </div>
-
-          {#if routeRows.length === 0}
-            <div class="network-empty">Добавьте минимум две остановки.</div>
-          {:else}
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Линия</th><th>Режим</th><th>Остановки</th><th>Вместимость</th>{#each PERIODS as period}<th>{period.id}</th>{/each}</tr></thead>
-                <tbody>
-                  {#each routeRows as row}
-                    <tr>
-                      <td><strong>{row.route.name}</strong></td>
-                      <td>{MODE_LABELS[row.route.mode]}</td>
-                      <td>{row.route.stop_ids.length}</td>
-                      <td>{row.vehicle?.capacity ?? "—"}</td>
-                      {#each PERIODS as period}<td>{row.service?.headway_by_period[period.id] ? `${row.service.headway_by_period[period.id]} мин` : "—"}</td>{/each}
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-
-          {#if cityAssignmentMeta}
-            <div class="analytics-panel">
-              <div class="section-title">Городской расчёт</div>
-              <div class="kpi-grid">
-                <div><span>Зоны</span><b>{cityAssignmentMeta.zones}</b></div>
-                <div><span>OD-пары</span><b>{cityAssignmentMeta.od_pairs}</b></div>
-                <div><span>Спрос</span><b>{cityAssignmentMeta.total_demand_trips.toFixed(0)}</b></div>
-                <div><span>Transit</span><b>{pct(assignmentResult?.metrics.transit_share ?? 0)}%</b></div>
-              </div>
-            </div>
-          {/if}
-
-          {#if cityAssignmentPeriods.length > 0}
-            <div class="analytics-panel">
-              <div class="section-title">Линия × период</div>
-              {#each cityAssignmentPeriods as period}
-                <div class="period-card">
-                  <strong>{period.period_id}</strong>
-                  <span>спрос {period.demand_trips.toFixed(0)}</span>
-                  <span>transit {pct(period.transit_share)}%</span>
-                  <span>load {pct(period.max_load_ratio)}%</span>
-                  <span>opex {period.economics.daily_operating_cost.toFixed(1)}</span>
-                  {#each period.services as service}
-                    <span>{service.route_id}: {service.riders.toFixed(0)} пасс. · PLF {pct(service.peak_load_factor)}% · парк {service.fleet}</span>
-                  {/each}
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          {#if assignmentResult}
-            <div class="analytics-panel">
-              <div class="section-title">Пассажиропоток</div>
-              <div class="kpi-grid">
-                <div><span>Transit</span><b>{assignmentResult.metrics.transit_trips.toFixed(1)}</b></div>
-                <div><span>Car</span><b>{assignmentResult.metrics.car_trips.toFixed(1)}</b></div>
-                <div><span>Walk</span><b>{assignmentResult.metrics.walk_trips.toFixed(1)}</b></div>
-                <div><span>Bike</span><b>{assignmentResult.metrics.bike_trips.toFixed(1)}</b></div>
-              </div>
-              {#if assignmentResult.loss_reasons.length > 0}
-                <div class="loss-list">
-                  {#each assignmentResult.loss_reasons as loss}<div class="loss-row"><span>{loss.reason}</span><b>{loss.trips.toFixed(1)}</b></div>{/each}
-                </div>
-              {/if}
-            </div>
-
-            {#if assignmentResult.track_capacity.some((item) => item.route_ids.length > 1)}
-              <div class="analytics-panel">
-                <div class="section-title">Совместные пути</div>
-                {#each assignmentResult.track_capacity.filter((item) => item.route_ids.length > 1) as item}
-                  <div class="period-card">
-                    <strong>{item.shared_group}</strong>
-                    <span>{item.period_id}</span>
-                    <span>{item.route_ids.join(", ")}</span>
-                    <span>{item.tph.toFixed(1)} отправл./ч</span>
-                    <span>лимит {item.limit_tph.toFixed(1)}</span>
-                    <span>{pct(item.utilization)}%</span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-
-          {#if economicsResult}
-            <div class="analytics-panel">
-              <div class="section-title">Экономика</div>
-              <div class="kpi-grid">
-                <div><span>Транспортная работа</span><b>{economicsResult.economics.daily_vehicle_km.toFixed(1)} км/сутки</b></div>
-                <div><span>Эксплуатация</span><b>{economicsResult.economics.daily_operating_cost.toFixed(2)} / сутки</b></div>
-                <div><span>Парк</span><b>{economicsResult.economics.daily_fleet_cost.toFixed(2)} / сутки</b></div>
-                <div><span>Выручка</span><b>{economicsResult.economics.daily_fare_revenue.toFixed(2)} / сутки</b></div>
-              </div>
-            </div>
-          {/if}
-
-          {#if scenarioComparison}
-            <div class="analytics-panel">
-              <div class="section-title">Сравнение сценариев</div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>Метрика</th><th>База</th><th>Текущий</th><th>Δ</th></tr></thead>
-                  <tbody>{#each scenarioComparison.comparison.metrics as item}<tr><td>{item.metric}</td><td>{item.base.toFixed(2)}</td><td>{item.alternative.toFixed(2)}</td><td>{item.delta >= 0 ? "+" : ""}{item.delta.toFixed(2)}</td></tr>{/each}</tbody>
-                </table>
-              </div>
-              <div class="small-label">Участков: {scenarioComparison.comparison.sections.length} · линий-периодов: {scenarioComparison.comparison.services.length}</div>
-              {#if scenarioComparison.comparison.services.length > 0}
-                <div class="table-wrap">
-                  <table>
-                    <thead><tr><th>Линия</th><th>Период</th><th>Пассажиры Δ</th><th>PLF Δ</th><th>Парк Δ</th><th>Интервал Δ</th></tr></thead>
-                    <tbody>
-                      {#each scenarioComparison.comparison.services as item}
-                        <tr>
-                          <td>{item.route_id}</td><td>{item.period_id}</td>
-                          <td>{item.riders_delta >= 0 ? "+" : ""}{item.riders_delta.toFixed(0)}</td>
-                          <td>{item.peak_load_factor_delta >= 0 ? "+" : ""}{(item.peak_load_factor_delta * 100).toFixed(1)} п.п.</td>
-                          <td>{item.fleet_delta >= 0 ? "+" : ""}{item.fleet_delta.toFixed(0)}</td>
-                          <td>{item.effective_headway_delta >= 0 ? "+" : ""}{item.effective_headway_delta.toFixed(1)} мин</td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
-              {/if}
-            </div>
-          {/if}
-
-          {#if timetable}
-            <div class="analytics-panel">
-              <div class="section-title">Расписание {timetable.service_id}</div>
-              {#each timetable.periods as period}
-                <div class="period-card"><strong>{period.period_id}</strong><span>{period.departures_minute.slice(0, 12).map((minute) => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(Math.round(minute % 60)).padStart(2, "0")}`).join(", ")}</span></div>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <NetworkView
+          summary={evaluationSummary}
+          routeRows={routeRows}
+          periods={PERIODS}
+          cityAssignmentMeta={cityAssignmentMeta}
+          cityAssignmentPeriods={cityAssignmentPeriods}
+          assignmentResult={assignmentResult}
+          economicsResult={economicsResult}
+          scenarioComparison={scenarioComparison}
+          timetable={timetable}
+          modeLabels={MODE_LABELS}
+          onGenerateTimetable={generateTimetable}
+        />
       {/if}
     </main>
   </div>
