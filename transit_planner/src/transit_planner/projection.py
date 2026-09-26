@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import cos, radians
+from math import cos, pi, radians
 
 from .data import RoadRecord
 from .geo import LineString, Point
@@ -34,7 +34,7 @@ def project_local_point_wgs84(
     cos_lat = cos(radians(origin_lat))
     if abs(cos_lat) < 1e-12:
         raise ValueError("origin_lat is too close to a pole")
-    lon = origin_lon + point.x / (EARTH_RADIUS_M * cos_lat) * 180.0 / 3.141592653589793
+    lon = origin_lon + point.x / (EARTH_RADIUS_M * cos_lat) * 180.0 / pi
     lat = origin_lat + point.y / EARTH_RADIUS_M * 180.0 / 3.141592653589793
     return Point(lon, lat)
 
