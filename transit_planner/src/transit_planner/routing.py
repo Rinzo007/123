@@ -7,6 +7,7 @@ from math import ceil, inf, isfinite, sqrt
 from .road import RoadGraph
 
 from .network import Network, Stop, TransitMode
+from .reference_model import REFERENCE_MODE_PROFILES
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +57,8 @@ class TransitRouter:
     """Time-dependent stop router with precomputed network adjacency."""
 
     _SPEEDS = {
-        TransitMode.BUS: 20.0,
-        TransitMode.TROLLEYBUS: 20.0,
-        TransitMode.TRAM: 22.0,
-        TransitMode.METRO: 35.0,
-        TransitMode.REGIONAL_RAIL: 55.0,
+        TransitMode(mode): profile.rows[profile.default_row].speed_kph
+        for mode, profile in REFERENCE_MODE_PROFILES.items()
     }
 
     def __init__(
