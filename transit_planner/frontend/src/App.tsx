@@ -1279,6 +1279,11 @@ export function App() {
                         <span>load {(period.max_load_ratio * 100).toFixed(0)}%</span>
                         <span>opex {period.economics.daily_operating_cost.toFixed(1)}</span>
                         <span>выручка {period.economics.daily_fare_revenue.toFixed(1)}</span>
+                        {period.services.map((service) => (
+                          <span key={service.service_id}>
+                            {service.route_id}: {service.riders.toFixed(0)} пасс., PLF {(service.peak_load_factor * 100).toFixed(0)}%, парк {service.fleet}
+                          </span>
+                        ))}
                       </div>
                     ))}
                   </div>
