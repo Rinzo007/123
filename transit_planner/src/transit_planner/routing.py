@@ -232,15 +232,19 @@ class TransitRouter:
             for previous_route, route_id in zip(route_sequence, route_sequence[1:])
             if previous_route != route_id
         )
+        adjusted_legs = _add_intermediate_dwell(
+            self.network,
+            tuple(legs),
+        )
+        adjusted_legs = _add_segment_crowding_penalties(
+            adjusted_legs,
+            segment_penalties,
+        )
         adjusted_legs = _adjust_connection_waits(
             self.network,
             period_id,
-            tuple(legs),
-            service_headway_factors=headway_factors,
-        )
-        adjusted_legs = _add_intermediate_dwell(
-            self.network,
             adjusted_legs,
+            service_headway_factors=headway_factors,
         )
         return Journey(
             origin_stop_id=origin.id,
@@ -455,6 +459,32 @@ def _scheduled_wait_minutes(
     if first_departure >= period_end:
         return None
     return headway / 2.0
+def _add_segment_crowding_penalties(
+    legs: tuple[JourneyLeg, ...],
+    penalties: dict[tuple[str, str, str], float],
+) -> tuple[JourneyLeg, ...]:
+    if not penalties:
+        return legs
+    result: list[JourneyLeg] = []
+    for leg in legs:
+        penalty = (
+            penalties.get((leg.route_id or "", leg.from_id, leg.to_id), 0.0)
+            if leg.kind == "transit"
+            else 0.0
+        )
+        result.append(
+            JourneyLeg(
+                leg.kind,
+                leg.from_id,
+                leg.to_id,
+                leg.duration_min + max(0.0, penalty),
+                leg.route_id,
+                leg.wait_min,
+                leg.service_id,
+            )
+        )
+    return tuple(result)
+
 
 def _add_intermediate_dwell(
     network: Network,
