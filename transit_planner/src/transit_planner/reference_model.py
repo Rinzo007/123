@@ -127,6 +127,8 @@ class ReferenceModeProfile:
     minimum_radius_m: float
     rows: dict[TrackRow, ReferenceRowProfile]
     default_row: TrackRow
+    lateral_acceleration_mps2: float = 1.0
+    infill_m: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +175,8 @@ REFERENCE_MODE_PROFILES = {
             TrackRow.RESERVED: ReferenceRowProfile(23.0, 2.5),
         },
         TrackRow.MIXED,
+        lateral_acceleration_mps2=1.1,
+        infill_m=0.4,
     ),
     "tram": ReferenceModeProfile(
         250, 9.0, 900.0, 25.0, 0.6, 60.0, 90.0, 40.0,
@@ -183,6 +187,8 @@ REFERENCE_MODE_PROFILES = {
             TrackRow.GRADE: ReferenceRowProfile(33.0, 85.0),
         },
         TrackRow.MIXED,
+        lateral_acceleration_mps2=0.9,
+        infill_m=2.5,
     ),
     "metro": ReferenceModeProfile(
         750, 14.0, 3200.0, 30.0, 0.15, 15.0, 150.0, 30.0,
@@ -193,6 +199,8 @@ REFERENCE_MODE_PROFILES = {
             TrackRow.GRADE: ReferenceRowProfile(70.0, 120.0),
         },
         TrackRow.RESERVED,
+        lateral_acceleration_mps2=0.8,
+        infill_m=60.0,
     ),
     "rail": ReferenceModeProfile(
         1000, 22.0, 5200.0, 45.0, 0.3, 25.0, 300.0, 20.0,
@@ -203,6 +211,8 @@ REFERENCE_MODE_PROFILES = {
             TrackRow.GRADE: ReferenceRowProfile(78.0, 95.0),
         },
         TrackRow.RESERVED,
+        lateral_acceleration_mps2=0.65,
+        infill_m=35.0,
     ),
 }
 
