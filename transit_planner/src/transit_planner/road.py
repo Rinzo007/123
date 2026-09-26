@@ -89,32 +89,89 @@ class RoadGraph:
         if origin == destination:
             return 0.0, ()
 
-        distances: dict[int, float] = {origin: 0.0}
-        previous: dict[int, tuple[int, str]] = {}
-        queue: list[tuple[float, int]] = [(0.0, origin)]
+        max_sequence = max(
+            (len(getattr(rule, "sequence", ())) for rule in self.prohibited_transitions),
+            default=0,
+        )
+        start_state = (origin, ())
+        distances = {start_state: 0.0}
+        previous = {}
+        queue = [(0.0, 0, start_state)]
+        serial = 1
+        target_state = None
 
         while queue:
-            distance, node_id = heappop(queue)
-            if distance != distances.get(node_id, inf):
+            distance, _, state = heappop(queue)
+            if distance != distances.get(state, inf):
                 continue
+            node_id, history = state
             if node_id == destination:
+                target_state = state
                 break
+
             for edge_id in self.outgoing.get(node_id, ()):
                 edge = self.edges[edge_id]
-                candidate = distance + edge.travel_time_minutes
-                if candidate < distances.get(edge.to_node, inf):
-                    distances[edge.to_node] = candidate
-                    previous[edge.to_node] = (node_id, edge_id)
-                    heappush(queue, (candidate, edge.to_node))
+                if history and self._transition_prohibited(history, edge, max_sequence):
+                    continue
 
-        if destination not in distances:
+                candidate = distance + edge.travel_time_minutes
+                next_history = history + (edge_id,)
+                if max_sequence > 0:
+                    next_history = next_history[-(max_sequence + 1):]
+                next_state = (edge.to_node, next_history)
+
+                if candidate < distances.get(next_state, inf):
+                    distances[next_state] = candidate
+                    previous[next_state] = (state, edge_id)
+                    heappush(queue, (candidate, serial, next_state))
+                    serial += 1
+
+        if target_state is None:
             return inf, ()
 
-        path: list[str] = []
-        current = destination
-        while current != origin:
+        path = []
+        current = target_state
+        while current != start_state:
             parent, edge_id = previous[current]
             path.append(edge_id)
             current = parent
         path.reverse()
-        return distances[destination], tuple(path)
+        return distances[target_state], tuple(path)
+
+    def _transition_prohibited(
+        self,
+        history: tuple[str, ...],
+        candidate: RoadEdge,
+        max_sequence: int,
+    ) -> bool:
+        if candidate.segment_id is None or max_sequence <= 0:
+            return False
+
+        prior_edges = tuple(self.edges[edge_id] for edge_id in history)
+        if not prior_edges:
+            return False
+
+        for source_offset in range(1, min(max_sequence, len(prior_edges)) + 1):
+            source_edge = prior_edges[-source_offset]
+            rules = self._restriction_index.get(source_edge.segment_id, ())
+            for rule in rules:
+                sequence = getattr(rule, "sequence", ())
+                if not sequence or len(sequence) != source_offset:
+                    continue
+
+                window = prior_edges[-(source_offset - 1):] + (candidate,)
+                source_heading = getattr(rule, "when_heading", None)
+                if source_heading is not None and source_edge.direction != source_heading:
+                    continue
+
+                final_heading = getattr(rule, "final_heading", None)
+                if final_heading is not None and candidate.direction != final_heading:
+                    continue
+
+                if all(
+                    edge.segment_id == item.segment_id
+                    and edge.from_connector_id == item.connector_id
+                    for edge, item in zip(window, sequence)
+                ):
+                    return True
+        return False
