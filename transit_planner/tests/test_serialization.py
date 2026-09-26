@@ -27,3 +27,19 @@ def test_round_trip_preserves_network():
     assert restored.track_sections["track-1"].speed_limit_kph == 12.5
     assert restored.services["svc"].headway_by_period["day"] == 8
     assert restored.services["svc"].departure_offset_by_period["day"] == 545.0
+
+
+def test_serialization_round_trips_reference_route_rows_and_service_phase():
+    from transit_planner.reference_model import TrackRow
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("r1", "1", TransitMode.TRAM, ("a", "b", "c"), row_by_segment=(TrackRow.RESERVED, TrackRow.GRADE)))
+    network.add_service(Service("svc", "r1", "tram", {"am": 10}, phase_by_period={"am": 12.0}))
+    restored = network_from_dict(network_to_dict(network))
+    assert restored.routes["r1"].row_by_segment == (TrackRow.RESERVED, TrackRow.GRADE)
+    assert restored.services["svc"].phase_by_period == {"am": 12.0}
