@@ -166,14 +166,21 @@ def test_assignment_routes_transit_demand_across_alternatives():
 
 def test_zone_no_car_share_reduces_car_trips():
     network = make_network()
+    demand = DemandMatrix((ODPairDemand("o", "d", 100),))
     zones = {
         "o": DemandZone("o", 0, 0, population=1000, no_car_share=1.0),
         "d": DemandZone("d", 2000, 0, population=1000, no_car_share=1.0),
     }
+    baseline = assign_demand(
+        network,
+        demand,
+        zones={key: value.with_default_no_car_share() if False else value for key, value in zones.items()},
+        config=AssignmentConfig(period_id="peak"),
+    )
     result = assign_demand(
         network,
-        DemandMatrix((ODPairDemand("o", "d", 100),)),
+        demand,
         zones=zones,
         config=AssignmentConfig(period_id="peak"),
     )
-    assert result.metrics.car_trips == 0.0
+    assert 0.0 < result.metrics.car_trips < baseline.metrics.car_trips
