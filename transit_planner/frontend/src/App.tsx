@@ -7,6 +7,7 @@ import {
   validateNetwork,
   calculateAssignment,
   calculateCityAssignment,
+  calculateEconomics,
   loadDemandStreets,
   loadPopulationZones,
   compareScenarios,
@@ -232,8 +233,13 @@ export function App() {
     origin: { lon: number; lat: number };
     destination: { lon: number; lat: number };
     trips: number;
+    farePerTransitTrip: number;
+    annualDays: number;
   } | null>(null);
   const [scenarioComparison, setScenarioComparison] = useState<Awaited<ReturnType<typeof compareScenarios>> | null>(null);
+  const [farePerTransitTrip, setFarePerTransitTrip] = useState(0);
+  const [annualDays, setAnnualDays] = useState(365);
+  const [economicsResult, setEconomicsResult] = useState<Awaited<ReturnType<typeof calculateEconomics>> | null>(null);
 
   useEffect(() => {
     drawModeRef.current = drawMode;
@@ -668,6 +674,47 @@ export function App() {
       setBusy(false);
     }
   }
+  async function runEconomics() {
+    if (stops.length < 2) return;
+    setBusy(true);
+    setMessage("Расчёт экономики текущей сети…");
+    try {
+      const demand: ScenarioPayload["demand"] = [{
+        origin_zone_id: stops[0].id,
+        destination_zone_id: stops[stops.length - 1].id,
+        trips_per_day: previewTrips,
+        purpose: "all",
+      }];
+      const zones: ScenarioPayload["zones"] = stops.map((stop) => {
+        const point = toLocalMeters(
+          stop.lon,
+          stop.lat,
+          stops[0].lon,
+          stops[0].lat,
+        );
+        return {
+          id: stop.id,
+          centroid_x: point.x,
+          centroid_y: point.y,
+        };
+      });
+      const result = await calculateEconomics(
+        network,
+        demand,
+        zones,
+        "am",
+        Math.max(0, farePerTransitTrip),
+        Math.max(1, Math.min(366, Math.round(annualDays))),
+      );
+      setEconomicsResult(result);
+      setMessage("Экономика рассчитана");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка расчёта экономики");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runPreviewAssignment() {
     if (stops.length < 2) return;
     setBusy(true);
@@ -705,6 +752,8 @@ export function App() {
     origin: { lon: number; lat: number },
     destination: { lon: number; lat: number },
     trips: number,
+    economicFare: number,
+    economicAnnualDays: number,
   ): ScenarioPayload {
     const originLon = scenarioNetwork.origin_lon ?? origin.lon;
     const originLat = scenarioNetwork.origin_lat ?? origin.lat;
@@ -732,6 +781,11 @@ export function App() {
       }],
       zones,
       config: { period_id: "am" },
+      economics_config: {
+        period_id: "am",
+        fare_per_transit_trip: economicFare,
+        annual_days: economicAnnualDays,
+      },
     };
   }
 
@@ -742,6 +796,8 @@ export function App() {
       origin: { lon: stops[0].lon, lat: stops[0].lat },
       destination: { lon: stops[stops.length - 1].lon, lat: stops[stops.length - 1].lat },
       trips: previewTrips,
+      farePerTransitTrip: farePerTransitTrip,
+      annualDays: annualDays,
     });
     setScenarioComparison(null);
     setMessage("Базовый сценарий зафиксирован");
@@ -759,6 +815,8 @@ export function App() {
         scenarioBase.origin,
         scenarioBase.destination,
         scenarioBase.trips,
+        scenarioBase.farePerTransitTrip,
+        scenarioBase.annualDays,
       );
       const alternativePayload = makeScenarioPayload(
         "alternative",
@@ -767,6 +825,8 @@ export function App() {
         scenarioBase.origin,
         scenarioBase.destination,
         scenarioBase.trips,
+        farePerTransitTrip,
+        annualDays,
       );
       const result = await compareScenarios(basePayload, alternativePayload);
       setScenarioComparison(result);
@@ -913,9 +973,32 @@ export function App() {
               <button className="primary" onClick={runPreviewAssignment} disabled={busy || stops.length < 2}>
                 Рассчитать пассажиропоток
               </button>
+              <button onClick={runEconomics} disabled={busy || stops.length < 2}>
+                Рассчитать экономику
+              </button>
               <button onClick={runCityAssignment} disabled={busy || stops.length < 2}>
                 Рассчитать городскую сеть
               </button>
+              <label>
+                Тариф за поездку, ед.
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={farePerTransitTrip}
+                  onChange={(event) => setFarePerTransitTrip(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Дней в году
+                <input
+                  type="number"
+                  min={1}
+                  max={366}
+                  value={annualDays}
+                  onChange={(event) => setAnnualDays(Number(event.target.value))}
+                />
+              </label>
             </div>
 
             <div className="period-headways">
@@ -1163,6 +1246,22 @@ export function App() {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {economicsResult && (
+                <div className="analytics-panel economics-panel">
+                  <div className="section-title">Экономика текущей сети</div>
+                  <div className="analytics-grid economics-grid">
+                    <div><span>Транспортная работа</span><b>{economicsResult.economics.daily_vehicle_km.toFixed(1)} км/сутки</b></div>
+                    <div><span>Эксплуатация</span><b>{economicsResult.economics.daily_operating_cost.toFixed(2)} / сутки</b></div>
+                    <div><span>Фонд подвижного состава</span><b>{economicsResult.economics.daily_fleet_cost.toFixed(2)} / сутки</b></div>
+                    <div><span>Тарифная выручка</span><b>{economicsResult.economics.daily_fare_revenue.toFixed(2)} / сутки</b></div>
+                    <div><span>Эксплуатация за год</span><b>{economicsResult.economics.annual_operating_cost.toFixed(2)}</b></div>
+                    <div><span>Выручка за год</span><b>{economicsResult.economics.annual_fare_revenue.toFixed(2)}</b></div>
+                    <div><span>Капитальные затраты</span><b>{economicsResult.economics.capital_cost.toFixed(2)}</b></div>
+                    <div><span>Эксплуатация/пассажир</span><b>{economicsResult.economics.operating_cost_per_transit_trip.toFixed(2)}</b></div>
+                  </div>
                 </div>
               )}
 
