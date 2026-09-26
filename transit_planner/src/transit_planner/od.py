@@ -15,8 +15,8 @@ class GravityParameters:
     intrazonal_factor: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.reference_speed_kph <= 0:
-            raise ValueError("reference_speed_kph must be positive")
+        if self.speed_kph <= 0:
+            raise ValueError("speed_kph must be positive")
         if self.decay <= 0:
             raise ValueError("decay must be positive")
         if not 0 < self.intrazonal_factor <= 1:
@@ -48,7 +48,7 @@ def gravity_od(
             impedance_minutes = (
                 parameters.intrazonal_factor
                 if distance_m == 0
-                else distance_m / 1000.0 / parameters.reference_speed_kph * 60.0
+                else distance_m / 1000.0 / parameters.speed_kph * 60.0
             )
             friction = exp(-parameters.decay * impedance_minutes)
             weight = attraction_base[destination.id] * friction
