@@ -416,6 +416,14 @@ input:focus, select:focus {
 }
 
 
+.economics-grid {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.economics-panel .analytics-grid > div {
+  min-width: 0;
+}
+
 .scenario-table-wrap {
   overflow-x: auto;
   margin-top: 10px;
