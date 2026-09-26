@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
   import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
   import {
@@ -69,7 +69,6 @@
   let mapRef: MapLibreMap | null = null;
   let mapReady = false;
   let fileInput: HTMLInputElement;
-  let evaluationWorker: Worker | null = null;
 
   let stops: StopDraft[] = [];
   let mode: TransitMode = "bus";
@@ -616,14 +615,6 @@
       // First launch or blocked IndexedDB.
     }
 
-    evaluationWorker = new Worker(new URL("./workers/evaluation.worker.ts", import.meta.url), { type: "module" });
-    evaluationWorker.onmessage = (event: MessageEvent<typeof evaluationSummary>) => {
-      evaluationSummary = event.data;
-    };
-    evaluationWorker.onerror = () => {
-      evaluationWorker = null;
-    };
-
     const map = new MapLibreMap({
       container: mapContainer,
       style: MAP_STYLE,
@@ -661,9 +652,23 @@
     initialized = true;
   });
 
-  $: if (evaluationWorker && network) {
-    evaluationWorker.postMessage({ kind: "summary", network });
+  onDestroy(() => {
+    disposeComputationWorkers();
+    mapRef?.remove();
+  });
+
+  async function refreshEvaluation(current: NetworkPayload) {
+    try {
+      evaluationSummary = await evaluateNetwork(current);
+    } catch {
+      // Worker errors must not block map editing.
+    }
   }
+
+  $: if (initialized) {
+    void refreshEvaluation(network);
+  }
+
 
   $: if (initialized) {
     saveUiSettings({
