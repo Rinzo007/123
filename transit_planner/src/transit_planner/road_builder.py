@@ -64,6 +64,7 @@ def build_road_graph(
                     None,
                     None,
                     "forward",
+                    tuple(record.geometry.points),
                 )
             )
         if record.backward_allowed and not record.oneway:
