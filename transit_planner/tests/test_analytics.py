@@ -42,3 +42,26 @@ def test_accessibility_respects_radius():
     zones = (DemandZone("far", 10000, 0, population=100),)
     result = calculate_accessibility(network, zones, radius_m=500)
     assert result.population_share == 0.0
+
+def test_one_way_service_analytics_uses_one_direction_of_vehicle_km():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80, 2.0))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(
+        Route("r1", "1", TransitMode.BUS, ("a", "b"), both_ways=False)
+    )
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 1),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = analyze_network(network, assignment)
+
+    service = result.services[0]
+    assert service.departures == 6
+    assert service.daily_vehicle_km == 6.0
+    assert service.daily_opex == 12.0
