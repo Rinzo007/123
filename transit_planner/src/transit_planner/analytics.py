@@ -83,6 +83,21 @@ class ServiceAnalytics:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackCapacityAnalytics:
+    shared_group: str
+    period_id: str
+    route_ids: tuple[str, ...]
+    tph: float
+    limit_tph: float
+
+    @property
+    def utilization(self) -> float:
+        if self.limit_tph <= 0 or self.limit_tph == float("inf"):
+            return 0.0
+        return self.tph / self.limit_tph
+
+
+@dataclass(frozen=True, slots=True)
 class NetworkAnalytics:
     transit_share: float
     average_transit_time_min: float
@@ -94,6 +109,7 @@ class NetworkAnalytics:
     sections: tuple[SectionAnalytics, ...]
     accessibility: tuple[AccessibilityResult, ...]
     services: tuple[ServiceAnalytics, ...] = ()
+    track_capacity: tuple[TrackCapacityAnalytics, ...] = ()
 
 
 def analyze_network(
@@ -141,6 +157,8 @@ def analyze_network(
             )
         )
 
+    track_capacity = _track_capacity_analytics(network)
+
     services = tuple(
         _service_analytics(
             network,
@@ -166,6 +184,7 @@ def analyze_network(
         sections=tuple(sections),
         accessibility=accessibility,
         services=services,
+        track_capacity=track_capacity,
     )
 
 
@@ -328,3 +347,62 @@ def calculate_accessibility(
 
 def _share(numerator: float, denominator: float) -> float:
     return 0.0 if denominator <= 0 else numerator / denominator
+
+
+def _track_capacity_analytics(
+    network: Network,
+) -> tuple[TrackCapacityAnalytics, ...]:
+    rows: list[TrackCapacityAnalytics] = []
+    for period_id in network.periods:
+        grouped: dict[str, set[str]] = {}
+        group_limits: dict[str, float] = {}
+        group_modes: dict[str, list[float]] = {}
+        for service in network.services.values():
+            if period_id not in service.headway_by_period:
+                continue
+            route = network.routes[service.route_id]
+            if route.mode.value == "bus":
+                continue
+            for section_id in route.track_section_ids:
+                section = network.track_sections.get(section_id)
+                if section is None or section.shared_group is None:
+                    continue
+                group = section.shared_group
+                grouped.setdefault(group, set()).add(route.id)
+                group_limits[group] = min(
+                    group_limits.get(group, float("inf")),
+                    section.capacity_departures_per_hour,
+                )
+                group_modes.setdefault(group, []).append(
+                    REFERENCE_MODE_PROFILES[route.mode.value].track_capacity_per_hour
+                )
+        for group, route_ids in grouped.items():
+            tph = 0.0
+            for service in network.services.values():
+                if period_id not in service.headway_by_period:
+                    continue
+                route = network.routes[service.route_id]
+                if route.id not in route_ids:
+                    continue
+                if any(
+                    network.track_sections.get(section_id) is not None
+                    and network.track_sections[section_id].shared_group == group
+                    for section_id in route.track_section_ids
+                ):
+                    tph += 60.0 / service.headway_by_period[period_id]
+            limit_tph = min(
+                group_limits[group],
+                min(group_modes[group], default=float("inf")),
+            )
+            rows.append(
+                TrackCapacityAnalytics(
+                    shared_group=group,
+                    period_id=period_id,
+                    route_ids=tuple(sorted(route_ids)),
+                    tph=tph,
+                    limit_tph=limit_tph,
+                )
+            )
+    return tuple(
+        sorted(rows, key=lambda item: (item.period_id, item.shared_group))
+    )
