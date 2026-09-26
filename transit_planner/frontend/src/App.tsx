@@ -709,6 +709,23 @@ export function App() {
                 ))}
               </select>
             </label>
+            <div className="preview-demand">
+              <div className="section-title">Проверочный расчёт</div>
+              <label>
+                Спрос от первой к последней остановке, поездок/сутки
+                <input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  value={previewTrips}
+                  onChange={(event) => setPreviewTrips(Number(event.target.value))}
+                />
+              </label>
+              <button className="primary" onClick={runPreviewAssignment} disabled={busy || stops.length < 2}>
+                Рассчитать пассажиропоток
+              </button>
+            </div>
+
             <div className="period-headways">
               <div className="section-title">Частота по периодам</div>
               {network.periods.map((period) => (
