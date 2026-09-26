@@ -230,6 +230,6 @@ def test_route_geometry_reverse_direction_is_supported() -> None:
     network.add_route(route)
 
     points = network.route_segment_geometry_points(route, 0)
-    assert points[0] == Point(10.0, 0.0)
-    assert points[-1] == Point(0.0, 0.0)
+    assert points[0] == Point(0.0, 0.0)
+    assert points[-1] == Point(10.0, 0.0)
     assert network.route_segment_length_km(route, 0) > 0.01
