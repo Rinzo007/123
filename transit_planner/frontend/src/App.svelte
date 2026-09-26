@@ -773,15 +773,15 @@
 
   <div class="workspace">
     <ControlPanel
-      bind:value={$routeNameStore}
-      bind:value={$modeStore}
+      bind:routeName={$routeNameStore}
+      bind:mode={$modeStore}
       modeLabels={MODE_LABELS}
       bind:previewTrips
       bind:farePerTransitTrip
       bind:annualDays
       periods={PERIODS}
-      bind:value={$headwaysStore}
-      bind:stops={$stopsStore}
+      bind:headways={$headwaysStore}
+      stops={$stopsStore}
       busy={busy}
       message={message}
       bind:showRoads
