@@ -181,6 +181,7 @@ def _daily_matrix(pairs: tuple[PeriodODPairDemand, ...]):
                 pair.destination_zone_id,
                 pair.trips,
                 pair.purpose,
+                pair.base_time_min,
             )
             for pair in pairs
         )
