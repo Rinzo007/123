@@ -47,6 +47,7 @@ def project_roads_wgs84(
             oneway=road.oneway,
             connectors=road.connectors,
             length_m=road.length_m,
+            prohibited_transitions=road.prohibited_transitions,
         )
         for road in roads
     )
