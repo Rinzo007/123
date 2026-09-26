@@ -419,47 +419,51 @@ def _section_capacity_and_platforms(
     period = network.periods[period_id]
     duration_hours = (period.end_minute - period.start_minute) / 60.0
 
-    segments: list[tuple[str, str, str, str | None, str, float, float, float]] = []
+    grouped: dict[tuple[str, str], list[tuple[str, str, str, str, float, float, float]]] = {}
+    physical_limits: dict[str, float] = {}
+
     for service in network.services.values():
         headway = service.headway_by_period.get(period_id)
         if headway is None:
             continue
         route = network.routes[service.route_id]
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        vehicle_capacity = network.vehicle_types[service.vehicle_type_id].capacity or profile.capacity
         scheduled_departures = (period.end_minute - period.start_minute) / headway
+
         for index, (from_id, to_id) in enumerate(zip(route.stop_ids, route.stop_ids[1:])):
             track_id = route.track_section_ids[index] if route.track_section_ids else None
             track = network.track_sections.get(track_id) if track_id else None
-            group = (track.shared_group if track and track.shared_group else track_id) if track else None
-            segments.append((service.id, route.id, from_id, to_id, group, scheduled_departures, profile.track_capacity_per_hour, network.vehicle_types[service.vehicle_type_id].capacity or profile.capacity))
-            if track:
-                platform_length = profile.platform_m
+            if track is None:
+                key = ("route", f"{route.id}:{from_id}:{to_id}")
+                group_limit = profile.track_capacity_per_hour
+            else:
+                group_name = track.shared_group or track.id
+                key = ("track", group_name)
+                group_limit = min(profile.track_capacity_per_hour, track.capacity_departures_per_hour)
+                physical_limits[group_name] = min(
+                    physical_limits.get(group_name, float("inf")),
+                    track.capacity_departures_per_hour,
+                )
                 for stop_id in (from_id, to_id):
-                    platform_m[stop_id] = max(platform_m.get(stop_id, 0.0), platform_length)
+                    platform_m[stop_id] = max(platform_m.get(stop_id, 0.0), profile.platform_m)
 
-    grouped: dict[str, list[tuple[str, str, str, str, float, float]]] = {}
-    for service_id, route_id, from_id, to_id, group, scheduled, mode_limit, vehicle_capacity in segments:
-        if group is None:
-            key = f"route:{route_id}:{from_id}:{to_id}"
-            grouped.setdefault(key, []).append((service_id, route_id, from_id, to_id, scheduled, min(scheduled, mode_limit * duration_hours)))
-            continue
-        track = next((section for section in network.track_sections.values() if (section.shared_group or section.id) == group), None)
-        physical_limit = track.capacity_departures_per_hour if track else mode_limit
-        max_departures = min(mode_limit * duration_hours, physical_limit * duration_hours)
-        key = f"track:{group}"
-        grouped.setdefault(key, []).append((service_id, route_id, from_id, to_id, scheduled, max_departures))
+            grouped.setdefault(key, []).append(
+                (service.id, route.id, from_id, to_id, scheduled_departures, group_limit, vehicle_capacity)
+            )
 
-    for key, items in grouped.items():
-        scheduled_total = sum(item[4] for item in items)
-        allowed_total = min(item[5] for item in items) if key.startswith("route:") else min(item[5] for item in items) if items else 0.0
-        if key.startswith("track:"):
-            allowed_total = items[0][5]
-        factor = 1.0 if scheduled_total <= 0 or scheduled_total <= allowed_total else allowed_total / scheduled_total
-        for _service_id, route_id, from_id, to_id, scheduled, _limit in items:
-            effective_departures = scheduled * factor
-            vehicle_capacity = next(
-                item[7] for item in segments
-                if item[0] == _service_id and item[1] == route_id and item[2] == from_id and item[3] == to_id
+    for (kind, group_name), items in grouped.items():
+        if kind == "track":
+            scheduled_total = sum(item[4] for item in items)
+            physical_limit = physical_limits[group_name] * duration_hours
+            factor = 1.0 if scheduled_total <= physical_limit else physical_limit / scheduled_total
+        else:
+            factor = 1.0
+
+        for service_id, route_id, from_id, to_id, scheduled, mode_limit, vehicle_capacity in items:
+            effective_departures = min(
+                scheduled * factor,
+                mode_limit * duration_hours,
             )
             capacity = effective_departures * vehicle_capacity
             forward_key = (route_id, from_id, to_id)
