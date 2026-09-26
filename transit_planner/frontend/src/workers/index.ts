@@ -1,19 +1,12 @@
 import type {NetworkPayload} from "../types";
-
 export type EvaluationSummary={lines:number;stops:number;dailyDepartures:number};
+export type MatrixResult={ids:string[];times:number[]};
+export type ChoiceResult={shares:{transit:number;car:number;walk:number;bike:number};trips:{transit:number;car:number;walk:number;bike:number}};
 
 type WorkerKind="evaluation"|"assignment"|"matrix"|"demand-choice";
-
-type WorkerMap={
- evaluation:typeof import("./evaluation.worker");
- assignment:typeof import("./assignment.worker");
- matrix:typeof import("./matrix.worker");
- "demand-choice":typeof import("./demand-choice.worker");
-};
-
 const workers:Partial<Record<WorkerKind,Worker>>={};
 
-export function getComputationWorker(kind:WorkerKind):Worker{
+function getWorker(kind:WorkerKind):Worker{
  const existing=workers[kind]; if(existing) return existing;
  const urls:Record<WorkerKind,URL>={
   evaluation:new URL("./evaluation.worker.ts",import.meta.url),
@@ -24,29 +17,18 @@ export function getComputationWorker(kind:WorkerKind):Worker{
  const worker=new Worker(urls[kind],{type:"module"}); workers[kind]=worker; return worker;
 }
 
-export function evaluateNetwork(network:NetworkPayload):Promise<EvaluationSummary>{
+function request<T>(kind:WorkerKind,payload:unknown):Promise<T>{
  return new Promise((resolve,reject)=>{
-  const worker=getComputationWorker("evaluation");
-  const onMessage=(event:MessageEvent<EvaluationSummary>)=>{cleanup();resolve(event.data)};
+  const worker=getWorker(kind);
+  const onMessage=(event:MessageEvent<T>)=>{cleanup();resolve(event.data)};
   const onError=(event:ErrorEvent)=>{cleanup();reject(event.error??new Error(event.message))};
   const cleanup=()=>{worker.removeEventListener("message",onMessage);worker.removeEventListener("error",onError)};
-  worker.addEventListener("message",onMessage);worker.addEventListener("error",onError);
-  worker.postMessage({kind:"summary",network});
+  worker.addEventListener("message",onMessage);worker.addEventListener("error",onError);worker.postMessage(payload);
  });
 }
 
-export function estimateDepartures(network:NetworkPayload):Promise<{dailyDepartures:number;fleetEstimate:number}>{
- return new Promise((resolve,reject)=>{
-  const worker=getComputationWorker("assignment");
-  const onMessage=(event:MessageEvent)=>{cleanup();resolve(event.data)};
-  const onError=(event:ErrorEvent)=>{cleanup();reject(event.error??new Error(event.message))};
-  const cleanup=()=>{worker.removeEventListener("message",onMessage);worker.removeEventListener("error",onError)};
-  worker.addEventListener("message",onMessage);worker.addEventListener("error",onError);
-  worker.postMessage({kind:"departures",network});
- });
-}
-
-export function disposeComputationWorkers(){
- for(const worker of Object.values(workers)) worker?.terminate();
- for(const key of Object.keys(workers) as WorkerKind[]) delete workers[key];
-}
+export function evaluateNetwork(network:NetworkPayload){return request<EvaluationSummary>("evaluation",{kind:"summary",network});}
+export function estimateDepartures(network:NetworkPayload){return request<{kind:"departures";dailyDepartures:number;fleetEstimate:number}>("assignment",{kind:"departures",network});}
+export function buildZoneMatrix(zones:Array<{id:string;centroid_x:number;centroid_y:number}>){return request<MatrixResult>("matrix",{kind:"matrix",zones});}
+export function chooseModes(trips:number,utilities:{transit:number;car:number;walk:number;bike:number}){return request<ChoiceResult>("demand-choice",{kind:"choice",trips,utilities});}
+export function disposeComputationWorkers(){for(const worker of Object.values(workers)) worker?.terminate(); for(const key of Object.keys(workers) as WorkerKind[]) delete workers[key];}
