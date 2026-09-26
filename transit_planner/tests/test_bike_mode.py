@@ -84,7 +84,7 @@ def test_alternative_probabilities_favor_lower_generalized_cost():
 
     shares = alternative_probabilities(((10.0, 5.0), (14.0, 8.0)))
     assert abs(sum(shares) - 1.0) < 1e-12
-    assert shares[0] > shares[1] > 0.0
+    assert shares == (2.0 / 3.0, 1.0 / 3.0)
 
 
 def test_no_car_availability_reduces_car_probability():
