@@ -45,7 +45,3 @@ def snap_stops_to_road_graph(
             )
         )
     return tuple(result)
-
-
-def snap_lookup(snaps: tuple[StopSnap, ...]) -> dict[str, StopSnap]:
-    return {item.stop_id: item for item in snaps}
