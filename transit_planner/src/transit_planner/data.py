@@ -21,6 +21,33 @@ class ConnectorRef:
 
 
 @dataclass(frozen=True, slots=True)
+class ProhibitedTransitionSequenceEntry:
+    segment_id: str
+    connector_id: str
+
+    def __post_init__(self) -> None:
+        if not self.segment_id.strip():
+            raise ValueError("segment_id cannot be empty")
+        if not self.connector_id.strip():
+            raise ValueError("connector_id cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class ProhibitedTransition:
+    sequence: tuple[ProhibitedTransitionSequenceEntry, ...]
+    final_heading: str | None = None
+    when_heading: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.sequence:
+            raise ValueError("A prohibited transition needs at least one sequence entry")
+        if self.final_heading not in (None, "forward", "backward"):
+            raise ValueError("Unsupported final heading")
+        if self.when_heading not in (None, "forward", "backward"):
+            raise ValueError("Unsupported source heading")
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorRecord:
     id: str
     location: Point
@@ -35,6 +62,7 @@ class RoadRecord:
     oneway: bool = False
     connectors: tuple[ConnectorRef, ...] = ()
     length_m: float | None = None
+    prohibited_transitions: tuple[ProhibitedTransition, ...] = ()
 
     def __post_init__(self) -> None:
         if self.speed_kph <= 0:
