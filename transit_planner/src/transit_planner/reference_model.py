@@ -177,6 +177,40 @@ REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
 
+def headway_unevenness_factor(
+    mode: str,
+    headway_min: float,
+    period_hours: float,
+    stop_boardings: tuple[float, ...] = (),
+    *,
+    route_closed: bool = False,
+    both_ways: bool = True,
+) -> float:
+    """Return the reference demand-feedback multiplier for headway."""
+    if headway_min <= 0 or period_hours <= 0:
+        raise ValueError("headway_min and period_hours must be positive")
+    if any(boardings < 0 for boardings in stop_boardings):
+        raise ValueError("stop_boardings cannot be negative")
+
+    profile = REFERENCE_MODE_PROFILES[mode]
+    direction_factor = (
+        2.0
+        if not route_closed or both_ways
+        else 1.0
+    )
+    f = sum(
+        profile.dwell_per_passenger_s * boardings
+        / (2.0 * direction_factor * period_hours * 3600.0)
+        for boardings in stop_boardings
+    )
+    m = min(
+        1.0,
+        profile.jitter_s * __import__("math").exp(f)
+        / (headway_min * 60.0),
+    )
+    return 1.0 + m * m
+
+
 def minimum_station_headway_min(
     mode: str,
     *,
