@@ -146,6 +146,7 @@ export function App() {
   const [cityRoads, setCityRoads] = useState<FeatureCollection | null>(null);
   const [cityConnectors, setCityConnectors] = useState<FeatureCollection | null>(null);
   const [cityStops, setCityStops] = useState<FeatureCollection | null>(null);
+  const [roadRoute, setRoadRoute] = useState<FeatureCollection<LineString, object> | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
   const [headway, setHeadway] = useState(10);
@@ -173,6 +174,7 @@ export function App() {
       if (!drawModeRef.current) return;
 
       const id = `stop-${Date.now()}-${Math.round(event.lngLat.lng * 1000)}`;
+      setRoadRoute(null);
       setStops((current) => [
         ...current,
         {
@@ -283,12 +285,12 @@ export function App() {
     const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
 
-    routeSource?.setData(routeGeoJSON(stops));
+    routeSource?.setData(roadRoute ?? routeGeoJSON(stops));
     draftStopsSource?.setData(stopsGeoJSON(stops));
     if (cityRoads) cityRoadSource?.setData(cityRoads);
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
-  }, [stops, cityRoads, cityConnectors, cityStops]);
+  }, [stops, cityRoads, cityConnectors, cityStops, roadRoute]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headway),
