@@ -33,7 +33,7 @@ class RoadEdge:
             raise ValueError("Edge length cannot be negative")
         if self.speed_kph <= 0:
             raise ValueError("Edge speed must be positive")
-        return self.length_m / self.speed_kph * 60.0
+        return self.length_m / 1000.0 / self.speed_kph * 60.0
 
 
 @dataclass(slots=True)
