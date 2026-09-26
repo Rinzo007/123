@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from math import hypot
 
 from .geo import LineString, Point
 from .infrastructure import TrackSection
@@ -136,6 +137,7 @@ class Network:
     def add_track_section(self, section: TrackSection) -> None:
         self._add_unique(self.track_sections, section.id, "track section")
         self.track_sections[section.id] = section
+
     def add_service(self, service: Service) -> None:
         self._add_unique(self.services, service.id, "service")
         if service.route_id not in self.routes:
@@ -163,30 +165,30 @@ class Network:
                 errors.append(f"Route {route.id} contains duplicate stops")
         return errors
 
+    def route_segment_length_km(self, route: Route, index: int) -> float:
+        left_id, right_id = route.segment_pairs()[index]
+        section = self._track_for_segment(route, index)
+        if section is not None:
+            return section.length_km
+        return _point_distance_km(
+            self.stops[left_id].location,
+            self.stops[right_id].location,
+        )
+
     def route_length_km(self, route: Route) -> float:
-        if route.track_section_ids:
-            return sum(
-                self.track_sections[section_id].length_km
-                for section_id in route.track_section_ids
-            )
         return sum(
-            _point_distance_km(self.stops[left_id].location, self.stops[right_id].location)
-            for left_id, right_id in route.segment_pairs()
+            self.route_segment_length_km(route, index)
+            for index in range(len(route.segment_pairs()))
         )
 
     def route_run_time_min(self, route: Route) -> float:
         total = 0.0
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
         fallback_speed = profile.rows[profile.default_row].speed_kph
-        for index, (left_id, right_id) in enumerate(route.segment_pairs()):
+        for index in range(len(route.segment_pairs())):
             section = self._track_for_segment(route, index)
             speed = fallback_speed if section is None or section.speed_limit_kph is None else section.speed_limit_kph
-            distance_km = (
-                section.length_km
-                if section is not None
-                else _point_distance_km(self.stops[left_id].location, self.stops[right_id].location)
-            )
-            total += distance_km / speed * 60.0
+            total += self.route_segment_length_km(route, index) / speed * 60.0
         return total
 
     def _track_for_segment(self, route: Route, index: int) -> TrackSection | None:
@@ -227,5 +229,4 @@ def default_vehicle_type(mode: TransitMode) -> VehicleType:
 
 
 def _point_distance_km(left: Point, right: Point) -> float:
-    from math import hypot
     return hypot(left.x - right.x, left.y - right.y) / 1000.0
