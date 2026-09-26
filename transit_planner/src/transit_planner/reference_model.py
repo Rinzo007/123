@@ -134,7 +134,6 @@ class ReferenceTransferProfile:
     base_s: float = 405.0
     wait_multiplier: float = 1.0
     walk_multiplier: float = 1.0
-    rider_bias_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.base_s < 0:
@@ -149,21 +148,8 @@ class ReferenceCarProfile:
     parking_eur: float = 1.5
     parking_s: float = 240.0
     circuity: float = 1.3
-
-
-@dataclass(frozen=True, slots=True)
-class ReferenceRestProfile:
-    base_speed_kph: float = 3.6
-    continuous_speed_kph: float = 5.0
-    access_s: float = 420.0
-    wait_s: float = 240.0
-    circuity: float = 1.3
-
-
 @dataclass(frozen=True, slots=True)
 class ReferenceMobilityProfile:
-    no_car_share: float = 0.35
-    two_wheel_share: float = 0.30
     two_wheel_speed_kph: float = 15.12
     two_wheel_reach_m: float = 7000.0
     two_wheel_per_km_eur: float = 0.03
@@ -172,7 +158,6 @@ class ReferenceMobilityProfile:
 REFERENCE_VOT_S_PER_EUR = 360.0
 REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
-REFERENCE_REST = ReferenceRestProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
 
 
