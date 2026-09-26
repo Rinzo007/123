@@ -76,6 +76,8 @@ class ServiceAnalytics:
     daily_vehicle_km: float
     daily_opex: float
     capacity_per_direction: float
+    riders: float
+    peak_load_factor: float
     effective_headway_min: float = 0.0
     minimum_station_headway_min: float = 0.0
     minimum_headway_min: float = 0.0
@@ -231,6 +233,23 @@ def _service_analytics(
     vehicle_km = departures * length_km * direction_factor
     vehicle = network.vehicle_types[service.vehicle_type_id]
     opex = vehicle_km * (vehicle.operating_cost_per_km or profile.opex_per_vehicle_km)
+    route_flow = next(
+        (
+            item
+            for item in assignment.route_flows
+            if item.route_id == route.id
+        ),
+        None,
+    )
+    riders = 0.0 if route_flow is None else route_flow.boardings
+    peak_load_factor = max(
+        (
+            item.load_ratio
+            for item in assignment.section_loads
+            if item.route_id == route.id
+        ),
+        default=0.0,
+    )
     service_boardings_per_hour = 0.0
     period_hours = (period.end_minute - period.start_minute) / 60.0
     direction_count = 1.0 if route.closed and not route.both_ways else 2.0
@@ -303,6 +322,8 @@ def _service_analytics(
         daily_vehicle_km=vehicle_km,
         daily_opex=opex,
         capacity_per_direction=departures * (vehicle.capacity or profile.capacity),
+        riders=riders,
+        peak_load_factor=peak_load_factor,
         effective_headway_min=headway * max(1.0, headway_factor),
         minimum_station_headway_min=station_headway,
         minimum_headway_min=minimum_headway,
