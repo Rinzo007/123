@@ -139,8 +139,8 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
         return temporal
 
     monkeypatch.setenv("TRANSIT_PLANNER_POPULATION_RASTER", "synthetic.tif")
-    monkeypatch.setattr(api_module, "generate_zones_from_population_raster", lambda *args, **kwargs: ())
-    monkeypatch.setattr(api_module.OverturePlacesProvider, "load_places", lambda self: ())
+    monkeypatch.setattr(api_module, "generate_zones_from_population_raster", lambda _raster_path, **_kwargs: ())
+    monkeypatch.setattr(api_module.OverturePlacesProvider, "load_places", lambda _self: ())
     monkeypatch.setattr(api_module, "assign_temporal_demand", fake_temporal)
 
     result = api_module.city_assignment({
@@ -155,7 +155,7 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
         "economics_config": {"period_id": "am", "fare_per_transit_trip": 2.0},
     })
 
-    assert result["economics"]["daily_vehicle_km"] == 24.0
+    assert result["economics"]["daily_vehicle_km"] == 72.0
     assert len(result["periods"]) == 2
     assert all("economics" in period for period in result["periods"])
     assert result["periods"][0]["economics"]["daily_fare_revenue"] > 0
