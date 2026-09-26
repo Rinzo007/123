@@ -9,6 +9,7 @@ from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .geojson import connectors_to_geojson, roads_to_geojson, stops_to_geojson
+from .projection import project_local_point_wgs84
 from .overture import (
     OvertureConnectorProvider,
     OvertureSource,
@@ -161,6 +162,56 @@ def overture_network(
         },
     }
 
+
+@app.post("/api/v1/data/overture/route")
+def overture_route(payload: dict) -> dict:
+    try:
+        bounds = _bbox(
+            float(payload["south"]),
+            float(payload["west"]),
+            float(payload["north"]),
+            float(payload["east"]),
+        )
+        raw_points = payload.get("points", [])
+        if not isinstance(raw_points, list) or len(raw_points) < 2:
+            raise HTTPException(status_code=400, detail="Для маршрута нужны минимум две точки")
+        if len(raw_points) > 100:
+            raise HTTPException(status_code=400, detail="Слишком много точек маршрута")
+
+        from .geo import Point
+
+        points = tuple(Point(float(item["lon"]), float(item["lat"])) for item in raw_points)
+        overture_network = OvertureNetworkProvider(
+            source=_overture_source(payload.get("release")),
+            bbox=bounds,
+            snap_max_distance_m=float(payload.get("snap_distance_m", 150.0)),
+        ).load()
+        route = overture_network.route_points(points)
+    except HTTPException:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Некорректный маршрут: {exc}") from exc
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail=f"Overture недоступен: {exc}") from exc
+
+    geometry = tuple(
+        project_local_point_wgs84(
+            point,
+            origin_lon=overture_network.origin_lon,
+            origin_lat=overture_network.origin_lat,
+        )
+        for point in route.geometry
+    )
+    return {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": [[point.x, point.y] for point in geometry]},
+        "properties": {
+            "edge_ids": list(route.edge_ids),
+            "length_m": route.length_m,
+            "travel_time_min": route.travel_time_min,
+            "snap_distances_m": list(route.snap_distances_m),
+        },
+    }
 
 @app.get("/api/v1/data/overture/stops")
 def overture_stops(
