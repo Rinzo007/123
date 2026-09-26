@@ -254,3 +254,32 @@ export function loadPopulationZones(
     }),
   );
 }
+export interface CityAssignmentResponse {
+  data: { zones: number; places: number; od_pairs: number; total_demand_trips: number };
+  assignment: AssignmentResponse;
+}
+
+export function calculateCityAssignment(
+  network: NetworkPayload,
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  originLon: number,
+  originLat: number,
+  periodId = "morning_peak",
+): Promise<CityAssignmentResponse> {
+  return fetch("/api/v1/assignment/city", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      network, south, west, north, east,
+      origin_lon: originLon,
+      origin_lat: originLat,
+      config: { period_id: periodId },
+    }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось рассчитать городскую сеть");
+    return response.json() as Promise<CityAssignmentResponse>;
+  });
+}
