@@ -306,13 +306,10 @@ class TransitRouter:
                 stop_map = result.setdefault(period_id, {})
                 offset = service.departure_offset_by_period.get(period_id, 0.0)
                 for index, (from_id, to_id) in enumerate(route.segment_pairs()):
-                    section = self.network._track_for_segment(route, index)
+                    section_id = route.track_section_for_segment(index)
+                    section = None if section_id is None else self.network.track_sections[section_id]
                     speed_limit = None if section is None else section.speed_limit_kph
-                    distance_km = (
-                        None
-                        if section is None
-                        else section.length_km
-                    )
+                    distance_km = None if section is None else section.length_km
                     stop_map.setdefault(from_id, []).append(
                         _TransitOption(
                             route.id,
