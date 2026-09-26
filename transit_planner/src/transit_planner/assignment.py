@@ -8,6 +8,7 @@ from .demand import DemandMatrix, ODPairDemand
 from .choice import ChoiceConfig, probabilities, utilities
 from .network import Network
 from .routing import Journey, TransitRouter
+from .reference_model import CROWDED_LOAD_RATIO, EXTREME_LOAD_RATIO, REFERENCE_MODE_PROFILES, SEVERE_LOAD_RATIO
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,17 @@ class SectionLoad:
     @property
     def load_ratio(self) -> float:
         return 0.0 if self.capacity <= 0 else self.passengers / self.capacity
+
+    @property
+    def crowding_level(self) -> str:
+        ratio = self.load_ratio
+        if ratio >= EXTREME_LOAD_RATIO:
+            return "extreme"
+        if ratio >= SEVERE_LOAD_RATIO:
+            return "severe"
+        if ratio >= CROWDED_LOAD_RATIO:
+            return "crowded"
+        return "normal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +48,8 @@ class StopFlow:
     boardings: float
     alightings: float
     transfers: float
+    dwell_seconds: float = 0.0
+    platform_m: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
