@@ -15,10 +15,12 @@
 Рабочий поток использует Overture:
 
 - дороги: Transportation / Segment;
-- физические узлы дорожной сети: Transportation / Connector — следующий слой маршрутизации;
-- остановки и станции: Base / Infrastructure с subtype=transit.
+- физические узлы дорожной сети: Transportation / Connector;
+- остановки и станции: Base / Infrastructure, subtype=transit.
 
-В текущем релизе Overture 2026-09-23.0 был выпущен schema v2.0.0; затем Overture опубликовал patch 2026-09-23.1. В приложении по умолчанию используется patch 2026-09-23.1. citeturn289065search0turn289065search1turn889581view0
+Для транспорта используются темы Overture напрямую. Карта получает GeoJSON через FastAPI, а тяжёлые выборки выполняются через DuckDB.
+
+По умолчанию используется релиз Overture 2026-09-23.1. Релизы Overture распространяются по AWS и Azure; версия релиза может быть переопределена на API-уровне.
 
 ## Запуск
 
