@@ -45,6 +45,10 @@ class RoadGraph:
     prohibited_transitions: tuple[ProhibitedTransition, ...] = ()
     _restriction_index: dict[str, tuple[ProhibitedTransition, ...]] = field(default_factory=dict, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        for rule in self.prohibited_transitions:
+            self._index_prohibited_transition(rule)
+
     def add_node(self, node: RoadNode) -> None:
         if node.id in self.nodes:
             raise ValueError(f"Duplicate road node: {node.id}")
@@ -78,12 +82,14 @@ class RoadGraph:
 
     def add_prohibited_transition(self, rule: ProhibitedTransition) -> None:
         self.prohibited_transitions = (*self.prohibited_transitions, rule)
-        source_segment_id = getattr(rule, "source_segment_id", None)
-        if source_segment_id:
-            self._restriction_index[source_segment_id] = (
-                *self._restriction_index.get(source_segment_id, ()),
-                rule,
-            )
+        self._index_prohibited_transition(rule)
+
+    def _index_prohibited_transition(self, rule: ProhibitedTransition) -> None:
+        source_segment_id = rule.source_segment_id
+        self._restriction_index[source_segment_id] = (
+            *self._restriction_index.get(source_segment_id, ()),
+            rule,
+        )
 
     def shortest_path(self, origin: int, destination: int) -> tuple[float, tuple[str, ...]]:
         if origin not in self.nodes or destination not in self.nodes:
