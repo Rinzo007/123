@@ -311,6 +311,7 @@ def _assign_once(
                 config=config.choice,
             ),
             car_availability=car_availability,
+            bike_availability=config.choice.two_wheel_share,
         )
 
         transit_trips = trips * probs["transit"]
