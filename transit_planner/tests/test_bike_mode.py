@@ -98,3 +98,11 @@ def test_no_car_availability_reduces_car_probability():
     without_car = probabilities(utilities_value, car_availability=0.0)
     assert without_car["car"] == 0.0
     assert without_car["walk"] > with_car["walk"]
+
+
+def test_trip_suppression_factor_matches_vot_exponential():
+    from transit_planner.choice import trip_suppression_factor
+
+    assert trip_suppression_factor(0.0) == 1.0
+    assert 0.0 < trip_suppression_factor(6.0) < 1.0
+    assert trip_suppression_factor(12.0) < trip_suppression_factor(6.0)
