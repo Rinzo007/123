@@ -516,6 +516,7 @@ def _add_intermediate_dwell(
             leg.kind == "transit"
             and leg.route_id is not None
             and previous_transit_route == leg.route_id
+            and network.routes[leg.route_id].is_stop_open(leg.from_id)
         ):
             profile = REFERENCE_MODE_PROFILES[network.routes[leg.route_id].mode.value]
             duration += profile.dwell_s / 60.0
