@@ -3,6 +3,8 @@ from __future__ import annotations
 from .data import ConnectorRecord, RoadRecord
 from .network import Stop
 from .places import CityPlace
+from .geo import Point
+from .projection import project_local_point_wgs84
 
 
 def roads_to_geojson(roads: tuple[RoadRecord, ...]) -> dict:
@@ -107,7 +109,7 @@ def places_to_geojson(places: tuple[CityPlace, ...]) -> dict:
     }
 
 
-def zones_to_geojson(zones) -> dict:
+def zones_to_geojson(zones, *, origin_lon: float = 0.0, origin_lat: float = 0.0) -> dict:
     return {
         "type": "FeatureCollection",
         "features": [
@@ -116,7 +118,18 @@ def zones_to_geojson(zones) -> dict:
                 "id": zone.id,
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [zone.centroid_x, zone.centroid_y],
+                    "coordinates": [
+                        project_local_point_wgs84(
+                            Point(zone.centroid_x, zone.centroid_y),
+                            origin_lon=origin_lon,
+                            origin_lat=origin_lat,
+                        ).x,
+                        project_local_point_wgs84(
+                            Point(zone.centroid_x, zone.centroid_y),
+                            origin_lon=origin_lon,
+                            origin_lat=origin_lat,
+                        ).y,
+                    ],
                 },
                 "properties": {
                     "id": zone.id,
