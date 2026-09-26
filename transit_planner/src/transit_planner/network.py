@@ -56,6 +56,7 @@ class Route:
     both_ways: bool = True
     closed: bool = False
     row_by_segment: tuple[TrackRow, ...] = ()
+    open_stop_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -67,12 +68,25 @@ class Route:
             raise ValueError("track_section_ids must match route segments")
         if self.row_by_segment and len(self.row_by_segment) != expected_segments:
             raise ValueError("row_by_segment must match route segments")
+        if self.open_stop_ids:
+            if len(self.open_stop_ids) < 2:
+                raise ValueError("A route needs at least two open stops")
+            if len(self.open_stop_ids) != len(set(self.open_stop_ids)):
+                raise ValueError("open_stop_ids must be unique")
+            if any(stop_id not in self.stop_ids for stop_id in self.open_stop_ids):
+                raise ValueError("open_stop_ids must be a subset of stop_ids")
 
     def segment_pairs(self) -> tuple[tuple[str, str], ...]:
         pairs = list(zip(self.stop_ids, self.stop_ids[1:]))
         if self.closed:
             pairs.append((self.stop_ids[-1], self.stop_ids[0]))
         return tuple(pairs)
+
+    def is_stop_open(self, stop_id: str) -> bool:
+        return not self.open_stop_ids or stop_id in self.open_stop_ids
+
+    def open_stop_count(self) -> int:
+        return sum(self.is_stop_open(stop_id) for stop_id in self.stop_ids)
 
     def track_section_for_segment(self, index: int) -> str | None:
         if index < 0 or index >= len(self.segment_pairs()):
@@ -265,7 +279,12 @@ class Network:
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
         direction_factor = 1.0 if not route.both_ways else 2.0
         run_min = direction_factor * self.route_run_time_min(route)
-        dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
+        dwell_min = (
+            2.0
+            * route.open_stop_count()
+            * profile.dwell_s
+            / 60.0
+        )
         turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
         return run_min + dwell_min + turnback_min
 
