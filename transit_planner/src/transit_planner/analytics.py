@@ -86,8 +86,6 @@ class NetworkAnalytics:
     sections: tuple[SectionAnalytics, ...]
     accessibility: tuple[AccessibilityResult, ...]
     services: tuple[ServiceAnalytics, ...] = ()
-    severe_sections: int = 0
-    extreme_sections: int = 0
 
 
 def analyze_network(
@@ -145,8 +143,6 @@ def analyze_network(
         average_transfers=assignment.metrics.average_transfers,
         max_load_ratio=assignment.max_load_ratio,
         overloaded_sections=sum(item.load_ratio >= 1.0 for item in sections),
-        severe_sections=sum(item.load_ratio >= 2.0 for item in sections),
-        extreme_sections=sum(item.load_ratio >= 4.0 for item in sections),
         passenger_km=passenger_km,
         stops=stops,
         sections=tuple(sections),
