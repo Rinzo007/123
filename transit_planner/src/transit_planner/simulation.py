@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
-
 from .demand import DemandMatrix
 from .network import Network
 
@@ -35,8 +33,7 @@ def calculate_service_capacity(
     period = network.periods[period_id]
     vehicle = network.vehicle_types[service.vehicle_type_id]
     headway = service.headway_by_period[period_id]
-    duration = period.end_minute - period.start_minute
-    departures = ceil(duration / headway)
+    departures = network.service_departures(service, period_id)
     return ServiceCapacity(
         service_id=service.id,
         period_id=period.id,
