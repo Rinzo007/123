@@ -357,6 +357,26 @@ export interface ScenarioComparisonResponse {
       alternative_passengers: number;
       delta: number;
     }>;
+    services: Array<{
+      service_id: string;
+      route_id: string;
+      period_id: string;
+      base_riders: number;
+      alternative_riders: number;
+      riders_delta: number;
+      base_peak_load_factor: number;
+      alternative_peak_load_factor: number;
+      peak_load_factor_delta: number;
+      base_fleet: number;
+      alternative_fleet: number;
+      fleet_delta: number;
+      base_effective_headway_min: number;
+      alternative_effective_headway_min: number;
+      effective_headway_delta: number;
+      base_minimum_headway_min: number;
+      alternative_minimum_headway_min: number;
+      minimum_headway_delta: number;
+    }>;
   };
 }
 
