@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from heapq import heappop, heappush
 from math import ceil, inf, isfinite, sqrt
 
-from .road import RoadGraph
-
 from .network import Network, Stop, TransitMode
 from .reference_model import REFERENCE_MODE_PROFILES
+from .road import RoadGraph
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +52,7 @@ class _TransitOption:
     departure_offset: float
     mode: TransitMode
     speed_limit_kph: float | None = None
+    distance_km: float | None = None
 
 
 class TransitRouter:
@@ -75,7 +75,10 @@ class TransitRouter:
         self.config = config
         self.road_graph = road_graph
         self.stop_road_nodes = dict(stop_road_nodes or {})
-        self._road_run_time_cache: dict[tuple[str, str, TransitMode, float | None], float | None] = {}
+        self._road_run_time_cache: dict[
+            tuple[str, str, TransitMode, float | None, float | None],
+            float | None,
+        ] = {}
         self._walking_neighbors_cache = self._build_walking_neighbors()
         self._transit_options_by_period = self._build_transit_options()
 
@@ -163,6 +166,7 @@ class TransitRouter:
                     option.neighbor_stop_id,
                     option.mode,
                     speed_limit_kph=option.speed_limit_kph,
+                    distance_km=option.distance_km,
                 )
                 next_state = (option.neighbor_stop_id, option.route_id)
                 weighted_wait = wait * self.config.wait_weight
@@ -218,12 +222,22 @@ class TransitRouter:
         mode: TransitMode,
         *,
         speed_limit_kph: float | None = None,
+        distance_km: float | None = None,
     ) -> float:
-        cache_key = (from_id, to_id, mode, speed_limit_kph)
+        cache_key = (from_id, to_id, mode, speed_limit_kph, distance_km)
         if cache_key in self._road_run_time_cache:
             cached = self._road_run_time_cache[cache_key]
             if cached is not None:
                 return cached
+
+        if distance_km is not None:
+            speed = speed_limit_kph or self._SPEEDS.get(
+                mode,
+                self.config.default_transit_speed_kph,
+            )
+            physical_time = distance_km / speed * 60.0
+            self._road_run_time_cache[cache_key] = physical_time
+            return physical_time
 
         if self.road_graph is not None:
             origin_node = self.stop_road_nodes.get(from_id)
@@ -246,12 +260,12 @@ class TransitRouter:
 
         a = self.network.stops[from_id]
         b = self.network.stops[to_id]
-        distance_km = self._point_distance(a, b) / 1000.0
+        fallback_distance_km = self._point_distance(a, b) / 1000.0
         speed = speed_limit_kph or self._SPEEDS.get(
             mode,
             self.config.default_transit_speed_kph,
         )
-        direct_time = distance_km / speed * 60.0
+        direct_time = fallback_distance_km / speed * 60.0
         self._road_run_time_cache[cache_key] = direct_time
         return direct_time
 
@@ -290,11 +304,15 @@ class TransitRouter:
             route = self.network.routes[service.route_id]
             for period_id, headway in service.headway_by_period.items():
                 stop_map = result.setdefault(period_id, {})
-                pairs = route.segment_pairs()
                 offset = service.departure_offset_by_period.get(period_id, 0.0)
-                for index, (from_id, to_id) in enumerate(pairs):
+                for index, (from_id, to_id) in enumerate(route.segment_pairs()):
                     section = self.network._track_for_segment(route, index)
                     speed_limit = None if section is None else section.speed_limit_kph
+                    distance_km = (
+                        None
+                        if section is None
+                        else section.length_km
+                    )
                     stop_map.setdefault(from_id, []).append(
                         _TransitOption(
                             route.id,
@@ -303,6 +321,7 @@ class TransitRouter:
                             offset,
                             route.mode,
                             speed_limit,
+                            distance_km,
                         )
                     )
                     if route.both_ways:
@@ -314,6 +333,7 @@ class TransitRouter:
                                 offset,
                                 route.mode,
                                 speed_limit,
+                                distance_km,
                             )
                         )
         return {
@@ -323,7 +343,6 @@ class TransitRouter:
             }
             for period_id, stop_map in result.items()
         }
-
 
 
 def _scheduled_wait_minutes(
