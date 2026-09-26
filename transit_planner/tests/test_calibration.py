@@ -15,7 +15,7 @@ def test_calibration_report_contains_mae_rmse_and_mape():
     )
 
     assert report.mae == 15.0
-    assert report.rmse == 10.0 ** 0.5 * 10.0
+    assert abs(report.rmse - (250.0 ** 0.5)) < 1e-12
     assert report.mape == 0.075
 
 
