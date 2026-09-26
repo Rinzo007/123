@@ -794,6 +794,7 @@
     <div>
       <div class="brand">Transit Planner</div>
       <div class="subtitle">Проектирование транспортной сети</div>
+      <div class="save-state" class:dirty={$projectStore.dirty}>{$projectStore.dirty ? "Изменения не сохранены" : "Сохранено"}</div>
     </div>
     <div class="actions">
       <button class:active-toggle={viewMode === "map"} on:click={() => viewMode = "map"}>Карта</button>
@@ -886,7 +887,7 @@
   :global(button), :global(input), :global(select) { font: inherit; }
   .app-shell { min-height: 100%; display: flex; flex-direction: column; }
   .topbar { display: flex; gap: 16px; justify-content: space-between; align-items: center; padding: 12px 16px; background: #111827; color: #fff; }
-  .brand { font-size: 18px; font-weight: 800; }.subtitle { font-size: 12px; opacity: .7; margin-top: 2px; }
+  .brand { font-size: 18px; font-weight: 800; }.subtitle { font-size: 12px; opacity: .7; margin-top: 2px; }.save-state { font-size: 11px; opacity: .7; margin-top: 3px; }.save-state.dirty { opacity: 1; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   button { border: 1px solid #d1d5db; background: #fff; color: #111827; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
   button:hover:not(:disabled) { background: #f9fafb; } button:disabled { opacity: .5; cursor: wait; }
