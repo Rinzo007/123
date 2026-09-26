@@ -1,0 +1,32 @@
+name: Vulture
+
+on:
+  push:
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+      - ".github/workflows/vulture.yml"
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+      - ".github/workflows/vulture.yml"
+
+concurrency:
+  group: vulture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dead-code:
+    name: Vulture dead-code check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install --upgrade pip
+      - run: pip install vulture==2.16
+      - run: python -m vulture
