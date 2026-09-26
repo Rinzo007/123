@@ -40,7 +40,7 @@ def test_gravity_od_balances_to_origin_production():
     )
     demand = gravity_od(
         zones,
-        parameters=GravityParameters(reference_speed_kph=30, decay=0.01),
+        parameters=GravityParameters(speed_kph=30, decay=0.01),
         trip_rate=0.1,
     )
     assert isinstance(demand, DemandMatrix)
