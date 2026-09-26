@@ -5,7 +5,7 @@ from math import ceil, sqrt
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
-from .mode_choice import ModeChoiceConfig, probabilities, utilities
+from .choice import ChoiceConfig, probabilities, utilities
 from .network import Network
 from .routing import Journey, TransitRouter
 
@@ -74,7 +74,7 @@ class AssignmentConfig:
     car_speed_kph: float = 30.0
     walking_speed_kph: float = 5.0
     bike_speed_kph: float = 15.0
-    mode_choice: ModeChoiceConfig = ModeChoiceConfig()
+    choice: ChoiceConfig = ChoiceConfig()
     transfer_penalty_min: float = 5.0
     crowding_penalty_min: float = 20.0
     crowding_start_ratio: float = 0.85
@@ -224,7 +224,7 @@ def _assign_once(
                 car_time_min=car_time,
                 transit_time_min=transit_time,
                 bike_time_min=bike_time,
-                config=config.mode_choice,
+                config=config.choice,
             )
         )
 
