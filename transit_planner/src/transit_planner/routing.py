@@ -37,6 +37,7 @@ class RouterConfig:
     walk_transfer_radius_m: float = 500.0
     wait_weight: float = 1.0
     transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
+    transfer_penalty_per_m_s: float = REFERENCE_TRANSFER.per_m_s
     transfer_walk_multiplier: float = REFERENCE_TRANSFER.walk_multiplier
 
     def __post_init__(self) -> None:
@@ -46,6 +47,8 @@ class RouterConfig:
             raise ValueError("walk_transfer_radius_m cannot be negative")
         if self.wait_weight < 0 or self.transfer_penalty_min < 0:
             raise ValueError("Wait and transfer penalties cannot be negative")
+        if self.transfer_penalty_per_m_s < 0:
+            raise ValueError("transfer_penalty_per_m_s cannot be negative")
         if self.transfer_walk_multiplier < 0:
             raise ValueError("transfer_walk_multiplier cannot be negative")
 
@@ -151,8 +154,20 @@ class TransitRouter:
                     walk_time * self.config.transfer_walk_multiplier
                     if transfer_walk else walk_time
                 )
+                transfer_penalty = 0.0
+                if transfer_walk:
+                    distance_m = (
+                        walk_time
+                        * self.config.walking_speed_kph
+                        * 1000.0
+                        / 60.0
+                    )
+                    transfer_penalty = (
+                        self.config.transfer_penalty_min
+                        + self.config.transfer_penalty_per_m_s * distance_m / 60.0
+                    )
                 next_state: State = (neighbor_id, None)
-                candidate = cost + effective_walk_time
+                candidate = cost + effective_walk_time + transfer_penalty
                 if candidate < best.get(next_state, inf):
                     best[next_state] = candidate
                     previous[next_state] = (
