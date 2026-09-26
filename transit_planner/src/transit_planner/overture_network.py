@@ -179,7 +179,7 @@ class OvertureNetworkProvider:
             bbox=self.bbox,
         )
 
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="overture") as pool:
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="overture") as pool:
             roads_future = pool.submit(transportation.load_roads)
             connectors_future = (
                 pool.submit(connector_provider.load_connectors)
