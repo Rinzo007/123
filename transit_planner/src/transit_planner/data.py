@@ -34,8 +34,13 @@ class RoadRecord:
     road_type: str = "unknown"
     oneway: bool = False
     connectors: tuple[ConnectorRef, ...] = ()
+    length_m: float | None = None
 
     def __post_init__(self) -> None:
+        if self.speed_kph <= 0:
+            raise ValueError("Road speed must be positive")
+        if self.length_m is not None and self.length_m <= 0:
+            raise ValueError("Road length_m must be positive when provided")
         connector_ids = [ref.connector_id for ref in self.connectors]
         if len(connector_ids) != len(set(connector_ids)):
             raise ValueError(f"Duplicate connector reference in road {self.id}")
