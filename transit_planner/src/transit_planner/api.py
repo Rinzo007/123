@@ -357,6 +357,7 @@ def city_demand(payload: dict) -> dict:
             centroid_y=float(item["centroid_y"]),
             population=float(item.get("population", 0.0)),
             jobs=float(item.get("jobs", 0.0)),
+            no_car_share=float(item.get("no_car_share", 0.35)),
         )
         for item in payload.get("zones", [])
     )
