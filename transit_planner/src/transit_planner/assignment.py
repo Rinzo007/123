@@ -67,6 +67,7 @@ class AssignmentMetrics:
     average_transit_time_min: float
     average_transfers: float
     bike_trips: float = 0.0
+    average_wait_time_min: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,6 +373,9 @@ def _assign_once(
         average_transit_time_min=0.0 if total_transit <= 0 else weighted_transit_time / total_transit,
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
         bike_trips=total_bike,
+        average_wait_time_min=(
+            0.0 if total_transit <= 0 else weighted_wait_time / total_transit
+        ),
     )
     losses = tuple(
         DemandLoss(reason, trips)
