@@ -48,13 +48,16 @@ class Route:
     stop_ids: tuple[str, ...]
     geometry: LineString | None = None
     track_section_ids: tuple[str, ...] = ()
+    both_ways: bool = True
+    closed: bool = False
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Route id cannot be empty")
         if len(self.stop_ids) < 2:
             raise ValueError("A route needs at least two stops")
-        if self.track_section_ids and len(self.track_section_ids) != len(self.stop_ids) - 1:
+        expected_segments = len(self.stop_ids) if self.closed else len(self.stop_ids) - 1
+        if self.track_section_ids and len(self.track_section_ids) != expected_segments:
             raise ValueError("track_section_ids must match route segments")
 
 
