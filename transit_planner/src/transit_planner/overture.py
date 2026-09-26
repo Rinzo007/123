@@ -27,6 +27,7 @@ class OvertureSource:
     transportation_glob: str | None = None
     connector_glob: str | None = None
     infrastructure_glob: str | None = None
+    places_glob: str | None = None
 
     def transportation_segments(self) -> str:
         if self.transportation_glob:
@@ -44,6 +45,14 @@ class OvertureSource:
             "theme=transportation/type=connector/*"
         )
 
+    def places(self) -> str:
+        if self.places_glob:
+            return self.places_glob
+        return (
+            f"{self.storage_root}/{self.release}/"
+            "theme=places/type=place/*"
+        )
+
     def infrastructure(self) -> str:
         if self.infrastructure_glob:
             return self.infrastructure_glob
@@ -51,6 +60,73 @@ class OvertureSource:
             f"{self.storage_root}/{self.release}/"
             "theme=base/type=infrastructure/*"
         )
+
+
+class OverturePlacesProvider:
+    """Read Overture Places and expose taxonomy/basic_category for trip demand."""
+
+    def __init__(
+        self,
+        *,
+        source: OvertureSource = OvertureSource(),
+        bbox: tuple[float, float, float, float] | None = None,
+        categories: tuple[str, ...] | None = None,
+    ) -> None:
+        self.source = source
+        self.bbox = bbox
+        self.categories = tuple(categories or ())
+
+    def load_places(self):
+        from .places import CityPlace
+
+        rows = _query_duckdb(self._sql())
+        places: list[CityPlace] = []
+        for place_id, geojson, name, basic_category, taxonomy_primary, confidence in rows:
+            if not geojson:
+                continue
+            geometry = json.loads(geojson)
+            coordinates = geometry.get("coordinates") or []
+            if len(coordinates) < 2:
+                continue
+            places.append(
+                CityPlace(
+                    id=f"overture:{place_id}",
+                    name=str(name or place_id),
+                    location=Point(float(coordinates[0]), float(coordinates[1])),
+                    basic_category=None if basic_category is None else str(basic_category),
+                    taxonomy_primary=None if taxonomy_primary is None else str(taxonomy_primary),
+                    importance=max(0.0, float(confidence or 1.0)),
+                )
+            )
+        return tuple(places)
+
+    def _sql(self) -> str:
+        bbox_filter = _bbox_sql(self.bbox)
+        category_filter = ""
+        if self.categories:
+            values = ", ".join(
+                "'" + value.replace("'", "''") + "'"
+                for value in self.categories
+            )
+            category_filter = f"""
+              AND (
+                basic_category IN ({values})
+                OR taxonomy.primary IN ({values})
+              )
+            """
+        return f"""
+            SELECT
+                id,
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                names.primary AS name,
+                basic_category,
+                taxonomy.primary AS taxonomy_primary,
+                confidence
+            FROM read_parquet('{_sql_quote(self.source.places())}')
+            WHERE TRUE
+              {category_filter}
+              {bbox_filter}
+        """
 
 
 class OvertureTransportationProvider:
