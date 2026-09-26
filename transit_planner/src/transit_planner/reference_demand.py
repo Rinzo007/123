@@ -5,6 +5,7 @@ from math import exp, hypot
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, PeriodODPairDemand, TemporalDemandMatrix
+from .od import GravityParameters, gravity_od
 from .reference_model import REFERENCE_PERIODS, REFERENCE_PURPOSE_LAYERS, ReferencePurposeLayer
 
 
@@ -133,8 +134,28 @@ def build_reference_demand_layers(
 def build_reference_daily_demand(
     zones: tuple[DemandZone, ...],
 ) -> DemandMatrix:
+    # The reference runtime has a base commuter matrix plus auxiliary
+    # purpose layers. Gravity OD provides the equivalent base commuter layer
+    # when the city does not have a pre-calibrated demand.json.
+    commuter = gravity_od(
+        zones,
+        parameters=GravityParameters(
+            reference_speed_kph=30.0,
+            decay=0.08,
+        ),
+        trip_rate=0.12,
+    )
     layers = build_reference_demand_layers(zones)
-    pairs: list[ODPairDemand] = []
+    pairs = [
+        ODPairDemand(
+            pair.origin_zone_id,
+            pair.destination_zone_id,
+            pair.trips_per_day,
+            "work",
+        )
+        for pair in commuter.pairs
+        if pair.trips_per_day > 0
+    ]
     for layer in layers.layers:
         totals: dict[tuple[str, str], float] = {}
         for pair in layer.demand.pairs:
@@ -143,9 +164,9 @@ def build_reference_daily_demand(
         pairs.extend(
             ODPairDemand(origin, destination, trips, layer.purpose)
             for (origin, destination), trips in totals.items()
+            if trips > 0
         )
     return DemandMatrix(tuple(pairs))
-
 
 def _select_reference_candidates(
     candidates: list[tuple[DemandZone, float, float]],
