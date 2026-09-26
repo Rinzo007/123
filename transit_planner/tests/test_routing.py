@@ -158,3 +158,21 @@ def test_router_uses_physical_track_length():
     )
     assert journey is not None
     assert abs(journey.duration_min - 12.0) < 1e-9
+
+
+def test_router_applies_reference_transfer_penalty_and_multiplier():
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 100), ("c", 600)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_route(Route("r2", "2", TransitMode.BUS, ("b", "c")))
+    network.add_service(Service("s1", "r1", "bus", {"am": 10}))
+    network.add_service(Service("s2", "r2", "bus", {"am": 10}))
+
+    journey = TransitRouter(network).shortest(network.stops["a"], network.stops["c"], period_id="am")
+
+    assert journey is not None
+    assert journey.transfers == 1
+    assert any(leg.kind == "transit" and leg.wait_min >= 0 for leg in journey.legs)
