@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
+from math import cos, radians, sqrt
 from typing import Iterable
 
 from .city import DemandZone
@@ -99,6 +99,8 @@ def generate_zones_from_population_raster(
     *,
     cell_size_m: float | None = None,
     jobs_points: Iterable[tuple[float, float, float]] = (),
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
 ) -> tuple[DemandZone, ...]:
     try:
         import rasterio
@@ -107,63 +109,98 @@ def generate_zones_from_population_raster(
             "Population raster support requires the optional 'gis' extra"
         ) from exc
 
+    from .projection import EARTH_RADIUS_M, project_wgs84_point
+
     with rasterio.open(raster_path) as dataset:
         if dataset.crs is None:
             raise ValueError("Population raster must define a CRS")
         if dataset.crs.to_epsg() != 4326:
             raise ValueError("Population raster must use EPSG:4326")
-        bounds = dataset.bounds
+
         transform = dataset.transform
-        resolution_x = abs(transform.a)
-        resolution_y = abs(transform.e)
-        if cell_size_m is None:
-            cell_size_m = max(resolution_x, resolution_y) * 111_320.0
-        if cell_size_m <= 0:
+        rows, cols = dataset.height, dataset.width
+        center_lon = (
+            float(origin_lon)
+            if origin_lon is not None
+            else float((dataset.bounds.left + dataset.bounds.right) / 2.0)
+        )
+        center_lat = (
+            float(origin_lat)
+            if origin_lat is not None
+            else float((dataset.bounds.bottom + dataset.bounds.top) / 2.0)
+        )
+
+        resolution_x_deg = abs(transform.a)
+        resolution_y_deg = abs(transform.e)
+        meters_per_degree_lon = EARTH_RADIUS_M * cos(radians(center_lat)) * radians(1.0)
+        meters_per_degree_lat = EARTH_RADIUS_M * radians(1.0)
+        native_x_m = resolution_x_deg * meters_per_degree_lon
+        native_y_m = resolution_y_deg * meters_per_degree_lat
+
+        target_size = (
+            max(native_x_m, native_y_m)
+            if cell_size_m is None
+            else float(cell_size_m)
+        )
+        if target_size <= 0:
             raise ValueError("cell_size_m must be positive")
 
-        from math import ceil
-        rows, cols = dataset.height, dataset.width
-        scale_x = cell_size_m / max(1.0, resolution_x * 111_320.0)
-        scale_y = cell_size_m / max(1.0, resolution_y * 111_320.0)
-        step_x = max(1, int(round(scale_x)))
-        step_y = max(1, int(round(scale_y)))
-
+        step_x = max(1, int(round(target_size / max(native_x_m, 1e-9))))
+        step_y = max(1, int(round(target_size / max(native_y_m, 1e-9))))
         data = dataset.read(1, masked=True)
+        raster_transform = transform
 
     zones: list[DemandZone] = []
     jobs_points = tuple(jobs_points)
     row_index = 0
+
     for row_start in range(0, rows, step_y):
         row_stop = min(rows, row_start + step_y)
         for col_start in range(0, cols, step_x):
             col_stop = min(cols, col_start + step_x)
             window = data[row_start:row_stop, col_start:col_stop]
             population = float(window.sum()) if window.count() else 0.0
-            if population <= 0.0 and not jobs_points:
-                continue
 
             left, top = rasterio.transform.xy(
-                transform,
+                raster_transform,
                 row_start,
                 col_start,
                 offset="ul",
             )
             right, bottom = rasterio.transform.xy(
-                transform,
+                raster_transform,
                 row_stop - 1,
                 col_stop - 1,
                 offset="lr",
             )
-            min_x = min(left, right)
-            max_x = max(left, right)
-            min_y = min(bottom, top)
-            max_y = max(bottom, top)
-            jobs = _aggregate_points(jobs_points, min_x, min_y, max_x, max_y)
+            min_lon = min(left, right)
+            max_lon = max(left, right)
+            min_lat = min(bottom, top)
+            max_lat = max(bottom, top)
+            jobs = _aggregate_points(
+                jobs_points,
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+            )
+
+            if population <= 0.0 and jobs <= 0.0:
+                continue
+
+            centroid = project_wgs84_point(
+                Point(
+                    (min_lon + max_lon) / 2.0,
+                    (min_lat + max_lat) / 2.0,
+                ),
+                origin_lon=center_lon,
+                origin_lat=center_lat,
+            )
             zones.append(
                 DemandZone(
                     id=f"raster_{row_index:06d}",
-                    centroid_x=(min_x + max_x) / 2.0,
-                    centroid_y=(min_y + max_y) / 2.0,
+                    centroid_x=centroid.x,
+                    centroid_y=centroid.y,
                     population=max(0.0, population),
                     jobs=max(0.0, jobs),
                 )
