@@ -114,6 +114,7 @@ class TransitRouter:
         *,
         period_id: str,
         route_penalties: dict[str, float] | None = None,
+        segment_crowding_penalties: dict[tuple[str, str, str], float] | None = None,
         service_headway_factors: dict[str, float] | None = None,
     ) -> Journey | None:
         if origin.id not in self.network.stops or destination.id not in self.network.stops:
@@ -125,6 +126,7 @@ class TransitRouter:
 
         options_by_stop = self._transit_options_by_period.get(period_id, {})
         penalties = route_penalties or {}
+        segment_penalties = segment_crowding_penalties or {}
         headway_factors = service_headway_factors or {}
         State = tuple[str, str | None]
         start: State = (origin.id, None)
@@ -188,7 +190,11 @@ class TransitRouter:
                 )
                 next_state = (option.neighbor_stop_id, option.route_id)
                 weighted_wait = wait * self.config.wait_weight
-                candidate = cost + weighted_wait + run + penalty
+                segment_penalty = segment_penalties.get(
+                    (option.route_id, stop_id, option.neighbor_stop_id),
+                    0.0,
+                )
+                candidate = cost + weighted_wait + run + penalty + segment_penalty
                 if candidate < best.get(next_state, inf):
                     best[next_state] = candidate
                     previous[next_state] = (
@@ -276,6 +282,7 @@ class TransitRouter:
                 destination,
                 period_id=period_id,
                 route_penalties=penalties,
+                segment_crowding_penalties=segment_crowding_penalties,
                 service_headway_factors=service_headway_factors,
             )
             if journey is None:
