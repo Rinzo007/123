@@ -210,7 +210,11 @@ def _assign_once(
                 network.stops[origin_stop_id],
                 network.stops[destination_stop_id],
                 period_id=config.period_id,
-                route_penalties=route_penalties,
+                route_penalized=any(
+                    route_penalties.get(leg.route_id or "", 0.0) > 0.0
+                    for leg in journey.legs
+                    if leg.kind == "transit"
+                ),
             )
             if candidate is not None and any(leg.kind == "transit" for leg in candidate.legs):
                 journey = candidate
@@ -346,9 +350,9 @@ def _classify_demand_loss(
     transfers: int,
     transit_fare: float,
     fare_weight: float,
-    route_penalties: dict[str, float],
+    route_penalized: bool,
 ) -> str:
-    if any(value > 0.0 for value in route_penalties.values()):
+    if route_penalized:
         return "crowding"
     best_alternative = min(walk_time, car_time, bike_time)
     if transit_fare > 0.0 and fare_weight * transit_fare >= 0.5 * transit_time:
