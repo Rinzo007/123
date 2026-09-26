@@ -275,19 +275,18 @@ class TransitRouter:
             route = self.network.routes[service.route_id]
             for period_id, headway in service.headway_by_period.items():
                 stop_map = result.setdefault(period_id, {})
-                for from_id, to_id in zip(route.stop_ids, route.stop_ids[1:]):
+                pairs = list(zip(route.stop_ids, route.stop_ids[1:]))
+                if route.closed:
+                    pairs.append((route.stop_ids[-1], route.stop_ids[0]))
+                offset = service.departure_offset_by_period.get(period_id, 0.0)
+                for from_id, to_id in pairs:
                     stop_map.setdefault(from_id, []).append(
-                        _TransitOption(route.id, to_id, headway, service.departure_offset_by_period.get(period_id, 0.0), route.mode)
+                        _TransitOption(route.id, to_id, headway, offset, route.mode)
                     )
-                    stop_map.setdefault(to_id, []).append(
-                        _TransitOption(
-                            route.id,
-                            from_id,
-                            headway,
-                            service.departure_offset_by_period.get(period_id, 0.0),
-                            route.mode,
+                    if route.both_ways:
+                        stop_map.setdefault(to_id, []).append(
+                            _TransitOption(route.id, from_id, headway, offset, route.mode)
                         )
-                    )
         return {
             period_id: {
                 stop_id: tuple(options)
