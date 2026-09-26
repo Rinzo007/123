@@ -53,9 +53,9 @@ class Route:
     stop_ids: tuple[str, ...]
     geometry: LineString | None = None
     track_section_ids: tuple[str, ...] = ()
-    row_by_segment: tuple[TrackRow, ...] = ()
     both_ways: bool = True
     closed: bool = False
+    row_by_segment: tuple[TrackRow, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id.strip():
