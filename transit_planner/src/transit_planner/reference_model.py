@@ -173,12 +173,3 @@ REFERENCE_MODE_PROFILES = {
 CROWDED_LOAD_RATIO = 1.0
 SEVERE_LOAD_RATIO = 2.0
 EXTREME_LOAD_RATIO = 4.0
-
-REFERENCE_LOSS_REASONS = (
-    "noroute",
-    "wait",
-    "crowd",
-    "transfer",
-    "ride",
-    "price",
-)
