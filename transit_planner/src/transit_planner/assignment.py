@@ -318,47 +318,66 @@ def _assign_once(
             loss_reasons[reason] = loss_reasons.get(reason, 0.0) + lost_trips
 
         if journeys:
-            for alternative_share, candidate in zip(alternative_shares, journeys):
+            for alternative_index, (alternative_share, candidate) in enumerate(
+                zip(alternative_shares, journeys)
+            ):
                 candidate_trips = transit_trips * alternative_share
-                candidate_time, candidate_wait = journey_stats[len(
-                    [
-                        item for item in journeys[:journeys.index(candidate)]
-                    ]
-                )]
+                candidate_time, candidate_wait = journey_stats[alternative_index]
                 weighted_transit_time += candidate_trips * candidate_time
                 weighted_transfers += candidate_trips * candidate.transfers
                 weighted_wait += candidate_trips * candidate_wait
 
-        for index, leg in enumerate(journey.legs):
-            if leg.kind != "transit" or leg.route_id is None:
-                continue
-            key = (leg.route_id, leg.from_id, leg.to_id)
-            section_flow[key] = section_flow.get(key, 0.0) + transit_trips
-            route_traversals[leg.route_id] = route_traversals.get(leg.route_id, 0.0) + transit_trips
+                for index, leg in enumerate(candidate.legs):
+                    if leg.kind != "transit" or leg.route_id is None:
+                        continue
+                    key = (leg.route_id, leg.from_id, leg.to_id)
+                    section_flow[key] = section_flow.get(key, 0.0) + candidate_trips
+                    route_traversals[leg.route_id] = (
+                        route_traversals.get(leg.route_id, 0.0) + candidate_trips
+                    )
 
-            previous_leg = journey.legs[index - 1] if index else None
-            next_leg = journey.legs[index + 1] if index + 1 < len(journey.legs) else None
-            previous_same_route = (
-                previous_leg is not None
-                and previous_leg.kind == "transit"
-                and previous_leg.route_id == leg.route_id
-            )
-            next_same_route = (
-                next_leg is not None
-                and next_leg.kind == "transit"
-                and next_leg.route_id == leg.route_id
-            )
+                    previous_leg = candidate.legs[index - 1] if index else None
+                    next_leg = (
+                        candidate.legs[index + 1]
+                        if index + 1 < len(candidate.legs)
+                        else None
+                    )
+                    previous_same_route = (
+                        previous_leg is not None
+                        and previous_leg.kind == "transit"
+                        and previous_leg.route_id == leg.route_id
+                    )
+                    next_same_route = (
+                        next_leg is not None
+                        and next_leg.kind == "transit"
+                        and next_leg.route_id == leg.route_id
+                    )
 
-            if not previous_same_route:
-                route_boardings[leg.route_id] = route_boardings.get(leg.route_id, 0.0) + transit_trips
-                stop_boardings[leg.from_id] = stop_boardings.get(leg.from_id, 0.0) + transit_trips
-                if previous_leg is not None and previous_leg.kind == "walk":
-                    stop_transfers[leg.from_id] = stop_transfers.get(leg.from_id, 0.0) + transit_trips
+                    if not previous_same_route:
+                        route_boardings[leg.route_id] = (
+                            route_boardings.get(leg.route_id, 0.0)
+                            + candidate_trips
+                        )
+                        stop_boardings[leg.from_id] = (
+                            stop_boardings.get(leg.from_id, 0.0)
+                            + candidate_trips
+                        )
+                        if previous_leg is not None and previous_leg.kind == "walk":
+                            stop_transfers[leg.from_id] = (
+                                stop_transfers.get(leg.from_id, 0.0)
+                                + candidate_trips
+                            )
 
-            if not next_same_route:
-                stop_alightings[leg.to_id] = stop_alightings.get(leg.to_id, 0.0) + transit_trips
-                if next_leg is not None and next_leg.kind == "walk":
-                    stop_transfers[leg.to_id] = stop_transfers.get(leg.to_id, 0.0) + transit_trips
+                    if not next_same_route:
+                        stop_alightings[leg.to_id] = (
+                            stop_alightings.get(leg.to_id, 0.0)
+                            + candidate_trips
+                        )
+                        if next_leg is not None and next_leg.kind == "walk":
+                            stop_transfers[leg.to_id] = (
+                                stop_transfers.get(leg.to_id, 0.0)
+                                + candidate_trips
+                            )
 
     section_loads = tuple(
         SectionLoad(
