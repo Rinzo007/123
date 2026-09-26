@@ -14,7 +14,7 @@ from .economics import (
     calculate_temporal_economics,
 )
 from .infrastructure import TrackType
-from .analytics import _service_analytics
+from .analytics import _service_analytics, _track_capacity_analytics
 from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city_demand import CityDemandConfig, build_city_demand, build_city_temporal_demand
@@ -835,6 +835,17 @@ def calculate_assignment(payload: dict) -> dict:
         if config.period_id in network.services[service_id].headway_by_period
     )
     return {
+        "track_capacity": [
+            {
+                "shared_group": item.shared_group,
+                "period_id": item.period_id,
+                "route_ids": list(item.route_ids),
+                "tph": item.tph,
+                "limit_tph": item.limit_tph,
+                "utilization": item.utilization,
+            }
+            for item in _track_capacity_analytics(network)
+        ],
         "services": [
             {
                 "service_id": item.service_id,
