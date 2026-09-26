@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class PeriodTimetable:
     period_id: str
-    departures_minute: tuple[int, ...]
+    departures_minute: tuple[float, ...]
 
     def __post_init__(self) -> None:
         if any(value < 0 or value >= 1440 for value in self.departures_minute):
@@ -48,10 +48,10 @@ def generate_service_timetable(
             raise ValueError("Invalid period window")
 
         first = start_minute + ((offset_minute - start_minute) % headway)
-        departures: list[int] = []
+        departures: list[float] = []
         current = first
         while current < end_minute:
-            departures.append(int(current))
+            departures.append(float(current))
             current += headway
 
         result.append(PeriodTimetable(period_id, tuple(departures)))
