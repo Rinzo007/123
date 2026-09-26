@@ -1379,6 +1379,35 @@ export function App() {
                   <div className="small-label scenario-section-count">
                     Изменений по участкам: {scenarioComparison.comparison.sections.length}
                   </div>
+                  {scenarioComparison.comparison.services.length > 0 && (
+                    <div className="scenario-services-wrap">
+                      <div className="small-label">Линии по периодам</div>
+                      <table className="scenario-table">
+                        <thead>
+                          <tr>
+                            <th>Линия</th>
+                            <th>Период</th>
+                            <th>Пассажиры Δ</th>
+                            <th>PLF Δ</th>
+                            <th>Парк Δ</th>
+                            <th>Интервал Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scenarioComparison.comparison.services.map((item) => (
+                            <tr key={item.service_id + ":" + item.period_id}>
+                              <td>{item.route_id}</td>
+                              <td>{item.period_id}</td>
+                              <td>{item.riders_delta >= 0 ? "+" : ""}{item.riders_delta.toFixed(0)}</td>
+                              <td>{item.peak_load_factor_delta >= 0 ? "+" : ""}{(item.peak_load_factor_delta * 100).toFixed(1)} п.п.</td>
+                              <td>{item.fleet_delta >= 0 ? "+" : ""}{item.fleet_delta.toFixed(0)}</td>
+                              <td>{item.effective_headway_delta >= 0 ? "+" : ""}{item.effective_headway_delta.toFixed(1)} мин</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
