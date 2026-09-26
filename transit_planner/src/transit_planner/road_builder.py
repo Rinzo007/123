@@ -49,7 +49,7 @@ def build_road_graph(
         end = record.geometry.points[-1]
         from_node = node_for(start.x, start.y)
         to_node = node_for(end.x, end.y)
-        length_m = record.geometry.length * coordinate_to_metre
+        _length_m(record, coordinate_to_metre)
         graph.add_edge(
             RoadEdge(
                 record.id,
@@ -180,6 +180,12 @@ def build_topological_road_graph(
     )
 
 
+def _length_m(record: RoadRecord, coordinate_to_metre: float) -> float:
+    if record.length_m is not None:
+        return record.length_m
+    return record.geometry.length * coordinate_to_metre
+
+
 def _normalized_refs(refs: tuple[ConnectorRef, ...]) -> tuple[ConnectorRef, ...]:
     return tuple(sorted(refs, key=lambda ref: ref.at))
 
@@ -194,7 +200,7 @@ def _add_fallback_segment(
     end = record.geometry.points[-1]
     from_node = endpoint_node(start.x, start.y)
     to_node = endpoint_node(end.x, end.y)
-    length_m = record.geometry.length * coordinate_to_metre
+    _length_m(record, coordinate_to_metre)
     graph.add_edge(
         RoadEdge(
             record.id,
