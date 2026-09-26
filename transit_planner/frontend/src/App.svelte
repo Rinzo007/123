@@ -1,0 +1,983 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
+  import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
+  import {
+    createTimetable,
+    loadOvertureNetwork,
+    loadOvertureRoute,
+    validateNetwork,
+    calculateAssignment,
+    calculateCityAssignment,
+    calculateEconomics,
+    loadDemandStreets,
+    loadPopulationZones,
+    compareScenarios,
+    type ScenarioPayload,
+  } from "./api";
+  import type { NetworkPayload, StopDraft, TransitMode } from "./types";
+  import { loadProject, loadUiSettings, saveProject, saveUiSettings } from "./storage";
+
+  const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
+  const MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
+
+  const MODE_LABELS: Record<TransitMode, string> = {
+    bus: "Автобус",
+    tram: "Трамвай",
+    metro: "Метро",
+    rail: "Железная дорога",
+  };
+
+  const MODE_CAPACITY: Record<TransitMode, number> = {
+    bus: 90,
+    tram: 250,
+    metro: 750,
+    rail: 1000,
+  };
+
+  const PERIODS = [
+    { id: "early", start_minute: 240, end_minute: 360 },
+    { id: "am", start_minute: 360, end_minute: 540 },
+    { id: "mid", start_minute: 540, end_minute: 900 },
+    { id: "pm", start_minute: 900, end_minute: 1140 },
+    { id: "eve", start_minute: 1140, end_minute: 1440 },
+  ];
+
+  type ProjectFile = {
+    format: "transit-planner-project";
+    version: number;
+    routeName: string;
+    mode: TransitMode;
+    headways: Record<string, number>;
+    stops: StopDraft[];
+    network: NetworkPayload;
+    roadRoute?: FeatureCollection<LineString, object> | null;
+    economics?: { farePerTransitTrip?: number; annualDays?: number };
+    scenarioBase?: {
+      network: NetworkPayload;
+      origin: { lon: number; lat: number };
+      destination: { lon: number; lat: number };
+      trips: number;
+      farePerTransitTrip: number;
+      annualDays: number;
+    } | null;
+  };
+
+  let mapContainer: HTMLDivElement;
+  let mapRef: MapLibreMap | null = null;
+  let mapReady = false;
+  let fileInput: HTMLInputElement;
+  let evaluationWorker: Worker | null = null;
+
+  let stops: StopDraft[] = [];
+  let mode: TransitMode = "bus";
+  let routeName = "Новый маршрут";
+  let headways: Record<string, number> = { early: 20, am: 10, mid: 12, pm: 10, eve: 20 };
+  let previewTrips = 1000;
+  let farePerTransitTrip = 0;
+  let annualDays = 365;
+
+  let cityRoads: FeatureCollection | null = null;
+  let cityConnectors: FeatureCollection | null = null;
+  let cityStops: FeatureCollection | null = null;
+  let cityPlaces: FeatureCollection | null = null;
+  let populationZones: FeatureCollection | null = null;
+  let demandStreets: FeatureCollection | null = null;
+  let roadRoute: FeatureCollection<LineString, object> | null = null;
+
+  let showRoads = true;
+  let showRoadSpeed = false;
+  let showStops = true;
+  let showPlaces = true;
+  let showConnectors = false;
+  let showPassengerFlow = true;
+  let showStationLoads = true;
+  let showDemandStreets = true;
+  let showPopulation = false;
+  let drawMode = false;
+  let viewMode: "map" | "network" = "map";
+
+  let assignmentResult: Awaited<ReturnType<typeof calculateAssignment>> | null = null;
+  let cityAssignmentMeta: Awaited<ReturnType<typeof calculateCityAssignment>>["data"] | null = null;
+  let cityAssignmentPeriods: Awaited<ReturnType<typeof calculateCityAssignment>>["periods"] = [];
+  let economicsResult: Awaited<ReturnType<typeof calculateEconomics>> | null = null;
+  let scenarioBase: ProjectFile["scenarioBase"] = null;
+  let scenarioComparison: Awaited<ReturnType<typeof compareScenarios>> | null = null;
+  let timetable: Awaited<ReturnType<typeof createTimetable>> | null = null;
+
+  let evaluationSummary = { lines: 0, stops: 0, dailyDepartures: 0 };
+  let busy = false;
+  let message = "Готово к редактированию";
+  let initialized = false;
+
+  function toLocalMeters(lon: number, lat: number, originLon: number, originLat: number) {
+    const earthRadius = 6378137;
+    const cosLat = Math.cos((originLat * Math.PI) / 180);
+    return {
+      x: ((lon - originLon) * Math.PI) / 180 * earthRadius * cosLat,
+      y: ((lat - originLat) * Math.PI) / 180 * earthRadius,
+    };
+  }
+
+  function buildNetworkPayload(): NetworkPayload {
+    const origin = stops[0] ?? { lon: DEFAULT_CENTER[0], lat: DEFAULT_CENTER[1] };
+    const metricStops = stops.map((stop) => ({
+      id: stop.id,
+      name: stop.name,
+      location: toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat),
+      is_station: false,
+    }));
+
+    const coordinates = roadRoute?.features[0]?.geometry.coordinates ?? [];
+    const geometry = coordinates.length >= 2
+      ? { points: coordinates.map(([lon, lat]) => toLocalMeters(lon, lat, origin.lon, origin.lat)) }
+      : metricStops.length >= 2
+        ? { points: metricStops.map((stop) => stop.location) }
+        : null;
+
+    const vehicleType = {
+      id: `vehicle-${mode}`,
+      name: MODE_LABELS[mode],
+      mode,
+      capacity: MODE_CAPACITY[mode],
+      operating_cost_per_km: 0,
+    };
+
+    return {
+      origin_lon: origin.lon,
+      origin_lat: origin.lat,
+      stops: metricStops,
+      routes: stops.length >= 2
+        ? [{ id: "draft-route", name: routeName, mode, stop_ids: stops.map((stop) => stop.id), geometry }]
+        : [],
+      vehicle_types: [vehicleType],
+      periods: PERIODS,
+      services: stops.length >= 2
+        ? [{
+            id: "draft-service",
+            route_id: "draft-route",
+            vehicle_type_id: vehicleType.id,
+            headway_by_period: { ...headways },
+          }]
+        : [],
+    };
+  }
+
+  let network: NetworkPayload = buildNetworkPayload();
+
+  $: network = buildNetworkPayload();
+
+  $: routeRows = network.routes.map((route) => {
+    const service = network.services.find((item) => item.route_id === route.id);
+    const vehicle = network.vehicle_types.find((item) => item.id === service?.vehicle_type_id);
+    return { route, service, vehicle };
+  });
+
+  $: totalDailyDepartures = network.services.reduce((sum, service) =>
+    sum + Object.entries(service.headway_by_period).reduce((periodSum, [periodId, headway]) => {
+      const period = network.periods.find((item) => item.id === periodId);
+      return !period || headway <= 0 ? periodSum : periodSum + Math.ceil((period.end_minute - period.start_minute) / headway);
+    }, 0), 0);
+
+  function stopsGeoJSON(): FeatureCollection<GeoJSONPoint, { id: string; name: string }> {
+    return {
+      type: "FeatureCollection",
+      features: stops.map((stop) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [stop.lon, stop.lat] },
+        properties: { id: stop.id, name: stop.name },
+      })),
+    };
+  }
+
+  function routeGeoJSON(): FeatureCollection<LineString, object> {
+    return {
+      type: "FeatureCollection",
+      features: stops.length >= 2
+        ? [{
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: stops.map((stop) => [stop.lon, stop.lat]) },
+            properties: {},
+          }]
+        : [],
+    };
+  }
+
+  function assignmentSectionGeoJSON(): FeatureCollection<LineString, Record<string, unknown>> {
+    if (!assignmentResult) return { type: "FeatureCollection", features: [] };
+    const byId = new Map(stops.map((stop) => [stop.id, stop]));
+    return {
+      type: "FeatureCollection",
+      features: assignmentResult.section_loads.flatMap((section) => {
+        const from = byId.get(section.from_stop_id);
+        const to = byId.get(section.to_stop_id);
+        return from && to
+          ? [{
+              type: "Feature",
+              geometry: { type: "LineString", coordinates: [[from.lon, from.lat], [to.lon, to.lat]] },
+              properties: section,
+            }]
+          : [];
+      }),
+    };
+  }
+
+  function assignmentStopGeoJSON(): FeatureCollection<GeoJSONPoint, Record<string, unknown>> {
+    if (!assignmentResult) return { type: "FeatureCollection", features: [] };
+    const byId = new Map(stops.map((stop) => [stop.id, stop]));
+    return {
+      type: "FeatureCollection",
+      features: assignmentResult.stop_flows.flatMap((flow) => {
+        const stop = byId.get(flow.stop_id);
+        return stop
+          ? [{
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [stop.lon, stop.lat] },
+              properties: flow,
+            }]
+          : [];
+      }),
+    };
+  }
+
+  function emptyPoints(): FeatureCollection<GeoJSONPoint> {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  function commitStops(next: StopDraft[]) {
+    stops = next;
+    roadRoute = null;
+    assignmentResult = null;
+    demandStreets = null;
+    scenarioComparison = null;
+  }
+
+  function addStop(event: MapMouseEvent) {
+    if (!drawMode) return;
+    const index = stops.length + 1;
+    commitStops([...stops, {
+      id: `stop-${Date.now()}-${index}`,
+      name: `Остановка ${index}`,
+      lon: event.lngLat.lng,
+      lat: event.lngLat.lat,
+    }]);
+  }
+
+  function removeStop(id: string) {
+    commitStops(stops.filter((stop) => stop.id !== id));
+  }
+
+  function clearRoute() {
+    stops = [];
+    roadRoute = null;
+    assignmentResult = null;
+    demandStreets = null;
+    scenarioComparison = null;
+    economicsResult = null;
+    timetable = null;
+    message = "Маршрут очищен";
+  }
+
+  async function loadCityData() {
+    if (!mapRef) return;
+    busy = true;
+    message = "Загрузка Overture для текущей области…";
+    try {
+      const bounds = mapRef.getBounds();
+      const data = await loadOvertureNetwork(
+        bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+      );
+      cityRoads = data.roads;
+      cityConnectors = data.connectors;
+      cityStops = data.stops;
+      cityPlaces = data.places;
+      try {
+        populationZones = await loadPopulationZones(
+          bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+        );
+      } catch {
+        populationZones = null;
+      }
+      message = `Overture ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка загрузки Overture";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function buildRoadRoute() {
+    if (!mapRef || stops.length < 2) return;
+    busy = true;
+    message = "Построение маршрута по Overture…";
+    try {
+      const bounds = mapRef.getBounds();
+      const data = await loadOvertureRoute(
+        stops.map((stop) => ({ lon: stop.lon, lat: stop.lat })),
+        bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+      );
+      roadRoute = {
+        type: "FeatureCollection",
+        features: [{ type: "Feature", geometry: data.geometry, properties: data.properties }],
+      };
+      message = `Маршрут Overture: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`;
+    } catch (error) {
+      roadRoute = null;
+      message = error instanceof Error ? error.message : "Ошибка построения маршрута";
+    } finally {
+      busy = false;
+    }
+  }
+
+  function previewZones() {
+    const origin = stops[0];
+    if (!origin) return [];
+    return stops.map((stop) => {
+      const point = toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat);
+      return { id: stop.id, centroid_x: point.x, centroid_y: point.y };
+    });
+  }
+
+  async function runPreviewAssignment() {
+    if (stops.length < 2) return;
+    busy = true;
+    message = "Расчёт проверочного пассажиропотока…";
+    try {
+      const demand = [{
+        origin_zone_id: stops[0].id,
+        destination_zone_id: stops[stops.length - 1].id,
+        trips_per_day: previewTrips,
+        purpose: "all",
+      }];
+      const result = await calculateAssignment(network, demand, previewZones(), "am");
+      assignmentResult = result;
+      demandStreets = await loadDemandStreets(demand, previewZones(), stops[0].lon, stops[0].lat);
+      message = `Пассажиропоток рассчитан: transit ${(result.metrics.transit_share * 100).toFixed(1)}%`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка расчёта пассажиропотока";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function runCityAssignment() {
+    if (!mapRef || stops.length < 2) return;
+    busy = true;
+    message = "Расчёт городской сети по WorldPop + Overture…";
+    try {
+      const bounds = mapRef.getBounds();
+      const result = await calculateCityAssignment(
+        network,
+        bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+        network.origin_lon ?? DEFAULT_CENTER[0],
+        network.origin_lat ?? DEFAULT_CENTER[1],
+        "am",
+        Math.max(0, farePerTransitTrip),
+        Math.max(1, Math.min(366, Math.round(annualDays))),
+      );
+      assignmentResult = result.assignment;
+      cityAssignmentMeta = result.data;
+      cityAssignmentPeriods = result.periods;
+      economicsResult = {
+        scenario_id: "citywide",
+        name: "Городская сеть",
+        economics: result.economics,
+      };
+      message = `Городской расчёт: ${result.data.od_pairs} OD-пар`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка городского расчёта";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function runEconomics() {
+    if (stops.length < 2) return;
+    busy = true;
+    message = "Расчёт экономики…";
+    try {
+      const result = await calculateEconomics(
+        network,
+        [{
+          origin_zone_id: stops[0].id,
+          destination_zone_id: stops[stops.length - 1].id,
+          trips_per_day: previewTrips,
+          purpose: "all",
+        }],
+        previewZones(),
+        "am",
+        Math.max(0, farePerTransitTrip),
+        Math.max(1, Math.min(366, Math.round(annualDays))),
+      );
+      economicsResult = result;
+      message = "Экономика рассчитана";
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка расчёта экономики";
+    } finally {
+      busy = false;
+    }
+  }
+
+  function makeScenarioPayload(id: string, name: string, scenarioNetwork: NetworkPayload, origin: StopDraft, destination: StopDraft, trips: number, fare: number, days: number): ScenarioPayload {
+    const originLon = scenarioNetwork.origin_lon ?? origin.lon;
+    const originLat = scenarioNetwork.origin_lat ?? origin.lat;
+    const toZone = (stop: StopDraft, zoneId: string) => {
+      const point = toLocalMeters(stop.lon, stop.lat, originLon, originLat);
+      return { id: zoneId, centroid_x: point.x, centroid_y: point.y };
+    };
+    return {
+      id,
+      name,
+      network: scenarioNetwork,
+      demand: [{
+        origin_zone_id: "scenario-origin",
+        destination_zone_id: "scenario-destination",
+        trips_per_day: trips,
+        purpose: "all",
+      }],
+      zones: [
+        toZone(origin, "scenario-origin"),
+        toZone(destination, "scenario-destination"),
+      ],
+      config: { period_id: "am", max_access_distance_m: 1500 },
+      economics_config: {
+        period_id: "am",
+        fare_per_transit_trip: fare,
+        annual_days: days,
+      },
+    };
+  }
+
+  function captureScenarioBase() {
+    if (stops.length < 2) return;
+    scenarioBase = {
+      network: structuredClone(network),
+      origin: { lon: stops[0].lon, lat: stops[0].lat },
+      destination: { lon: stops[stops.length - 1].lon, lat: stops[stops.length - 1].lat },
+      trips: previewTrips,
+      farePerTransitTrip,
+      annualDays,
+    };
+    scenarioComparison = null;
+    message = "Базовый сценарий зафиксирован";
+  }
+
+  async function compareWithScenarioBase() {
+    if (!scenarioBase || stops.length < 2) return;
+    busy = true;
+    message = "Сравнение базового и текущего сценариев…";
+    try {
+      const origin: StopDraft = { id: "origin", name: "Источник", ...scenarioBase.origin };
+      const destination: StopDraft = { id: "destination", name: "Назначение", ...scenarioBase.destination };
+      const result = await compareScenarios(
+        makeScenarioPayload("base", "Базовый сценарий", scenarioBase.network, origin, destination, scenarioBase.trips, scenarioBase.farePerTransitTrip, scenarioBase.annualDays),
+        makeScenarioPayload("alternative", "Текущий сценарий", network, origin, destination, scenarioBase.trips, farePerTransitTrip, annualDays),
+      );
+      scenarioComparison = result;
+      message = "Сравнение сценариев завершено";
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка сравнения сценариев";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function generateTimetable() {
+    const service = network.services[0];
+    if (!service) return;
+    busy = true;
+    message = "Формирование расписания…";
+    try {
+      timetable = await createTimetable(service.id, network.periods, service.headway_by_period);
+      message = "Расписание сформировано";
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Ошибка формирования расписания";
+    } finally {
+      busy = false;
+    }
+  }
+
+  function projectData(): ProjectFile {
+    return {
+      format: "transit-planner-project",
+      version: 3,
+      routeName,
+      mode,
+      headways,
+      stops,
+      network,
+      roadRoute,
+      economics: { farePerTransitTrip, annualDays },
+      scenarioBase,
+    };
+  }
+
+  function exportJson() {
+    const blob = new Blob([JSON.stringify(projectData(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "transit-network.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    void saveProject("current", projectData());
+    message = "JSON сети экспортирован";
+  }
+
+  function applyProject(project: ProjectFile) {
+    if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
+    const version = Number(project.version ?? 1);
+    if (version < 1 || version > 3) throw new Error("Неподдерживаемая версия проекта");
+    routeName = String(project.routeName ?? "Новый маршрут");
+    mode = (project.mode ?? "bus") as TransitMode;
+    headways = { ...headways, ...(project.headways ?? {}) };
+    stops = Array.isArray(project.stops) ? project.stops : [];
+    roadRoute = version >= 3 && project.roadRoute?.type === "FeatureCollection" ? project.roadRoute : null;
+    const economics = project.economics ?? {};
+    farePerTransitTrip = Number.isFinite(Number(economics.farePerTransitTrip)) ? Math.max(0, Number(economics.farePerTransitTrip)) : 0;
+    annualDays = Number.isFinite(Number(economics.annualDays)) ? Math.max(1, Math.min(366, Math.round(Number(economics.annualDays)))) : 365;
+    scenarioBase = version >= 2 && project.scenarioBase?.network ? project.scenarioBase : null;
+    assignmentResult = null;
+    economicsResult = null;
+    scenarioComparison = null;
+    timetable = null;
+    message = "Проект загружен";
+  }
+
+  function loadJsonFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        applyProject(JSON.parse(String(reader.result)) as ProjectFile);
+      } catch (error) {
+        message = error instanceof Error ? error.message : "Не удалось загрузить проект";
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  onMount(async () => {
+    const settings = loadUiSettings({
+      showRoads: true,
+      showRoadSpeed: false,
+      showStops: true,
+      showPlaces: true,
+      showConnectors: false,
+      showPassengerFlow: true,
+      showStationLoads: true,
+      showDemandStreets: true,
+      showPopulation: false,
+    });
+    showRoads = Boolean(settings.showRoads);
+    showRoadSpeed = Boolean(settings.showRoadSpeed);
+    showStops = Boolean(settings.showStops);
+    showPlaces = Boolean(settings.showPlaces);
+    showConnectors = Boolean(settings.showConnectors);
+    showPassengerFlow = Boolean(settings.showPassengerFlow);
+    showStationLoads = Boolean(settings.showStationLoads);
+    showDemandStreets = Boolean(settings.showDemandStreets);
+    showPopulation = Boolean(settings.showPopulation);
+
+    try {
+      const saved = await loadProject("current");
+      if (saved && typeof saved === "object") applyProject(saved as ProjectFile);
+    } catch {
+      // First launch or blocked IndexedDB.
+    }
+
+    evaluationWorker = new Worker(new URL("./workers/evaluation.worker.ts", import.meta.url), { type: "module" });
+    evaluationWorker.onmessage = (event: MessageEvent<typeof evaluationSummary>) => {
+      evaluationSummary = event.data;
+    };
+    evaluationWorker.onerror = () => {
+      evaluationWorker = null;
+    };
+
+    const map = new MapLibreMap({
+      container: mapContainer,
+      style: MAP_STYLE,
+      center: DEFAULT_CENTER,
+      zoom: 11,
+    });
+    mapRef = map;
+    map.addControl(new NavigationControl(), "top-right");
+
+    map.on("load", () => {
+      const blank = { type: "FeatureCollection", features: [] };
+      map.addSource("city-roads", { type: "geojson", data: blank });
+      map.addLayer({ id: "city-road-lines", type: "line", source: "city-roads", paint: { "line-color": "#9ca3af", "line-width": 1.2, "line-opacity": 0.65 } });
+      map.addSource("city-connectors", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "city-connector-circles", type: "circle", source: "city-connectors", paint: { "circle-radius": 2.5, "circle-color": "#f59e0b", "circle-opacity": 0.7 } });
+      map.addSource("city-places", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "city-place-circles", type: "circle", source: "city-places", paint: { "circle-radius": 3, "circle-color": "#8b5cf6", "circle-opacity": 0.5 } });
+      map.addSource("city-stops", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "city-stop-circles", type: "circle", source: "city-stops", paint: { "circle-radius": 3.5, "circle-color": "#6b7280", "circle-opacity": 0.65, "circle-stroke-width": 1, "circle-stroke-color": "#fff" } });
+      map.addSource("population-zones", { type: "geojson", data: blank });
+      map.addLayer({ id: "population-zone-points", type: "circle", source: "population-zones", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "population"], 0, 2, 500, 5, 2000, 9, 5000, 15], "circle-opacity": 0.28, "circle-color": "#0f766e" } });
+      map.addSource("demand-streets", { type: "geojson", data: blank });
+      map.addLayer({ id: "demand-street-lines", type: "line", source: "demand-streets", paint: { "line-width": ["interpolate", ["linear"], ["get", "flow_weight"], 0, 1, 100, 3, 500, 7, 1000, 11], "line-opacity": 0.45, "line-color": "#7c3aed" } });
+      map.addSource("analysis-sections", { type: "geojson", data: blank });
+      map.addLayer({ id: "analysis-section-loads", type: "line", source: "analysis-sections", paint: { "line-width": 6, "line-opacity": 0.82, "line-color": ["interpolate", ["linear"], ["get", "load_ratio"], 0, "#22c55e", 0.7, "#eab308", 1, "#f97316", 1.5, "#dc2626"] } });
+      map.addSource("analysis-stops", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-stops", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      map.addSource("draft-route", { type: "geojson", data: routeGeoJSON() });
+      map.addLayer({ id: "draft-route-line", type: "line", source: "draft-route", paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2563eb" } });
+      map.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
+      map.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      mapReady = true;
+    });
+    map.on("click", addStop);
+    initialized = true;
+  });
+
+  $: if (evaluationWorker && network) {
+    evaluationWorker.postMessage({ kind: "summary", network });
+  }
+
+  $: if (initialized) {
+    saveUiSettings({
+      showRoads,
+      showRoadSpeed,
+      showStops,
+      showPlaces,
+      showConnectors,
+      showPassengerFlow,
+      showStationLoads,
+      showDemandStreets,
+      showPopulation,
+    });
+    void saveProject("current", projectData());
+  }
+
+  $: if (mapRef && mapReady) {
+    const source = (id: string) => mapRef?.getSource(id) as GeoJSONSource | undefined;
+    source("draft-route")?.setData(roadRoute ?? routeGeoJSON());
+    source("draft-stops")?.setData(stopsGeoJSON());
+    if (cityRoads) source("city-roads")?.setData(cityRoads as any);
+    if (cityConnectors) source("city-connectors")?.setData(cityConnectors as any);
+    if (cityStops) source("city-stops")?.setData(cityStops as any);
+    if (cityPlaces) source("city-places")?.setData(cityPlaces as any);
+    if (populationZones) source("population-zones")?.setData(populationZones as any);
+    if (demandStreets) source("demand-streets")?.setData(demandStreets as any);
+    source("analysis-sections")?.setData(assignmentSectionGeoJSON() as any);
+    source("analysis-stops")?.setData(assignmentStopGeoJSON() as any);
+
+    const setVisibility = (id: string, visible: boolean) => {
+      if (mapRef?.getLayer(id)) mapRef.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+    };
+    setVisibility("city-road-lines", showRoads);
+    setVisibility("city-connector-circles", showConnectors);
+    setVisibility("city-stop-circles", showStops);
+    setVisibility("city-place-circles", showPlaces);
+    setVisibility("population-zone-points", showPopulation);
+    setVisibility("demand-street-lines", showDemandStreets);
+    setVisibility("analysis-section-loads", showPassengerFlow);
+    setVisibility("analysis-stop-loads", showStationLoads);
+    if (mapRef.getLayer("city-road-lines")) {
+      mapRef.setPaintProperty("city-road-lines", "line-color",
+        showRoadSpeed
+          ? ["interpolate", ["linear"], ["get", "speed_kph"], 10, "#ef4444", 30, "#eab308", 50, "#22c55e", 90, "#3b82f6"]
+          : "#9ca3af");
+    }
+  }
+
+  function pct(value: number) {
+    return (value * 100).toFixed(1);
+  }
+</script>
+
+<svelte:head>
+  <title>Transit Planner</title>
+  <meta name="description" content="Проектирование и моделирование транспортной сети" />
+</svelte:head>
+
+<div class="app-shell">
+  <header class="topbar">
+    <div>
+      <div class="brand">Transit Planner</div>
+      <div class="subtitle">Проектирование транспортной сети</div>
+    </div>
+    <div class="actions">
+      <button class:active-toggle={viewMode === "map"} on:click={() => viewMode = "map"}>Карта</button>
+      <button class:active-toggle={viewMode === "network"} on:click={() => viewMode = "network"}>Сеть</button>
+      <button on:click={loadCityData} disabled={busy}>Загрузить Overture</button>
+      <button on:click={buildRoadRoute} disabled={busy || stops.length < 2}>Построить по дорогам</button>
+      <button class="primary" class:active={drawMode} on:click={() => drawMode = !drawMode}>
+        {drawMode ? "Завершить рисование" : "Добавить остановки"}
+      </button>
+      <button on:click={async () => {
+        busy = true;
+        try {
+          const result = await validateNetwork(network);
+          message = result.valid ? "Сеть корректна" : `Ошибки: ${result.errors.join("; ")}`;
+        } catch (error) {
+          message = error instanceof Error ? error.message : "Ошибка проверки";
+        } finally {
+          busy = false;
+        }
+      }} disabled={busy || stops.length < 2}>Проверить сеть</button>
+      <button on:click={captureScenarioBase} disabled={busy || stops.length < 2}>Зафиксировать базовый</button>
+      <button on:click={compareWithScenarioBase} disabled={busy || !scenarioBase || stops.length < 2}>Сравнить</button>
+      <button on:click={exportJson}>Сохранить</button>
+      <button on:click={() => fileInput?.click()}>Открыть</button>
+      <input bind:this={fileInput} type="file" accept="application/json" hidden on:change={(event) => {
+        const file = (event.currentTarget as HTMLInputElement).files?.[0];
+        if (file) loadJsonFile(file);
+        (event.currentTarget as HTMLInputElement).value = "";
+      }} />
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <section>
+        <div class="section-title">Маршрут</div>
+        <label>Название<input bind:value={routeName} /></label>
+        <label>Вид транспорта
+          <select bind:value={mode}>
+            {#each Object.entries(MODE_LABELS) as [value, label]}
+              <option value={value}>{label}</option>
+            {/each}
+          </select>
+        </label>
+
+        <div class="preview-demand">
+          <div class="section-title">Проверочный расчёт</div>
+          <label>Спрос, поездок/сутки<input type="number" min="1" max="100000" bind:value={previewTrips} /></label>
+          <button class="primary" on:click={runPreviewAssignment} disabled={busy || stops.length < 2}>Рассчитать пассажиропоток</button>
+          <button on:click={runEconomics} disabled={busy || stops.length < 2}>Рассчитать экономику</button>
+          <button on:click={runCityAssignment} disabled={busy || stops.length < 2}>Рассчитать городскую сеть</button>
+          <label>Тариф за поездку<input type="number" min="0" step="0.01" bind:value={farePerTransitTrip} /></label>
+          <label>Дней в году<input type="number" min="1" max="366" bind:value={annualDays} /></label>
+        </div>
+
+        <div class="period-headways">
+          <div class="section-title">Интервалы</div>
+          {#each PERIODS as period}
+            <label>{period.id}
+              <input type="number" min="1" max="120" step="1" bind:value={headways[period.id]} />
+            </label>
+          {/each}
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">Остановки ({stops.length})</div>
+        {#if stops.length === 0}
+          <div class="empty">Включите «Добавить остановки» и кликайте по карте.</div>
+        {:else}
+          {#each stops as stop, index}
+            <div class="stop-row">
+              <div><strong>{index + 1}. {stop.name}</strong><small>{stop.lon.toFixed(5)}, {stop.lat.toFixed(5)}</small></div>
+              <button on:click={() => removeStop(stop.id)}>Удалить</button>
+            </div>
+          {/each}
+          <button on:click={clearRoute}>Очистить маршрут</button>
+        {/if}
+      </section>
+
+      <section>
+        <div class="section-title">Слои</div>
+        <label class="check"><input type="checkbox" bind:checked={showRoads} /> Дороги</label>
+        <label class="check"><input type="checkbox" bind:checked={showRoadSpeed} /> Скорости дорог</label>
+        <label class="check"><input type="checkbox" bind:checked={showStops} /> Остановки Overture</label>
+        <label class="check"><input type="checkbox" bind:checked={showPlaces} /> Places Overture</label>
+        <label class="check"><input type="checkbox" bind:checked={showConnectors} /> Connectors</label>
+        <label class="check"><input type="checkbox" bind:checked={showPopulation} /> WorldPop</label>
+        <label class="check"><input type="checkbox" bind:checked={showDemandStreets} /> Demand streets</label>
+        <label class="check"><input type="checkbox" bind:checked={showPassengerFlow} /> Пассажиропоток</label>
+        <label class="check"><input type="checkbox" bind:checked={showStationLoads} /> Нагрузка остановок</label>
+      </section>
+
+      <div class="status" class:busy>{message}</div>
+    </aside>
+
+    <main class="main-panel">
+      {#if viewMode === "map"}
+        <div class="map-wrap">
+          <div class="map" bind:this={mapContainer}></div>
+          {#if drawMode}<div class="map-hint">Кликайте по карте, чтобы добавлять остановки</div>{/if}
+        </div>
+      {:else}
+        <div class="network-view">
+          <div class="network-header">
+            <div>
+              <h2>Сеть</h2>
+              <p>Линии, частота, парк и результаты расчёта</p>
+              <button on:click={generateTimetable} disabled={busy || network.services.length === 0}>Сформировать расписание</button>
+            </div>
+            <div class="network-kpis">
+              <div><span>Линий</span><b>{evaluationSummary.lines}</b></div>
+              <div><span>Отправлений/сутки</span><b>{evaluationSummary.dailyDepartures}</b></div>
+              <div><span>Остановок</span><b>{evaluationSummary.stops}</b></div>
+            </div>
+          </div>
+
+          {#if routeRows.length === 0}
+            <div class="network-empty">Добавьте минимум две остановки.</div>
+          {:else}
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Линия</th><th>Режим</th><th>Остановки</th><th>Вместимость</th>{#each PERIODS as period}<th>{period.id}</th>{/each}</tr></thead>
+                <tbody>
+                  {#each routeRows as row}
+                    <tr>
+                      <td><strong>{row.route.name}</strong></td>
+                      <td>{MODE_LABELS[row.route.mode]}</td>
+                      <td>{row.route.stop_ids.length}</td>
+                      <td>{row.vehicle?.capacity ?? "—"}</td>
+                      {#each PERIODS as period}<td>{row.service?.headway_by_period[period.id] ? `${row.service.headway_by_period[period.id]} мин` : "—"}</td>{/each}
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+
+          {#if cityAssignmentMeta}
+            <div class="analytics-panel">
+              <div class="section-title">Городской расчёт</div>
+              <div class="kpi-grid">
+                <div><span>Зоны</span><b>{cityAssignmentMeta.zones}</b></div>
+                <div><span>OD-пары</span><b>{cityAssignmentMeta.od_pairs}</b></div>
+                <div><span>Спрос</span><b>{cityAssignmentMeta.total_demand_trips.toFixed(0)}</b></div>
+                <div><span>Transit</span><b>{pct(assignmentResult?.metrics.transit_share ?? 0)}%</b></div>
+              </div>
+            </div>
+          {/if}
+
+          {#if cityAssignmentPeriods.length > 0}
+            <div class="analytics-panel">
+              <div class="section-title">Линия × период</div>
+              {#each cityAssignmentPeriods as period}
+                <div class="period-card">
+                  <strong>{period.period_id}</strong>
+                  <span>спрос {period.demand_trips.toFixed(0)}</span>
+                  <span>transit {pct(period.transit_share)}%</span>
+                  <span>load {pct(period.max_load_ratio)}%</span>
+                  <span>opex {period.economics.daily_operating_cost.toFixed(1)}</span>
+                  {#each period.services as service}
+                    <span>{service.route_id}: {service.riders.toFixed(0)} пасс. · PLF {pct(service.peak_load_factor)}% · парк {service.fleet}</span>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if assignmentResult}
+            <div class="analytics-panel">
+              <div class="section-title">Пассажиропоток</div>
+              <div class="kpi-grid">
+                <div><span>Transit</span><b>{assignmentResult.metrics.transit_trips.toFixed(1)}</b></div>
+                <div><span>Car</span><b>{assignmentResult.metrics.car_trips.toFixed(1)}</b></div>
+                <div><span>Walk</span><b>{assignmentResult.metrics.walk_trips.toFixed(1)}</b></div>
+                <div><span>Bike</span><b>{assignmentResult.metrics.bike_trips.toFixed(1)}</b></div>
+              </div>
+              {#if assignmentResult.loss_reasons.length > 0}
+                <div class="loss-list">
+                  {#each assignmentResult.loss_reasons as loss}<div class="loss-row"><span>{loss.reason}</span><b>{loss.trips.toFixed(1)}</b></div>{/each}
+                </div>
+              {/if}
+            </div>
+
+            {#if assignmentResult.track_capacity.some((item) => item.route_ids.length > 1)}
+              <div class="analytics-panel">
+                <div class="section-title">Совместные пути</div>
+                {#each assignmentResult.track_capacity.filter((item) => item.route_ids.length > 1) as item}
+                  <div class="period-card">
+                    <strong>{item.shared_group}</strong>
+                    <span>{item.period_id}</span>
+                    <span>{item.route_ids.join(", ")}</span>
+                    <span>{item.tph.toFixed(1)} отправл./ч</span>
+                    <span>лимит {item.limit_tph.toFixed(1)}</span>
+                    <span>{pct(item.utilization)}%</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+
+          {#if economicsResult}
+            <div class="analytics-panel">
+              <div class="section-title">Экономика</div>
+              <div class="kpi-grid">
+                <div><span>Транспортная работа</span><b>{economicsResult.economics.daily_vehicle_km.toFixed(1)} км/сутки</b></div>
+                <div><span>Эксплуатация</span><b>{economicsResult.economics.daily_operating_cost.toFixed(2)} / сутки</b></div>
+                <div><span>Парк</span><b>{economicsResult.economics.daily_fleet_cost.toFixed(2)} / сутки</b></div>
+                <div><span>Выручка</span><b>{economicsResult.economics.daily_fare_revenue.toFixed(2)} / сутки</b></div>
+              </div>
+            </div>
+          {/if}
+
+          {#if scenarioComparison}
+            <div class="analytics-panel">
+              <div class="section-title">Сравнение сценариев</div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Метрика</th><th>База</th><th>Текущий</th><th>Δ</th></tr></thead>
+                  <tbody>{#each scenarioComparison.comparison.metrics as item}<tr><td>{item.metric}</td><td>{item.base.toFixed(2)}</td><td>{item.alternative.toFixed(2)}</td><td>{item.delta >= 0 ? "+" : ""}{item.delta.toFixed(2)}</td></tr>{/each}</tbody>
+                </table>
+              </div>
+              <div class="small-label">Участков: {scenarioComparison.comparison.sections.length} · линий-периодов: {scenarioComparison.comparison.services.length}</div>
+              {#if scenarioComparison.comparison.services.length > 0}
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Линия</th><th>Период</th><th>Пассажиры Δ</th><th>PLF Δ</th><th>Парк Δ</th><th>Интервал Δ</th></tr></thead>
+                    <tbody>
+                      {#each scenarioComparison.comparison.services as item}
+                        <tr>
+                          <td>{item.route_id}</td><td>{item.period_id}</td>
+                          <td>{item.riders_delta >= 0 ? "+" : ""}{item.riders_delta.toFixed(0)}</td>
+                          <td>{item.peak_load_factor_delta >= 0 ? "+" : ""}{(item.peak_load_factor_delta * 100).toFixed(1)} п.п.</td>
+                          <td>{item.fleet_delta >= 0 ? "+" : ""}{item.fleet_delta.toFixed(0)}</td>
+                          <td>{item.effective_headway_delta >= 0 ? "+" : ""}{item.effective_headway_delta.toFixed(1)} мин</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if timetable}
+            <div class="analytics-panel">
+              <div class="section-title">Расписание {timetable.service_id}</div>
+              {#each timetable.periods as period}
+                <div class="period-card"><strong>{period.period_id}</strong><span>{period.departures_minute.slice(0, 12).map((minute) => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(Math.round(minute % 60)).padStart(2, "0")}`).join(", ")}</span></div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </main>
+  </div>
+</div>
+
+<style>
+  :global(html, body, #app) { height: 100%; margin: 0; }
+  :global(body) { font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f3f4f6; color: #111827; }
+  :global(button), :global(input), :global(select) { font: inherit; }
+  .app-shell { min-height: 100%; display: flex; flex-direction: column; }
+  .topbar { display: flex; gap: 16px; justify-content: space-between; align-items: center; padding: 12px 16px; background: #111827; color: #fff; }
+  .brand { font-size: 18px; font-weight: 800; }.subtitle { font-size: 12px; opacity: .7; margin-top: 2px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  button { border: 1px solid #d1d5db; background: #fff; color: #111827; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #f9fafb; } button:disabled { opacity: .5; cursor: wait; }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }.active-toggle, button.active { outline: 2px solid #60a5fa; outline-offset: 1px; }
+  .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+  .sidebar { overflow: auto; padding: 14px; background: #fff; border-right: 1px solid #e5e7eb; }.sidebar section { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+  .section-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 750; margin-bottom: 10px; }
+  label { display: grid; gap: 5px; font-size: 12px; margin-bottom: 9px; } label input, label select { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 7px; padding: 7px 8px; background: #fff; }
+  .check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; font-size: 13px; }.check input { width: auto; }
+  .stop-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #e5e7eb; border-radius: 7px; margin-bottom: 6px; }.stop-row small { display: block; color: #6b7280; margin-top: 2px; }
+  .empty { color: #6b7280; font-size: 13px; line-height: 1.4; }.status { position: sticky; bottom: 0; padding: 10px; background: #f9fafb; border-radius: 7px; font-size: 12px; }.status.busy { color: #1d4ed8; }
+  .main-panel { min-width: 0; min-height: 0; position: relative; }.map-wrap, .map { width: 100%; height: 100%; min-height: 640px; }.map-hint { position: absolute; top: 12px; left: 12px; padding: 8px 10px; background: rgba(17,24,39,.9); color: #fff; border-radius: 7px; font-size: 12px; }
+  .network-view { height: 100%; overflow: auto; padding: 20px; box-sizing: border-box; }.network-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }.network-header h2 { margin: 0 0 4px; }.network-header p { color: #6b7280; margin: 0 0 10px; }
+  .network-kpis, .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)); gap: 8px; }.kpi-grid { grid-template-columns: repeat(4, minmax(110px, 1fr)); }.network-kpis > div, .kpi-grid > div { background: #fff; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; }.network-kpis span, .kpi-grid span { display: block; color: #6b7280; font-size: 11px; }.network-kpis b, .kpi-grid b { display: block; margin-top: 4px; }
+  .network-empty, .analytics-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 12px; }.analytics-panel .section-title { margin-bottom: 12px; }
+  .table-wrap { overflow: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; } table { width: 100%; border-collapse: collapse; font-size: 12px; } th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; } th { background: #f9fafb; }
+  .period-card { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }.period-card:last-child { border-bottom: 0; }.period-card span { color: #4b5563; }.loss-list { margin-top: 10px; }.loss-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }.small-label { color: #6b7280; font-size: 11px; margin: 8px 0; }
+  @media (max-width: 1000px) { .workspace { grid-template-columns: 280px minmax(0,1fr); }.topbar { align-items: flex-start; }.network-kpis { grid-template-columns: 1fr; }.kpi-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); } }
+  @media (max-width: 760px) { .workspace { grid-template-columns: 1fr; }.sidebar { max-height: 42vh; border-right: 0; border-bottom: 1px solid #e5e7eb; }.map-wrap, .map { min-height: 58vh; }.topbar { flex-direction: column; }.actions { justify-content: flex-start; } }
+</style>
