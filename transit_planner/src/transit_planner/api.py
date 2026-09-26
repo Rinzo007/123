@@ -806,21 +806,15 @@ def city_assignment(payload: dict) -> dict:
                         "daily_vehicle_km": service.daily_vehicle_km,
                         "daily_opex": service.daily_opex,
                     }
-                    for service_id, service in (
-                        (
-                            service.service_id,
-                            service,
-                        )
-                        for service in (
-                            _service_analytics(
-                                network,
-                                service_id,
-                                item.period_id,
-                                assignment=item.result,
-                            )
-                            for service_id in network.services
-                            if item.period_id in network.services[service_id].headway_by_period
-                        )
+                    for service_id in network.services
+                    if item.period_id in network.services[service_id].headway_by_period
+                    for service in (
+                        _service_analytics(
+                            network,
+                            service_id,
+                            item.period_id,
+                            assignment=item.result,
+                        ),
                     )
                 ],
                 "economics": _economics_result_to_dict(
