@@ -127,6 +127,62 @@ class OvertureNetworkProvider:
             snap_max_distance_m=self.snap_max_distance_m,
         )
 
+    def route_points(
+        self,
+        points_wgs84: tuple[Point, ...],
+        *,
+        snap_max_distance_m: float | None = 150.0,
+    ) -> RoadRouteResult:
+        if len(points_wgs84) < 2:
+            raise ValueError("A road route needs at least two points")
+
+        origin_lon = fmean(point.x for point in points_wgs84)
+        origin_lat = fmean(point.y for point in points_wgs84)
+        from .projection import project_wgs84_point
+        metric_points = tuple(
+            project_wgs84_point(
+                point,
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+            )
+            for point in points_wgs84
+        )
+        route_stops = tuple(
+            Stop(
+                f"route-point-{index}",
+                f"Route point {index + 1}",
+                point,
+            )
+            for index, point in enumerate(metric_points)
+        )
+        snaps = snap_stops_to_road_graph(
+            route_stops,
+            self.graph,
+            max_distance=snap_max_distance_m,
+        )
+        edge_ids: list[str] = []
+        for index in range(len(route_stops) - 1):
+            start_snap = snaps[index]
+            end_snap = snaps[index + 1]
+            if start_snap.road_node_id is None or end_snap.road_node_id is None:
+                raise ValueError("A route point is too far from the road graph")
+            _, path = self.graph.shortest_path(
+                start_snap.road_node_id,
+                end_snap.road_node_id,
+            )
+            if not path:
+                raise ValueError("No road path exists between consecutive route points")
+            edge_ids.extend(path)
+
+        edge_path = tuple(edge_ids)
+        return RoadRouteResult(
+            edge_ids=edge_path,
+            geometry=self.graph.path_geometry(edge_path),
+            length_m=self.graph.path_length_m(edge_path),
+            travel_time_min=self.graph.path_travel_time_minutes(edge_path),
+            snap_distances_m=tuple(snap.distance for snap in snaps),
+        )
+
     def _origin(self, stops: tuple[Stop, ...]) -> tuple[float, float]:
         if stops:
             return (
