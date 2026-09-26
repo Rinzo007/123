@@ -183,3 +183,43 @@ export function createTimetable(
     return response.json() as Promise<TimetableResponse>;
   });
 }
+export interface AssignmentResponse {
+  metrics: {
+    total_trips: number;
+    transit_trips: number;
+    car_trips: number;
+    walk_trips: number;
+    bike_trips: number;
+    transit_share: number;
+    average_transit_time_min: number;
+    average_transfers: number;
+  };
+  iterations: number;
+  max_load_ratio: number;
+  unserved_transit_demand: number;
+  loss_reasons: Array<{ reason: string; trips: number }>;
+  route_flows: Array<{ route_id: string; boardings: number; passenger_section_traversals: number }>;
+  section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }>;
+  stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number }>;
+}
+
+export function calculateAssignment(
+  network: NetworkPayload,
+  demand: Array<{ origin_zone_id: string; destination_zone_id: string; trips_per_day: number; purpose?: string }>,
+  zones: Array<{ id: string; centroid_x: number; centroid_y: number; population?: number; jobs?: number }>,
+  periodId = "morning_peak",
+): Promise<AssignmentResponse> {
+  return fetch("/api/v1/assignment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      network,
+      demand,
+      zones,
+      config: { period_id: periodId },
+    }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось рассчитать пассажиропоток");
+    return response.json() as Promise<AssignmentResponse>;
+  });
+}
