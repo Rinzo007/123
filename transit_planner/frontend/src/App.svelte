@@ -23,6 +23,7 @@
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
+  import EvaluationPanel from "./components/EvaluationPanel.svelte";
   import { stops as stopsStore, mode as modeStore, routeName as routeNameStore, headways as headwaysStore } from "./stores/network";
   import { project as projectStore, markProjectDirty } from "./stores/project";
 
