@@ -117,6 +117,7 @@
   let busy = false;
   let message = "Готово к редактированию";
   let initialized = false;
+  let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function toLocalMeters(lon: number, lat: number, originLon: number, originLat: number) {
     const earthRadius = 6378137;
@@ -262,9 +263,21 @@
     });
   }
 
+  function scheduleProjectSave() {
+    if (!initialized) return;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
+      void saveProject("current", projectData()).then(() => markProjectClean()).catch(() => {
+        message = "Изменения остаются только в текущем сеансе";
+      });
+    }, 350);
+  }
+
   function handleProjectChange() {
     markProjectDirty();
     syncProjectStore(true);
+    scheduleProjectSave();
   }
 
   function commitStops(next: StopDraft[]) {
@@ -685,6 +698,7 @@
   });
 
   onDestroy(() => {
+    if (autosaveTimer) clearTimeout(autosaveTimer);
     disposeComputationWorkers();
     mapRef?.remove();
   });
