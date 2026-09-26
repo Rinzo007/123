@@ -18,9 +18,9 @@ api = [
 test = [
   "pytest>=8,<10",
   "duckdb>=1.4,<2",
+]
 gis = [
   "rasterio>=1.4,<2",
-]
 ]
 
 [tool.setuptools]
