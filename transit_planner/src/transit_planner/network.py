@@ -4,13 +4,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from math import ceil, hypot, isfinite
 
-from .geo import LineString, Point, minimum_curve_radius_m
+from .geo import LineString, Point
 from .infrastructure import TrackSection
 from .reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_PERIODS,
     TrackRow,
-    lateral_speed_limit_kph,
 )
 
 
@@ -207,21 +206,6 @@ class Network:
             return ()
         return geometry_points[start : end + 1]
 
-    def route_segment_curve_speed_limit_kph(
-        self,
-        route: Route,
-        index: int,
-    ) -> float:
-        points = self.route_segment_geometry_points(route, index)
-        if len(points) < 3:
-            return float("inf")
-        radius_m = minimum_curve_radius_m(points)
-        if not isfinite(radius_m):
-            return float("inf")
-        return lateral_speed_limit_kph(
-            route.mode.value,
-            radius_m,
-        )
 
     def route_segment_length_km(self, route: Route, index: int) -> float:
         left_id, right_id = route.segment_pairs()[index]
@@ -261,9 +245,6 @@ class Network:
             section = self.track_sections[section_id]
             if section.speed_limit_kph is not None:
                 speed = section.speed_limit_kph
-        curve_speed = self.route_segment_curve_speed_limit_kph(route, index)
-        if isfinite(curve_speed):
-            speed = min(speed, curve_speed)
         if speed <= 0:
             raise ValueError("Route segment speed must be positive")
         return self.route_segment_length_km(route, index) / speed * 60.0
