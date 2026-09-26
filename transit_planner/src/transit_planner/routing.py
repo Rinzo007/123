@@ -178,7 +178,10 @@ class TransitRouter:
                     serial += 1
 
             for option in options_by_stop.get(stop_id, ()):
+                route = self.network.routes[option.route_id]
                 board = current_route != option.route_id
+                if board and not route.is_stop_open(stop_id):
+                    continue
                 wait = 0.0
                 if board:
                     period = self.network.periods[period_id]
