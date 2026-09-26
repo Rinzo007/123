@@ -777,6 +777,14 @@ export function App() {
               <input type="checkbox" checked={showConnectors} onChange={(event) => setShowConnectors(event.target.checked)} />
               <span>Коннекторы</span>
             </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showPassengerFlow} onChange={(event) => setShowPassengerFlow(event.target.checked)} />
+              <span>Пассажиропоток</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showStationLoads} onChange={(event) => setShowStationLoads(event.target.checked)} />
+              <span>Загрузка остановок</span>
+            </label>
           </section>
 
           <section className="summary">
