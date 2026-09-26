@@ -32,7 +32,9 @@ class ChoiceConfig:
     bike_circuity: float = 1.25
     bike_cost_per_km_eur: float = REFERENCE_MOBILITY.two_wheel_per_km_eur
     bike_fixed_minutes: float = REFERENCE_CAR.parking_s / 60.0
-    bike_max_distance_m: float = REFERENCE_MOBILITY.two_wheel_reach_m
+    bike_time_factor: float = 1.5
+    bike_reach_m: float = REFERENCE_MOBILITY.two_wheel_reach_m
+    two_wheel_share: float = REFERENCE_MOBILITY.two_wheel_share
     walk_speed_kph: float = 5.0
     bike_speed_kph: float = REFERENCE_MOBILITY.two_wheel_speed_kph
     no_car_share: float = REFERENCE_MOBILITY.no_car_share
@@ -51,14 +53,16 @@ class ChoiceConfig:
             raise ValueError("Parking cost and time cannot be negative")
         if self.car_circuity <= 0 or self.walk_circuity <= 0 or self.bike_circuity <= 0:
             raise ValueError("Circuity factors must be positive")
-        if self.bike_fixed_minutes < 0 or self.bike_max_distance_m < 0:
-            raise ValueError("Bike fixed time and maximum distance cannot be negative")
+        if self.bike_fixed_minutes < 0 or self.bike_time_factor <= 0 or self.bike_reach_m < 0:
+            raise ValueError("Bike time parameters are invalid")
         if self.walk_speed_kph <= 0 or self.bike_speed_kph <= 0:
             raise ValueError("Walking and cycling speeds must be positive")
         if not 0.0 <= self.no_car_share <= 1.0:
             raise ValueError("no_car_share must be in [0, 1]")
         if not 0.0 <= self.no_car_effectiveness <= 1.0:
             raise ValueError("no_car_effectiveness must be in [0, 1]")
+        if not 0.0 <= self.two_wheel_share <= 1.0:
+            raise ValueError("two_wheel_share must be in [0, 1]")
 
     @property
     def time_coefficient(self) -> float:
@@ -100,17 +104,20 @@ def utilities(
         )
     )
     bike_distance_km = 0.0 if bike_distance_km is None else max(0.0, bike_distance_km)
-    if bike_distance_km > config.bike_max_distance_m / 1000.0:
-        bike = float("-inf")
-    else:
-        bike_time = walk_time_min if bike_time_min is None else bike_time_min
-        bike_generalized_minutes = (
-            config.bike_fixed_minutes
-            + config.bike_circuity * bike_time
-            + bike_distance_km * config.bike_cost_per_km_eur
-            * config.value_of_time_s_per_eur / 60.0
-        )
-        bike = config.bike_constant - coefficient * bike_generalized_minutes
+    bike_distance_m = bike_distance_km * 1000.0 * config.bike_circuity
+    excess_distance_m = max(0.0, bike_distance_m - config.bike_reach_m)
+    bike_generalized_minutes = (
+        config.bike_fixed_minutes
+        + config.bike_time_factor
+        * (bike_distance_m + excess_distance_m)
+        / config.bike_speed_kph
+        * 60.0
+        / 1000.0
+        + bike_distance_m / 1000.0
+        * config.bike_cost_per_km_eur
+        * config.value_of_time_s_per_eur / 60.0
+    )
+    bike = config.bike_constant - coefficient * bike_generalized_minutes
 
     walk_generalized_minutes = config.walk_circuity * walk_time_min
     car_generalized_minutes = (
@@ -133,9 +140,13 @@ def probabilities(
     values: ModeUtilities,
     *,
     car_availability: float = 1.0,
+    bike_availability: float = 1.0,
 ) -> dict[str, float]:
     if not 0.0 <= car_availability <= 1.0:
         raise ValueError("car_availability must be in [0, 1]")
+
+    if not 0.0 <= bike_availability <= 1.0:
+        raise ValueError("bike_availability must be in [0, 1]")
 
     available = {
         "walk": values.walk,
@@ -152,7 +163,9 @@ def probabilities(
             0.0
             if value == float("-inf")
             else exp(value - maximum) * (
-                car_availability if key == "car" else 1.0
+                car_availability if key == "car" else (
+                    bike_availability if key == "bike" else 1.0
+                )
             )
         )
         for key, value in available.items()
