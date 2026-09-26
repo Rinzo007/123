@@ -14,7 +14,7 @@ from transit_planner.reference_model import (
 )
 
 
-def test_reference_has_five_operating_periods():
+def test_has_five_operating_periods():
     assert [(p.key, p.start_minute, p.end_minute) for p in REFERENCE_PERIODS] == [
         ("early", 240, 360),
         ("am", 360, 540),
@@ -24,7 +24,7 @@ def test_reference_has_five_operating_periods():
     ]
 
 
-def test_reference_purpose_rules_have_five_outbound_and_return_shares():
+def test_purpose_rules_have_five_outbound_and_return_shares():
     assert {rule.key for rule in REFERENCE_PURPOSE_LAYERS} == {
         "edu", "health", "shop", "air", "night"
     }
@@ -35,18 +35,18 @@ def test_reference_purpose_rules_have_five_outbound_and_return_shares():
         assert abs(sum(rule.return_shares) - 1.0) < 1e-9
 
 
-def test_reference_mode_profiles_expose_capacity_dwell_and_row_cost():
+def test_mode_profiles_expose_capacity_dwell_and_row_cost():
     assert REFERENCE_MODE_PROFILES["bus"].capacity == 90
     assert REFERENCE_MODE_PROFILES["tram"].dwell_per_passenger_s == 0.6
     assert REFERENCE_MODE_PROFILES["metro"].rows["reserved"].cost_per_km == 32.0
     assert REFERENCE_MODE_PROFILES["rail"].platform_m == 140.0
 
 
-def test_reference_crowding_thresholds_match_model_levels():
+def test_crowding_thresholds_match_model_levels():
     assert (CROWDED_LOAD_RATIO, SEVERE_LOAD_RATIO, EXTREME_LOAD_RATIO) == (1.0, 2.0, 4.0)
 
 
-def test_reference_demand_layer_creates_both_directions_and_periods():
+def test_demand_layer_creates_both_directions_and_periods():
     zones = (
         DemandZone("o", 0, 0, population=1000),
         DemandZone("d", 1000, 0, purpose_attractions=(("shop", 100),)),
@@ -60,7 +60,7 @@ def test_reference_demand_layer_creates_both_directions_and_periods():
     assert any(pair.origin_zone_id == "d" and pair.destination_zone_id == "o" for pair in result.demand.pairs)
 
 
-def test_reference_layers_and_daily_adapter_are_composable():
+def test_demand_layers_and_daily_adapter_are_composable():
     zones = (
         DemandZone("o", 0, 0, population=1000),
         DemandZone("d", 1000, 0, purpose_attractions=(("night", 100),)),
