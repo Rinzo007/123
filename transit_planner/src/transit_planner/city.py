@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .geo import BoundingBox
+from .reference_model import REFERENCE_MOBILITY
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,7 @@ class DemandZone:
     population: float = 0.0
     jobs: float = 0.0
     purpose_attractions: tuple[tuple[str, float], ...] = ()
-    no_car_share: float = 0.35
+    no_car_share: float = REFERENCE_MOBILITY.no_car_share
 
     def __post_init__(self) -> None:
         if not self.id.strip():
