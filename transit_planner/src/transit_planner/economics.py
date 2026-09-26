@@ -90,7 +90,7 @@ def calculate_economics(
         daily_operating_cost += vehicle_km * operating_cost_per_km
     for route_id in active_routes:
         route = network.routes[route_id]
-        length_km = _route_length_km(network, route)
+        length_km = network.route_length_km(route)
         capital_cost += _route_capital_cost(
             network,
             route,
