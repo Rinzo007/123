@@ -126,3 +126,35 @@ def test_router_uses_physical_track_speed_limit() -> None:
     )
     assert journey is not None
     assert abs(journey.duration_min - 6.0) < 1e-9
+
+def test_router_uses_physical_track_length():
+    from transit_planner.infrastructure import TrackSection
+
+    network = make_network()
+    network.add_track_section(
+        TrackSection(
+            "physical",
+            2.0,
+            speed_limit_kph=10.0,
+        )
+    )
+    network.routes.clear()
+    network.add_route(
+        Route(
+            "physical-route",
+            "Physical",
+            TransitMode.BUS,
+            ("a", "b"),
+            track_section_ids=("physical",),
+        )
+    )
+    network.services.clear()
+    network.add_service(Service("physical-service", "physical-route", "bus", {"am": 10}))
+
+    journey = TransitRouter(network).shortest(
+        network.stops["a"],
+        network.stops["b"],
+        period_id="am",
+    )
+    assert journey is not None
+    assert abs(journey.duration_min - 12.0) < 1e-9
