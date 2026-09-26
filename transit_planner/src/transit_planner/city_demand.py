@@ -68,11 +68,55 @@ def build_city_demand(
 
 def build_reference_city_demand_layers(
     zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...] = (),
+    *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
 ) -> ReferenceDemandLayers:
-    return build_reference_demand_layers(zones)
+    if (origin_lon is None) != (origin_lat is None):
+        raise ValueError("origin_lon and origin_lat must be provided together")
+    if origin_lon is not None and origin_lat is not None:
+        places = tuple(
+            CityPlace(
+                id=place.id,
+                name=place.name,
+                location=project_wgs84_point(
+                    place.location,
+                    origin_lon=origin_lon,
+                    origin_lat=origin_lat,
+                ),
+                basic_category=place.basic_category,
+                taxonomy_primary=place.taxonomy_primary,
+                taxonomy_hierarchy=place.taxonomy_hierarchy,
+                importance=place.importance,
+            )
+            for place in places
+        )
+    enriched_zones = aggregate_place_attractions(zones, places)
+    return build_reference_demand_layers(enriched_zones)
 
 
 def build_reference_city_daily_demand(
     zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...] = (),
+    *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
 ) -> DemandMatrix:
-    return build_reference_daily_demand(zones)
+    layers = build_reference_city_demand_layers(
+        zones,
+        places,
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    pairs: list[ODPairDemand] = []
+    for layer in layers.layers:
+        totals: dict[tuple[str, str], float] = {}
+        for pair in layer.demand.pairs:
+            key = (pair.origin_zone_id, pair.destination_zone_id)
+            totals[key] = totals.get(key, 0.0) + pair.trips
+        pairs.extend(
+            ODPairDemand(origin, destination, trips, layer.purpose)
+            for (origin, destination), trips in totals.items()
+        )
+    return DemandMatrix(tuple(pairs))
