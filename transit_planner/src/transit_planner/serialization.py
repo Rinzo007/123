@@ -79,6 +79,11 @@ def network_from_dict(data: dict) -> Network:
                 capacity_departures_per_hour=float(raw.get("capacity_departures_per_hour", 30.0)),
                 shared_group=raw.get("shared_group"),
                 station_ids=tuple(raw.get("station_ids", ())),
+                speed_limit_kph=(
+                    None
+                    if raw.get("speed_limit_kph") is None
+                    else float(raw["speed_limit_kph"])
+                ),
             )
         )
 
