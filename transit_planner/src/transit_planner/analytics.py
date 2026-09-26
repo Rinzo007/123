@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
+from math import ceil, sqrt
 
 from .assignment import AssignmentResult
 from .city import DemandZone
 from .network import Network
+from .reference_model import REFERENCE_MODE_PROFILES
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,18 @@ class AccessibilityResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ServiceAnalytics:
+    service_id: str
+    route_id: str
+    period_id: str
+    departures: int
+    fleet: int
+    daily_vehicle_km: float
+    daily_opex: float
+    capacity_per_direction: float
+
+
+@dataclass(frozen=True, slots=True)
 class NetworkAnalytics:
     transit_share: float
     average_transit_time_min: float
@@ -72,6 +85,7 @@ class NetworkAnalytics:
     stops: tuple[StopAnalytics, ...]
     sections: tuple[SectionAnalytics, ...]
     accessibility: tuple[AccessibilityResult, ...]
+    services: tuple[ServiceAnalytics, ...] = ()
     severe_sections: int = 0
     extreme_sections: int = 0
 
@@ -116,6 +130,11 @@ def analyze_network(
             )
         )
 
+    services = tuple(
+        _service_analytics(network, service_id, period_id)
+        for service_id, service in network.services.items()
+        for period_id in service.headway_by_period
+    )
     accessibility = tuple(
         calculate_accessibility(network, zones, radius_m=radius)
         for radius in accessibility_radii_m
@@ -132,6 +151,47 @@ def analyze_network(
         stops=stops,
         sections=tuple(sections),
         accessibility=accessibility,
+        services=services,
+    )
+
+
+def _service_analytics(
+    network: Network,
+    service_id: str,
+    period_id: str,
+) -> ServiceAnalytics:
+    service = network.services[service_id]
+    route = network.routes[service.route_id]
+    period = network.periods[period_id]
+    profile = REFERENCE_MODE_PROFILES[route.mode.value]
+    headway = service.headway_by_period[period_id]
+    duration_min = period.end_minute - period.start_minute
+    departures = ceil(duration_min / headway)
+    length_km = sum(
+        _stop_distance_km(
+            network.stops[left_id],
+            network.stops[right_id],
+        )
+        for left_id, right_id in zip(route.stop_ids, route.stop_ids[1:])
+    )
+    speed_kph = profile.rows[profile.default_row].speed_kph
+    run_min = 2.0 * length_km / speed_kph * 60.0
+    dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
+    turnback_min = 2.0 * profile.turnback_s / 60.0
+    cycle_min = run_min + dwell_min + turnback_min
+    fleet = max(1, ceil(cycle_min / headway))
+    vehicle_km = departures * length_km * 2.0
+    vehicle = network.vehicle_types[service.vehicle_type_id]
+    opex = vehicle_km * (vehicle.operating_cost_per_km or profile.opex_per_vehicle_km)
+    return ServiceAnalytics(
+        service_id=service_id,
+        route_id=route.id,
+        period_id=period_id,
+        departures=departures,
+        fleet=fleet,
+        daily_vehicle_km=vehicle_km,
+        daily_opex=opex,
+        capacity_per_direction=departures * (vehicle.capacity or profile.capacity),
     )
 
 
