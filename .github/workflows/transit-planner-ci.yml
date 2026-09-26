@@ -1,0 +1,45 @@
+name: Transit Planner CI
+
+on:
+  push:
+    paths:
+      - "transit_planner/**"
+      - ".github/workflows/transit-planner-ci.yml"
+  pull_request:
+    paths:
+      - "transit_planner/**"
+      - ".github/workflows/transit-planner-ci.yml"
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transit_planner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: transit_planner/pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[test]"
+      - run: pytest -q tests
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transit_planner/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: transit_planner/frontend/package.json
+      - run: npm install
+      - run: npm run build
