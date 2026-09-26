@@ -319,3 +319,33 @@ input:focus, select:focus {
     overflow-x: auto;
   }
 }
+
+
+.period-headways label {
+  margin-bottom: 8px;
+}
+
+.timetable-panel {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: white;
+}
+
+.timetable-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef2f7;
+  font-size: 12px;
+}
+
+.timetable-row:last-child {
+  border-bottom: 0;
+}
+
+.timetable-row span {
+  color: #4b5563;
+}
