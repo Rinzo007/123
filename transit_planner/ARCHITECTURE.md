@@ -10,7 +10,7 @@ City -> zones -> OD -> mode choice -> route choice -> assignment -> crowding -> 
 
 ## P2: дорожный граф
 
-GeoJSON / OSM / Overture adapter -> RoadRecord -> road_builder -> RoadGraph
+Overture transportation segment/connector adapter -> RoadRecord -> road_builder -> RoadGraph
 
 ## P3: спрос и маршрутизация
 
