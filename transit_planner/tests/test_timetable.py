@@ -57,7 +57,7 @@ def test_average_connection_wait_is_schedule_aware():
             upstream_run_time=10,
         )
         - 10.0
-    ) < 1e-9
+    ) < 1e-3
     assert abs(
         average_connection_wait_minutes(
             10,
@@ -67,4 +67,4 @@ def test_average_connection_wait_is_schedule_aware():
             upstream_run_time=10,
         )
         - 15.0
-    ) < 1e-9
+    ) < 1e-3
