@@ -28,7 +28,7 @@
   {/if}
 </div>
 <style>
-.network-view{height:100%;overflow:auto;padding:20px;box-sizing:border-box}
+.network-view{padding:0;box-sizing:border-box}
 .network-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}
 .network-header h2{margin:0 0 4px}.network-header p{color:#6b7280;margin:0}
 .network-kpis{display:grid;grid-template-columns:repeat(3,minmax(110px,1fr));gap:8px}
