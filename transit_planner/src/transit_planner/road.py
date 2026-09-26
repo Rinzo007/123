@@ -26,6 +26,7 @@ class RoadEdge:
     from_connector_id: str | None = None
     to_connector_id: str | None = None
     direction: str | None = None
+    geometry: tuple[object, ...] | None = None
 
     @property
     def travel_time_minutes(self) -> float:
@@ -48,6 +49,34 @@ class RoadGraph:
     def __post_init__(self) -> None:
         for rule in self.prohibited_transitions:
             self._index_prohibited_transition(rule)
+
+    def path_length_m(self, path: tuple[str, ...]) -> float:
+        return sum(self.edges[edge_id].length_m for edge_id in path)
+
+    def path_travel_time_minutes(self, path: tuple[str, ...]) -> float:
+        return sum(self.edges[edge_id].travel_time_minutes for edge_id in path)
+
+    def path_geometry(self, path: tuple[str, ...]) -> tuple[object, ...]:
+        points: list[object] = []
+        for edge_id in path:
+            edge = self.edges[edge_id]
+            shape = tuple(edge.geometry) if edge.geometry is not None else (
+                self.nodes[edge.from_node],
+                self.nodes[edge.to_node],
+            )
+            if points and shape:
+                first = shape[0]
+                previous = points[-1]
+                if (
+                    getattr(first, "x", None) == getattr(previous, "x", None)
+                    and getattr(first, "y", None) == getattr(previous, "y", None)
+                ):
+                    points.extend(shape[1:])
+                else:
+                    points.extend(shape)
+            else:
+                points.extend(shape)
+        return tuple(points)
 
     def add_node(self, node: RoadNode) -> None:
         if node.id in self.nodes:
