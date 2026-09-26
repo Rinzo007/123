@@ -84,3 +84,45 @@ def connection_wait(
     downstream: PeriodTimetable,
 ) -> float | None:
     return wait_minutes(downstream, upstream_arrival_minute)
+
+
+def average_connection_wait_minutes(
+    upstream_headway: float,
+    downstream_headway: float,
+    *,
+    upstream_offset: float = 0.0,
+    downstream_offset: float = 0.0,
+    upstream_run_time: float = 0.0,
+) -> float | None:
+    """Average downstream wait for periodic upstream arrivals.
+
+    When the two headways are commensurate, evaluate the exact repeating
+    departure pattern. Otherwise use the stationary half-headway expectation.
+    """
+    if upstream_headway <= 0 or downstream_headway <= 0:
+        return None
+    if upstream_run_time < 0:
+        raise ValueError("upstream_run_time cannot be negative")
+
+    ratio = upstream_headway / downstream_headway
+    reverse_ratio = downstream_headway / upstream_headway
+    if abs(round(ratio) - ratio) > 1e-9 and abs(round(reverse_ratio) - reverse_ratio) > 1e-9:
+        return downstream_headway / 2.0
+
+    cycle = max(upstream_headway, downstream_headway)
+    if abs(ratio - round(ratio)) <= 1e-9:
+        cycle *= 1.0
+    else:
+        cycle *= round(reverse_ratio)
+    count = max(1, int(round(cycle / upstream_headway)))
+    waits = []
+    for index in range(count):
+        arrival = upstream_offset + index * upstream_headway + upstream_run_time
+        next_departure = downstream_offset + (
+            (arrival - downstream_offset + downstream_headway - 1e-12)
+            // downstream_headway
+        ) * downstream_headway
+        if next_departure < arrival - 1e-9:
+            next_departure += downstream_headway
+        waits.append(max(0.0, next_departure - arrival))
+    return sum(waits) / len(waits)
