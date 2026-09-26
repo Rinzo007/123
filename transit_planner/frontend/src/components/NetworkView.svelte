@@ -2,11 +2,39 @@
   export let summary={lines:0,stops:0,dailyDepartures:0};
   export let routeRows:Array<{route:{name:string;mode:string;stop_ids:string[]};vehicle?:{capacity?:number};service?:{headway_by_period:Record<string,number>}}>=[]; 
   export let periods:Array<{id:string}>=[];
-  export let cityMeta:Record<string,unknown>|null=null;
-  export let periodsData:Array<any>=[]; export let assignmentResult:any=null; export let economicsResult:any=null; export let scenarioComparison:any=null; export let timetable:any=null; export let modeLabels:Record<string,string>={}; export let onGenerateTimetable:()=>void=()=>{};
+  export let modeLabels:Record<string,string>={};
+  export let onGenerateTimetable:()=>void=()=>{};
 </script>
-<div class="network-view"><div class="network-header"><div><h2>Сеть</h2><p>Линии, частота, парк и результаты расчёта</p><button on:click={onGenerateTimetable}>Сформировать расписание</button></div><div class="network-kpis"><div><span>Линий</span><b>{summary.lines}</b></div><div><span>Отправлений/сутки</span><b>{summary.dailyDepartures}</b></div><div><span>Остановок</span><b>{summary.stops}</b></div></div></div>
-{#if routeRows.length===0}<div class="network-empty">Добавьте минимум две остановки.</div>{:else}<div class="table-wrap"><table><thead><tr><th>Линия</th><th>Режим</th><th>Остановки</th><th>Вместимость</th>{#each periods as period}<th>{period.id}</th>{/each}</tr></thead><tbody>{#each routeRows as row}<tr><td><strong>{row.route.name}</strong></td><td>{modeLabels[row.route.mode] ?? row.route.mode}</td><td>{row.route.stop_ids.length}</td><td>{row.vehicle?.capacity??"—"}</td>{#each periods as period}<td>{row.service?.headway_by_period[period.id]??"—"}</td>{/each}</tr>{/each}</tbody></table></div>{/if}
-{#if cityMeta}<div class="analytics-panel"><div class="section-title">Городской расчёт</div><div class="kpi-grid">{#each Object.entries(cityMeta) as item}<div><span>{item[0]}</span><b>{String(item[1])}</b></div>{/each}</div></div>{/if}
-{#if assignmentResult}<div class="analytics-panel"><div class="section-title">Пассажиропоток</div><div class="kpi-grid"><div>Transit <b>{assignmentResult.metrics.transit_trips.toFixed(1)}</b></div><div>Car <b>{assignmentResult.metrics.car_trips.toFixed(1)}</b></div><div>Walk <b>{assignmentResult.metrics.walk_trips.toFixed(1)}</b></div><div>Bike <b>{assignmentResult.metrics.bike_trips.toFixed(1)}</b></div></div></div>{/if}{#if economicsResult}<div class="analytics-panel"><div class="section-title">Экономика</div><div class="kpi-grid"><div>Работа <b>{economicsResult.economics.daily_vehicle_km.toFixed(1)} км</b></div><div>Opex <b>{economicsResult.economics.daily_operating_cost.toFixed(2)}</b></div><div>Парк <b>{economicsResult.economics.daily_fleet_cost.toFixed(2)}</b></div><div>Выручка <b>{economicsResult.economics.daily_fare_revenue.toFixed(2)}</b></div></div></div>{/if}{#if scenarioComparison}<div class="analytics-panel"><div class="section-title">Сравнение сценариев</div><p>Участков: {scenarioComparison.comparison.sections.length} · линий-периодов: {scenarioComparison.comparison.services.length}</p></div>{/if}{#if timetable}<div class="analytics-panel"><div class="section-title">Расписание</div>{#each timetable.periods as period}<div class="period-card"><strong>{period.period_id}</strong><span>{period.departures_minute.length} отправлений</span></div>{/each}</div>{/if}{#if periodsData.length}<div class="analytics-panel"><div class="section-title">Линия × период</div>{#each periodsData as period}<div class="period-card"><strong>{period.period_id}</strong><span>спрос {period.demand_trips.toFixed(0)}</span><span>transit {(period.transit_share*100).toFixed(1)}%</span><span>load {(period.max_load_ratio*100).toFixed(1)}%</span><span>opex {period.economics.daily_operating_cost.toFixed(1)}</span>{#each period.services as service}<span>{service.route_id}: {service.riders.toFixed(0)} пасс. · PLF {(service.peak_load_factor*100).toFixed(1)}% · парк {service.fleet}</span>{/each}</div>{/each}</div>{/if}</div>
-<style>.network-view{height:100%;overflow:auto;padding:20px;box-sizing:border-box}.network-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}.network-header h2{margin:0 0 4px}.network-header p{color:#6b7280;margin:0}.network-kpis,.kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(110px,1fr));gap:8px}.kpi-grid{grid-template-columns:repeat(4,minmax(110px,1fr))}.network-kpis>div,.kpi-grid>div{background:#fff;border:1px solid #e5e7eb;padding:10px;border-radius:8px}.network-kpis span,.kpi-grid span{display:block;color:#6b7280;font-size:11px}.network-kpis b,.kpi-grid b{display:block;margin-top:4px}.network-empty,.analytics-panel{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px}.table-wrap{overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #f0f0f0;white-space:nowrap}th{background:#f9fafb}.period-card{display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}.period-card span{color:#4b5563}</style>
+<div class="network-view">
+  <div class="network-header">
+    <div>
+      <h2>Сеть</h2><p>Линии, интервалы и остановки</p>
+      <button on:click={onGenerateTimetable}>Сформировать расписание</button>
+    </div>
+    <div class="network-kpis">
+      <div><span>Линий</span><b>{summary.lines}</b></div>
+      <div><span>Отправлений/сутки</span><b>{summary.dailyDepartures}</b></div>
+      <div><span>Остановок</span><b>{summary.stops}</b></div>
+    </div>
+  </div>
+  {#if routeRows.length===0}
+    <div class="network-empty">Добавьте минимум две остановки.</div>
+  {:else}
+    <div class="table-wrap"><table><thead><tr><th>Линия</th><th>Вид транспорта</th><th>Остановки</th><th>Вместимость</th>{#each periods as period}<th>{period.id}</th>{/each}</tr></thead><tbody>
+      {#each routeRows as row}
+        <tr><td><strong>{row.route.name}</strong></td><td>{modeLabels[row.route.mode] ?? row.route.mode}</td><td>{row.route.stop_ids.length}</td><td>{row.vehicle?.capacity??"—"}</td>{#each periods as period}<td>{row.service?.headway_by_period[period.id]??"—"}</td>{/each}</tr>
+      {/each}
+    </tbody></table></div>
+  {/if}
+</div>
+<style>
+.network-view{height:100%;overflow:auto;padding:20px;box-sizing:border-box}
+.network-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}
+.network-header h2{margin:0 0 4px}.network-header p{color:#6b7280;margin:0}
+.network-kpis{display:grid;grid-template-columns:repeat(3,minmax(110px,1fr));gap:8px}
+.network-kpis>div{background:#fff;border:1px solid #e5e7eb;padding:10px;border-radius:8px}
+.network-kpis span{display:block;color:#6b7280;font-size:11px}.network-kpis b{display:block;margin-top:4px}
+.network-empty,.table-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px}
+.table-wrap{overflow:auto;padding:0}table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #f0f0f0;white-space:nowrap}th{background:#f9fafb}
+</style>
