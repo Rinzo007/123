@@ -6,7 +6,6 @@ from .city import DemandZone
 from .demand import DemandMatrix
 from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfile
 from .od import purpose_gravity_od
-from .geo import Point
 from .projection import project_wgs84_point
 from .places import CityPlace, aggregate_place_attractions
 
