@@ -410,6 +410,9 @@ export function App() {
           <button onClick={loadCityData} disabled={busy}>
             Загрузить Overture
           </button>
+          <button onClick={buildRoadRoute} disabled={busy || stops.length < 2}>
+            Построить по дорогам
+          </button>
           <button
             className={drawMode ? "primary active" : "primary"}
             onClick={() => setDrawMode((value) => !value)}
