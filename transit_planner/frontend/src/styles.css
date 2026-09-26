@@ -366,3 +366,51 @@ input:focus, select:focus {
   display: grid;
   gap: 6px;
 }
+
+.analytics-panel {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: white;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.analytics-grid > div {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.analytics-grid span,
+.analytics-grid b {
+  display: block;
+}
+
+.analytics-grid span,
+.small-label {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.analytics-grid b {
+  margin-top: 3px;
+  font-size: 16px;
+}
+
+.loss-list {
+  margin-top: 14px;
+}
+
+.loss-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid #eef2f7;
+  font-size: 12px;
+}
