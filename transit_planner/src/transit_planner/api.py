@@ -10,7 +10,7 @@ from .assignment import AssignmentConfig, assign_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city_demand import CityDemandConfig, build_city_demand
 from .city import DemandZone
-from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
+from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson, zones_to_geojson
 from .projection import project_local_point_wgs84
@@ -369,20 +369,14 @@ def city_demand(payload: dict) -> dict:
         )
         for item in payload.get("places", [])
     )
-    config = CityDemandConfig(
-        trip_rate=float(payload.get("trip_rate", 0.12)),
-        decay=float(payload.get("decay", 0.08)),
-        reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
-    )
     demand = build_city_demand(
         zones,
         places,
         origin_lon=payload.get("origin_lon"),
         origin_lat=payload.get("origin_lat"),
-        config=config,
     )
     return {
-        "model": "reference",
+        "model": "main",
         "total_trips_per_day": demand.total_trips_per_day,
         "pairs": [
             {
@@ -426,33 +420,6 @@ def demand_streets(payload: dict) -> dict:
         origin_lat=float(payload.get("origin_lat", 0.0)),
     )
 
-@app.post("/api/v1/demand/temporal")
-def temporal_demand(payload: dict) -> dict:
-    pairs = tuple(
-        ODPairDemand(
-            str(item["origin_zone_id"]),
-            str(item["destination_zone_id"]),
-            float(item["trips_per_day"]),
-            str(item.get("purpose", "all")),
-        )
-        for item in payload.get("demand", [])
-    )
-    temporal = expand_daily_demand(DemandMatrix(pairs))
-    return {
-        "total_trips": temporal.total_trips,
-        "period_totals": temporal.period_totals(),
-        "pairs": [
-            {
-                "origin_zone_id": pair.origin_zone_id,
-                "destination_zone_id": pair.destination_zone_id,
-                "period_id": pair.period_id,
-                "trips": pair.trips,
-                "purpose": pair.purpose,
-            }
-            for pair in temporal.pairs
-        ],
-    }
-
 @app.post("/api/v1/assignment/city")
 def city_assignment(payload: dict) -> dict:
     raster_path = os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
@@ -483,11 +450,6 @@ def city_assignment(payload: dict) -> dict:
             places,
             origin_lon=origin_lon,
             origin_lat=origin_lat,
-            config=CityDemandConfig(
-                trip_rate=float(payload.get("trip_rate", 0.12)),
-                decay=float(payload.get("decay", 0.08)),
-                reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
-            ),
         )
         result = assign_demand(
             network,
