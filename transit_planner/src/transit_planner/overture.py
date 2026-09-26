@@ -336,7 +336,7 @@ def _field(value, name: str):
     try:
         return value[name]
     except (KeyError, TypeError, IndexError):
-        return None
+        pass
     return getattr(value, name, None)
 
 
