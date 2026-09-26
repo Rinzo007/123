@@ -234,6 +234,16 @@ def minimum_station_headway_min(
     return dwell_headway, "dwell"
 
 
+def crowding_time_multiplier(load_ratio: float) -> float:
+    """Return the active reference crowding multiplier for in-vehicle time."""
+    if load_ratio < 0:
+        raise ValueError("load_ratio cannot be negative")
+    return 1.0 + max(
+        0.0,
+        min(load_ratio, 1.5) - 0.85,
+    ) * 2.2
+
+
 def lateral_speed_limit_kph(
     mode: str,
     radius_m: float,
