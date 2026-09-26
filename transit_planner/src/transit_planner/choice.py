@@ -101,16 +101,21 @@ def utilities(
             - config.transit_fare_weight * transit_fare
         )
     )
+    has_bike_distance = bike_distance_km is not None
     bike_distance_km = 0.0 if bike_distance_km is None else max(0.0, bike_distance_km)
     bike_distance_m = bike_distance_km * 1000.0 * config.bike_circuity
     excess_distance_m = max(0.0, bike_distance_m - config.bike_reach_m)
+    bike_travel_minutes = (
+        max(0.0, bike_time_min)
+        if not has_bike_distance and bike_time_min is not None
+        else bike_distance_m / config.bike_speed_kph * 60.0 / 1000.0
+    )
+    excess_travel_minutes = (
+        excess_distance_m / config.bike_speed_kph * 60.0 / 1000.0
+    )
     bike_generalized_minutes = (
         config.bike_fixed_minutes
-        + config.bike_time_factor
-        * (bike_distance_m + excess_distance_m)
-        / config.bike_speed_kph
-        * 60.0
-        / 1000.0
+        + config.bike_time_factor * (bike_travel_minutes + excess_travel_minutes)
         + bike_distance_m / 1000.0
         * config.bike_cost_per_km_eur
         * config.value_of_time_s_per_eur / 60.0
