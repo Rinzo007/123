@@ -3,13 +3,14 @@ from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.geo import Point
 from transit_planner.mode_choice import ModeChoiceConfig
-from transit_planner.network import Network, Stop
+from transit_planner.network import Network, ServicePeriod, Stop
 
 
 def test_assignment_includes_bike_in_mode_split():
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0)))
     network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_period(ServicePeriod("peak", 0, 60))
 
     demand = DemandMatrix((
         ODPairDemand("z1", "z2", 100.0),
