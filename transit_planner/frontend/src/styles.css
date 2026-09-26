@@ -414,3 +414,42 @@ input:focus, select:focus {
   border-bottom: 1px solid #eef2f7;
   font-size: 12px;
 }
+
+
+.scenario-table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.scenario-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.scenario-table th,
+.scenario-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.scenario-table th:first-child,
+.scenario-table td:first-child {
+  text-align: left;
+}
+
+.scenario-table th {
+  color: #6b7280;
+  background: #f8fafc;
+  font-size: 11px;
+}
+
+.scenario-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.scenario-section-count {
+  margin-top: 10px;
+}
