@@ -62,7 +62,7 @@ def generate_service_timetable(
 def next_departure(
     timetable: PeriodTimetable,
     arrival_minute: float,
-) -> int | None:
+) -> float | None:
     for departure in timetable.departures_minute:
         if departure >= arrival_minute:
             return departure
