@@ -113,3 +113,43 @@ export function loadOvertureNetwork(
     }),
   );
 }
+
+export interface OvertureRouteResponse {
+  type: "Feature";
+  geometry: {
+    type: "LineString";
+    coordinates: number[][];
+  };
+  properties: {
+    edge_ids: string[];
+    length_m: number;
+    travel_time_min: number;
+    snap_distances_m: number[];
+  };
+}
+
+export function loadOvertureRoute(
+  points: Array<{ lon: number; lat: number }>,
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<OvertureRouteResponse> {
+  return fetch("/api/v1/data/overture/route", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      points,
+      south,
+      west,
+      north,
+      east,
+    }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body || "Не удалось построить маршрут по Overture");
+    }
+    return response.json() as Promise<OvertureRouteResponse>;
+  });
+}
