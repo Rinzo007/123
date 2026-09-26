@@ -232,6 +232,27 @@ export function calculateAssignment(
     return response.json() as Promise<AssignmentResponse>;
   });
 }
+export interface ReferenceDemandResponse {
+  city: string;
+  source: string;
+  pts: Array<[number, number, number, number]>;
+  od: Array<[number, number, number, number]>;
+  baselineT: number[][];
+}
+
+export function loadReferenceDemand(
+  south: number, west: number, north: number, east: number,
+  originLon: number, originLat: number,
+): Promise<ReferenceDemandResponse> {
+  return loadJson<ReferenceDemandResponse>(
+    "/api/v1/demand/reference",
+    new URLSearchParams({
+      south: String(south), west: String(west), north: String(north), east: String(east),
+      origin_lon: String(originLon), origin_lat: String(originLat),
+    }),
+  );
+}
+
 export function loadDemandStreets(
   demand: Array<{ origin_zone_id: string; destination_zone_id: string; trips_per_day: number; purpose?: string }>,
   zones: Array<{ id: string; centroid_x: number; centroid_y: number }>,
