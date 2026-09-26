@@ -162,6 +162,7 @@ def build_topological_road_graph(
                 )
 
             length_m = _length_m(record, coordinate_to_metre) * at_delta
+            edge_geometry = _slice_geometry(points, left_ref.at, right_ref.at)
             edge_id = f"{record.id}:{left_ref.connector_id}:{right_ref.connector_id}"
             if record.forward_allowed:
                 graph.add_edge(
@@ -176,6 +177,7 @@ def build_topological_road_graph(
                         left_ref.connector_id,
                         right_ref.connector_id,
                         "forward",
+                        edge_geometry,
                     )
                 )
             if record.backward_allowed and not record.oneway:
@@ -191,6 +193,7 @@ def build_topological_road_graph(
                         right_ref.connector_id,
                         left_ref.connector_id,
                         "backward",
+                        tuple(reversed(edge_geometry)),
                     )
                 )
 
@@ -255,6 +258,38 @@ def _add_fallback_segment(
             )
         )
 
+
+
+def _slice_geometry(
+    points: tuple[Point, ...],
+    start_fraction: float,
+    end_fraction: float,
+) -> tuple[Point, ...]:
+    if not 0.0 <= start_fraction <= end_fraction <= 1.0:
+        raise ValueError("Geometry slice fractions must be ordered in [0, 1]")
+    if start_fraction == end_fraction:
+        point = _interpolate_fraction(points, start_fraction)
+        return (point, point)
+
+    total = sum(
+        ((right.x - left.x) ** 2 + (right.y - left.y) ** 2) ** 0.5
+        for left, right in zip(points, points[1:])
+    )
+    if total <= 0:
+        point = points[0]
+        return (point, point)
+
+    result = [_interpolate_fraction(points, start_fraction)]
+    traversed = 0.0
+    for left, right in zip(points, points[1:]):
+        segment = ((right.x - left.x) ** 2 + (right.y - left.y) ** 2) ** 0.5
+        next_traversed = traversed + segment
+        fraction = next_traversed / total
+        if start_fraction < fraction < end_fraction:
+            result.append(right)
+        traversed = next_traversed
+    result.append(_interpolate_fraction(points, end_fraction))
+    return tuple(result)
 
 def _interpolate_fraction(points, fraction: float):
     if not 0.0 <= fraction <= 1.0:
