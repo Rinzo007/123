@@ -459,13 +459,24 @@ def _section_capacity_and_platforms(
         if kind == "track":
             scheduled_total = sum(item[4] for item in items)
             physical_limit = physical_limits[group_name] * duration_hours
-            factor = 1.0 if scheduled_total <= physical_limit else physical_limit / scheduled_total
+            # Track capacity describes the carrying capacity of the physical
+            # corridor. Allocate it across services by their scheduled share.
+            # This keeps shared corridors from double-counting departures while
+            # preserving the full physical capacity for crowding analysis.
+            if scheduled_total <= 0:
+                continue
+            group_departures = physical_limit
         else:
-            factor = 1.0
+            group_departures = None
 
+        scheduled_total = sum(item[4] for item in items)
         for service_id, route_id, from_id, to_id, scheduled, mode_limit, vehicle_capacity in items:
+            if kind == "track":
+                effective_departures = group_departures * scheduled / scheduled_total
+            else:
+                effective_departures = scheduled
             effective_departures = min(
-                scheduled * factor,
+                effective_departures,
                 mode_limit * duration_hours,
             )
             capacity = effective_departures * vehicle_capacity
