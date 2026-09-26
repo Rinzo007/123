@@ -445,8 +445,11 @@ def _section_capacity_and_platforms(
                     physical_limits.get(group_name, float("inf")),
                     track.capacity_departures_per_hour,
                 )
-                for stop_id in (from_id, to_id):
-                    platform_m[stop_id] = max(platform_m.get(stop_id, 0.0), profile.platform_m)
+
+            # Platform length is a mode-level infrastructure requirement and
+            # does not depend on an explicit TrackSection being attached.
+            for stop_id in (from_id, to_id):
+                platform_m[stop_id] = max(platform_m.get(stop_id, 0.0), profile.platform_m)
 
             grouped.setdefault(key, []).append(
                 (service.id, route.id, from_id, to_id, scheduled_departures, group_limit, vehicle_capacity)
