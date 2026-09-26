@@ -72,6 +72,7 @@ class AssignmentMetrics:
     average_transfers: float
     bike_trips: float = 0.0
     average_wait_time_min: float = 0.0
+    rest_trips: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +258,7 @@ def _assign_once(
     stop_boardings: dict[str, float] = {}
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
-    total_transit = total_car = total_walk = total_bike = 0.0
+    total_transit = total_car = total_walk = total_bike = total_rest = 0.0
     weighted_transit_time = weighted_transfers = weighted_wait = 0.0
     unserved = 0.0
     loss_reasons: dict[str, float] = {}
@@ -333,10 +334,12 @@ def _assign_once(
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
         bike_trips = trips * probs["bike"]
+        rest_trips = trips * probs["rest"]
         total_transit += transit_trips
         total_car += car_trips
         total_walk += walk_trips
         total_bike += bike_trips
+        total_rest += rest_trips
 
         if journey is None:
             unserved += transit_trips
@@ -482,6 +485,7 @@ def _assign_once(
         average_wait_time_min=(
             0.0 if total_transit <= 0 else weighted_wait / total_transit
         ),
+        rest_trips=total_rest,
     )
     losses = tuple(
         DemandLoss(reason, trips)
