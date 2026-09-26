@@ -259,7 +259,7 @@ class Network:
         if section_id is not None:
             section = self.track_sections[section_id]
             if section.speed_limit_kph is not None:
-                speed = min(speed, section.speed_limit_kph)
+                speed = section.speed_limit_kph
         geometry = self.route_segment_geometry_points(route, index)
         if len(geometry) >= 3:
             radius_m = minimum_curve_radius_m(geometry)
