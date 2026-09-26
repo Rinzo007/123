@@ -291,6 +291,7 @@ def calculate_assignment(payload: dict) -> dict:
             "transit_trips": result.metrics.transit_trips,
             "car_trips": result.metrics.car_trips,
             "walk_trips": result.metrics.walk_trips,
+            "bike_trips": result.metrics.bike_trips,
             "transit_share": result.metrics.transit_share,
             "average_transit_time_min": result.metrics.average_transit_time_min,
             "average_transfers": result.metrics.average_transfers,
