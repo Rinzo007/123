@@ -383,9 +383,13 @@ class TransitRouter:
                 for index, (from_id, to_id) in enumerate(route.segment_pairs()):
                     section_id = route.track_section_for_segment(index)
                     physical_run_time_min = (
-                        None
-                        if section_id is None
-                        else self.network.route_segment_run_time_min(route, index)
+                        self.network.route_segment_run_time_min(route, index)
+                        if (
+                            section_id is not None
+                            or route.geometry is not None
+                            or route.row_by_segment
+                        )
+                        else None
                     )
                     stop_map.setdefault(from_id, []).append(
                         _TransitOption(
