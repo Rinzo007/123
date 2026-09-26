@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from math import exp
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +181,7 @@ REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
 
+
 def headway_unevenness_factor(
     mode: str,
     headway_min: float,
@@ -208,7 +210,7 @@ def headway_unevenness_factor(
     )
     m = min(
         1.0,
-        profile.jitter_s * __import__("math").exp(f)
+        profile.jitter_s * exp(f)
         / (headway_min * 60.0),
     )
     return 1.0 + m * m
