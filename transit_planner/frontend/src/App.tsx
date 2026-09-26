@@ -863,12 +863,17 @@ export function App() {
   function exportJson() {
     const project = {
       format: "transit-planner-project",
-      version: 1,
+      version: 2,
       routeName,
       mode,
       headways,
       stops,
       network,
+      economics: {
+        farePerTransitTrip,
+        annualDays,
+      },
+      scenarioBase,
     };
     const blob = new Blob([JSON.stringify(project, null, 2)], {
       type: "application/json",
@@ -889,9 +894,29 @@ export function App() {
       try {
         const project = JSON.parse(String(reader.result));
         if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
+        const version = Number(project.version ?? 1);
+        if (version < 1 || version > 2) throw new Error("Неподдерживаемая версия проекта");
         setRouteName(String(project.routeName ?? "Новый маршрут"));
         setMode((project.mode ?? "bus") as TransitMode);
         setHeadways({ ...headways, ...(project.headways ?? {}) });
+        const economics = project.economics ?? {};
+        setFarePerTransitTrip(
+          Number.isFinite(Number(economics.farePerTransitTrip))
+            ? Math.max(0, Number(economics.farePerTransitTrip))
+            : 0,
+        );
+        setAnnualDays(
+          Number.isFinite(Number(economics.annualDays))
+            ? Math.max(1, Math.min(366, Math.round(Number(economics.annualDays))))
+            : 365,
+        );
+        setScenarioBase(
+          version >= 2 && project.scenarioBase?.network
+            ? project.scenarioBase
+            : null,
+        );
+        setScenarioComparison(null);
+        setEconomicsResult(null);
         commitStops(Array.isArray(project.stops) ? project.stops : []);
         setRoadRoute(null);
         setTimetable(null);
