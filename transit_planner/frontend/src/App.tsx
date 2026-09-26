@@ -84,7 +84,13 @@ function buildNetworkPayload(
     stops: metricStops,
     routes: stops.length >= 2 ? [route] : [],
     vehicle_types: [vehicleType],
-    periods: [{ id: "peak", start_minute: 360, end_minute: 540 }],
+    periods: [
+      { id: "night", start_minute: 0, end_minute: 360 },
+      { id: "morning_peak", start_minute: 360, end_minute: 600 },
+      { id: "daytime", start_minute: 600, end_minute: 960 },
+      { id: "evening_peak", start_minute: 960, end_minute: 1200 },
+      { id: "late_evening", start_minute: 1200, end_minute: 1440 },
+    ],
     services:
       stops.length >= 2
         ? [
@@ -92,7 +98,13 @@ function buildNetworkPayload(
               id: "draft-service",
               route_id: "draft-route",
               vehicle_type_id: vehicleType.id,
-              headway_by_period: { peak: headway },
+              headway_by_period: {
+                night: headway,
+                morning_peak: headway,
+                daytime: headway,
+                evening_peak: headway,
+                late_evening: headway,
+              },
             },
           ]
         : [],
