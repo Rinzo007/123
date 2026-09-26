@@ -6,7 +6,7 @@ from transit_planner.choice import ChoiceConfig, utilities
 from transit_planner.network import Network, ServicePeriod, Stop
 
 
-def test_reference_choice_penalizes_wait_and_long_bike_trips():
+def test_reference_choice_penalizes_wait_and_bike_excess_distance():
     config = ChoiceConfig()
     no_wait = utilities(
         walk_time_min=20.0,
@@ -38,7 +38,8 @@ def test_reference_choice_penalizes_wait_and_long_bike_trips():
         config=config,
     )
     assert with_wait.transit < no_wait.transit
-    assert long_bike.bike == float("-inf")
+    assert long_bike.bike > float("-inf")
+    assert long_bike.bike < no_wait.bike
 
 
 def test_assignment_includes_bike_in_mode_split():
@@ -106,3 +107,18 @@ def test_trip_suppression_factor_matches_vot_exponential():
     assert trip_suppression_factor(0.0) == 1.0
     assert 0.0 < trip_suppression_factor(6.0) < 1.0
     assert trip_suppression_factor(12.0) < trip_suppression_factor(6.0)
+
+
+def test_two_wheel_share_controls_bike_probability():
+    from transit_planner.choice import probabilities
+
+    values = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=None,
+        bike_time_min=12.0,
+        bike_distance_km=5.0,
+    )
+    full = probabilities(values, bike_availability=1.0)
+    reference = probabilities(values, bike_availability=0.30)
+    assert 0.0 < reference["bike"] < full["bike"]
