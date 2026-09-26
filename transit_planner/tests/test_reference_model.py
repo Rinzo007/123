@@ -10,6 +10,7 @@ from transit_planner.reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_CAR,
     REFERENCE_MOBILITY,
+    REFERENCE_NO_CAR_EFFECTIVENESS,
     REFERENCE_PERIODS,
     REFERENCE_TRANSFER,
     REFERENCE_PURPOSE_LAYERS,
@@ -116,3 +117,8 @@ def test_reference_minimum_headway_rules():
     assert minimum_station_headway_min("bus", route_closed=True)[1] == "dwell"
     assert minimum_station_headway_min("rail", route_closed=False)[1] in {"dwell", "turnback"}
     assert minimum_track_headway_min(30.0) == 2.0
+
+
+def test_reference_mobility_includes_no_car_defaults():
+    assert REFERENCE_MOBILITY.no_car_share == 0.35
+    assert REFERENCE_NO_CAR_EFFECTIVENESS == 0.78
