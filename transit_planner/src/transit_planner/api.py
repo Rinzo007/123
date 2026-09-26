@@ -489,6 +489,21 @@ def city_assignment(payload: dict) -> dict:
             "section_loads": [{"route_id": item.route_id, "from_stop_id": item.from_stop_id, "to_stop_id": item.to_stop_id, "passengers": item.passengers, "capacity": item.capacity, "load_ratio": item.load_ratio} for item in result.section_loads],
             "stop_flows": [{"stop_id": item.stop_id, "boardings": item.boardings, "alightings": item.alightings, "transfers": item.transfers} for item in result.stop_flows],
         },
+        "periods": [
+            {
+                "period_id": item.period_id,
+                "demand_trips": item.demand_trips,
+                "transit_trips": item.result.metrics.transit_trips,
+                "car_trips": item.result.metrics.car_trips,
+                "walk_trips": item.result.metrics.walk_trips,
+                "bike_trips": item.result.metrics.bike_trips,
+                "transit_share": item.result.metrics.transit_share,
+                "average_transit_time_min": item.result.metrics.average_transit_time_min,
+                "average_transfers": item.result.metrics.average_transfers,
+                "max_load_ratio": item.result.max_load_ratio,
+            }
+            for item in temporal_result.periods
+        ],
     }
 
 @app.post("/api/v1/assignment")
