@@ -207,6 +207,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [viewMode, setViewMode] = useState<"map" | "network">("map");
   const [showRoads, setShowRoads] = useState(true);
+  const [showRoadSpeed, setShowRoadSpeed] = useState(false);
   const [showStops, setShowStops] = useState(true);
   const [showPlaces, setShowPlaces] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
@@ -408,11 +409,20 @@ export function App() {
     if (map.getLayer("analysis-section-loads")) map.setLayoutProperty("analysis-section-loads", "visibility", showPassengerFlow ? "visible" : "none");
     if (map.getLayer("analysis-stop-loads")) map.setLayoutProperty("analysis-stop-loads", "visibility", showStationLoads ? "visible" : "none");
 
-    if (map.getLayer("city-road-lines")) map.setLayoutProperty("city-road-lines", "visibility", showRoads ? "visible" : "none");
+    if (map.getLayer("city-road-lines")) {
+      map.setLayoutProperty("city-road-lines", "visibility", showRoads ? "visible" : "none");
+      map.setPaintProperty(
+        "city-road-lines",
+        "line-color",
+        showRoadSpeed
+          ? ["interpolate", ["linear"], ["get", "speed_kph"], 10, "#ef4444", 30, "#eab308", 50, "#22c55e", 90, "#3b82f6"]
+          : "#9ca3af",
+      );
+    }
     if (map.getLayer("city-connector-circles")) map.setLayoutProperty("city-connector-circles", "visibility", showConnectors ? "visible" : "none");
     if (map.getLayer("city-stop-circles")) map.setLayoutProperty("city-stop-circles", "visibility", showStops ? "visible" : "none");
     if (map.getLayer("city-place-circles")) map.setLayoutProperty("city-place-circles", "visibility", showPlaces ? "visible" : "none");
-  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, showRoads, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads]);
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headways),
@@ -781,6 +791,10 @@ export function App() {
             <label className="check-row">
               <input type="checkbox" checked={showRoads} onChange={(event) => setShowRoads(event.target.checked)} />
               <span>Дороги Overture</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showRoadSpeed} onChange={(event) => setShowRoadSpeed(event.target.checked)} />
+              <span>Скорость дорог</span>
             </label>
             <label className="check-row">
               <input type="checkbox" checked={showStops} onChange={(event) => setShowStops(event.target.checked)} />
