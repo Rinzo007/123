@@ -5,6 +5,7 @@ from heapq import heappop, heappush
 from math import inf, isfinite, sqrt
 
 from .network import Network, Stop, TransitMode
+from .timetable import average_connection_wait_minutes
 from .reference_model import REFERENCE_MODE_PROFILES
 from .road import RoadGraph
 
@@ -17,6 +18,7 @@ class JourneyLeg:
     duration_min: float
     route_id: str | None = None
     wait_min: float = 0.0
+    service_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,7 @@ class _TransitOption:
     neighbor_stop_id: str
     headway: float
     departure_offset: float
+    phase_minute: float
     mode: TransitMode
     physical_run_time_min: float | None = None
 
@@ -180,6 +183,7 @@ class TransitRouter:
                             run,
                             option.route_id,
                             wait_min=wait,
+                            service_id=option.service_id,
                         ),
                     )
                     heappush(queue, (candidate, serial, next_state))
@@ -205,12 +209,17 @@ class TransitRouter:
             for previous_route, route_id in zip(route_sequence, route_sequence[1:])
             if previous_route != route_id
         )
+        adjusted_legs = _adjust_connection_waits(
+            self.network,
+            period_id,
+            tuple(legs),
+        )
         return Journey(
             origin_stop_id=origin.id,
             destination_stop_id=destination.id,
-            duration_min=sum(leg.duration_min for leg in legs),
+            duration_min=sum(leg.duration_min for leg in adjusted_legs),
             transfers=transfers,
-            legs=tuple(legs),
+            legs=adjusted_legs,
         )
 
     def _run_time_between(
@@ -309,6 +318,7 @@ class TransitRouter:
                             to_id,
                             headway,
                             offset,
+                            service.phase_by_period.get(period_id, 0.0),
                             route.mode,
                             physical_run_time_min,
                         )
@@ -353,3 +363,60 @@ def _scheduled_wait_minutes(
     if first_departure >= period_end:
         return None
     return headway / 2.0
+
+
+def _adjust_connection_waits(
+    network: Network,
+    period_id: str,
+    legs: tuple[JourneyLeg, ...],
+) -> tuple[JourneyLeg, ...]:
+    if not legs:
+        return legs
+
+    result: list[JourneyLeg] = []
+    active_route_id: str | None = None
+    active_service_id: str | None = None
+    upstream_run = 0.0
+    for leg in legs:
+        if leg.kind != "transit" or leg.route_id is None:
+            result.append(leg)
+            if leg.kind == "walk":
+                active_route_id = None
+                active_service_id = None
+                upstream_run = 0.0
+            continue
+
+        wait = leg.wait_min
+        if active_route_id is not None and active_route_id != leg.route_id:
+            upstream_service = network.services.get(active_service_id or "")
+            downstream_service = network.services.get(leg.service_id or "")
+            if upstream_service is not None and downstream_service is not None:
+                upstream_h = upstream_service.headway_by_period.get(period_id)
+                downstream_h = downstream_service.headway_by_period.get(period_id)
+                if upstream_h is not None and downstream_h is not None:
+                    wait = average_connection_wait_minutes(
+                        upstream_h,
+                        downstream_h,
+                        upstream_offset=upstream_service.departure_offset_by_period.get(period_id, 0.0)
+                        + upstream_service.phase_by_period.get(period_id, 0.0),
+                        downstream_offset=downstream_service.departure_offset_by_period.get(period_id, 0.0)
+                        + downstream_service.phase_by_period.get(period_id, 0.0),
+                        upstream_run_time=upstream_run,
+                    ) or wait
+        updated = JourneyLeg(
+            leg.kind,
+            leg.from_id,
+            leg.to_id,
+            leg.duration_min,
+            leg.route_id,
+            wait,
+            leg.service_id,
+        )
+        result.append(updated)
+        if active_route_id != leg.route_id:
+            active_route_id = leg.route_id
+            active_service_id = leg.service_id
+            upstream_run = leg.duration_min
+        else:
+            upstream_run += leg.duration_min
+    return tuple(result)
