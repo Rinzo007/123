@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
+from .city_demand import CityDemandConfig, build_city_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
@@ -20,6 +21,7 @@ from .overture import (
     OvertureTransportationProvider,
 )
 from .overture_network import OvertureNetworkProvider
+from .places import CityPlace
 from .timetable import generate_service_timetable
 from .serialization import network_from_dict
 
@@ -312,6 +314,50 @@ def create_timetable(payload: dict) -> dict:
                 "departures_minute": list(period.departures_minute),
             }
             for period in timetable.periods
+        ],
+    }
+
+@app.post("/api/v1/demand/city")
+def city_demand(payload: dict) -> dict:
+    from .geo import Point
+
+    zones = tuple(
+        DemandZone(
+            id=str(item["id"]),
+            centroid_x=float(item["centroid_x"]),
+            centroid_y=float(item["centroid_y"]),
+            population=float(item.get("population", 0.0)),
+            jobs=float(item.get("jobs", 0.0)),
+        )
+        for item in payload.get("zones", [])
+    )
+    places = tuple(
+        CityPlace(
+            id=str(item["id"]),
+            name=str(item.get("name", item["id"])),
+            location=Point(float(item["lon"]), float(item["lat"])),
+            basic_category=item.get("basic_category"),
+            taxonomy_primary=item.get("taxonomy_primary"),
+            importance=float(item.get("importance", 1.0)),
+        )
+        for item in payload.get("places", [])
+    )
+    config = CityDemandConfig(
+        trip_rate=float(payload.get("trip_rate", 0.12)),
+        decay=float(payload.get("decay", 0.08)),
+        reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
+    )
+    demand = build_city_demand(zones, places, config=config)
+    return {
+        "total_trips_per_day": demand.total_trips_per_day,
+        "pairs": [
+            {
+                "origin_zone_id": pair.origin_zone_id,
+                "destination_zone_id": pair.destination_zone_id,
+                "trips_per_day": pair.trips_per_day,
+                "purpose": pair.purpose,
+            }
+            for pair in demand.pairs
         ],
     }
 
