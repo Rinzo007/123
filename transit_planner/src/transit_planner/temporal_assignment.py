@@ -134,6 +134,7 @@ class TemporalAssignmentResult:
                 average_wait_time_min=(
                     0.0 if transit <= 0 else weighted_wait / transit
                 ),
+                rest_trips=rest,
             ),
             route_flows=tuple(RouteFlow(route_id, values[0], values[1]) for route_id, values in sorted(route_acc.items())),
             section_loads=tuple(SectionLoad(route_id, from_id, to_id, values[0], values[1]) for (route_id, from_id, to_id), values in sorted(section_acc.items())),
