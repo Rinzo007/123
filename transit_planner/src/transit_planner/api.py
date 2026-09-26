@@ -9,6 +9,7 @@ from .assignment import AssignmentConfig, assign_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
+from .demand_streets import build_demand_streets, demand_streets_to_geojson
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson
 from .projection import project_local_point_wgs84
 from .overture import (
@@ -313,6 +314,37 @@ def create_timetable(payload: dict) -> dict:
             for period in timetable.periods
         ],
     }
+
+@app.post("/api/v1/demand/streets")
+def demand_streets(payload: dict) -> dict:
+    pairs = tuple(
+        ODPairDemand(
+            str(item["origin_zone_id"]),
+            str(item["destination_zone_id"]),
+            float(item["trips_per_day"]),
+            str(item.get("purpose", "all")),
+        )
+        for item in payload.get("demand", [])
+    )
+    zones = {
+        str(item["id"]): DemandZone(
+            id=str(item["id"]),
+            centroid_x=float(item["centroid_x"]),
+            centroid_y=float(item["centroid_y"]),
+        )
+        for item in payload.get("zones", [])
+    }
+    streets = build_demand_streets(
+        pairs,
+        zones,
+        min_trips=float(payload.get("min_trips", 0.0)),
+    )
+    return demand_streets_to_geojson(
+        streets,
+        zones,
+        origin_lon=float(payload.get("origin_lon", 0.0)),
+        origin_lat=float(payload.get("origin_lat", 0.0)),
+    )
 
 @app.post("/api/v1/demand/temporal")
 def temporal_demand(payload: dict) -> dict:
