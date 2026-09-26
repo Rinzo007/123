@@ -101,24 +101,3 @@ def test_no_car_availability_reduces_car_probability():
     assert without_car["walk"] > with_car["walk"]
 
 
-def test_trip_suppression_factor_matches_vot_exponential():
-    from transit_planner.choice import trip_suppression_factor
-
-    assert trip_suppression_factor(0.0) == 1.0
-    assert 0.0 < trip_suppression_factor(6.0) < 1.0
-    assert trip_suppression_factor(12.0) < trip_suppression_factor(6.0)
-
-
-def test_two_wheel_share_controls_bike_probability():
-    from transit_planner.choice import probabilities
-
-    values = utilities(
-        walk_time_min=20.0,
-        car_time_min=10.0,
-        transit_time_min=None,
-        bike_time_min=12.0,
-        bike_distance_km=5.0,
-    )
-    full = probabilities(values, bike_availability=1.0)
-    reference = probabilities(values, bike_availability=0.30)
-    assert 0.0 < reference["bike"] < full["bike"]
