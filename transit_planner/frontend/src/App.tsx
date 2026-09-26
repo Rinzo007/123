@@ -5,6 +5,7 @@ import {
   loadOvertureNetwork,
   loadOvertureRoute,
   validateNetwork,
+  calculateAssignment,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
@@ -114,6 +115,41 @@ function buildNetworkPayload(
   };
 }
 
+
+function assignmentSectionGeoJSON(
+  result: { section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }> },
+  stops: StopDraft[],
+): FeatureCollection<LineString, { route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }> {
+  const byId = new Map(stops.map((stop) => [stop.id, stop]));
+  return {
+    type: "FeatureCollection",
+    features: result.section_loads.flatMap((section) => {
+      const from = byId.get(section.from_stop_id);
+      const to = byId.get(section.to_stop_id);
+      if (!from || !to) return [];
+      return [{
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: [[from.lon, from.lat], [to.lon, to.lat]] },
+        properties: section,
+      }];
+    }),
+  };
+}
+
+function assignmentStopGeoJSON(
+  result: { stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number }> },
+  stops: StopDraft[],
+) : FeatureCollection<GeoJSONPoint, { stop_id: string; boardings: number; alightings: number; transfers: number }> {
+  const byId = new Map(stops.map((stop) => [stop.id, stop]));
+  return {
+    type: "FeatureCollection",
+    features: result.stop_flows.flatMap((flow) => {
+      const stop = byId.get(flow.stop_id);
+      if (!stop) return [];
+      return [{ type: "Feature", geometry: { type: "Point", coordinates: [stop.lon, stop.lat] }, properties: flow }];
+    }),
+  };
+}
 function emptyPointCollection(): FeatureCollection<GeoJSONPoint, { id: string; name?: string }> {
   return { type: "FeatureCollection", features: [] };
 }
@@ -174,6 +210,10 @@ export function App() {
   const [showStops, setShowStops] = useState(true);
   const [showPlaces, setShowPlaces] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
+  const [showPassengerFlow, setShowPassengerFlow] = useState(true);
+  const [showStationLoads, setShowStationLoads] = useState(true);
+  const [previewTrips, setPreviewTrips] = useState(1000);
+  const [assignmentResult, setAssignmentResult] = useState<Awaited<ReturnType<typeof calculateAssignment>> | null>(null);
   const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
   const [stopHistory, setStopHistory] = useState<StopDraft[][]>([]);
   const [stopFuture, setStopFuture] = useState<StopDraft[][]>([]);
@@ -266,6 +306,38 @@ export function App() {
         },
       });
 
+      map.addSource("analysis-sections", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "analysis-section-loads",
+        type: "line",
+        source: "analysis-sections",
+        paint: {
+          "line-width": 6,
+          "line-opacity": 0.82,
+          "line-color": [
+            "interpolate", ["linear"], ["get", "load_ratio"],
+            0, "#22c55e",
+            0.7, "#eab308",
+            1.0, "#f97316",
+            1.5, "#dc2626",
+          ],
+        },
+      });
+
+      map.addSource("analysis-stops", { type: "geojson", data: emptyPointCollection() });
+      map.addLayer({
+        id: "analysis-stop-loads",
+        type: "circle",
+        source: "analysis-stops",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18],
+          "circle-color": "#111827",
+          "circle-opacity": 0.72,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       map.addSource("draft-route", {
         type: "geojson",
         data: routeGeoJSON([]),
@@ -317,6 +389,8 @@ export function App() {
     const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
     const cityPlaceSource = map.getSource("city-places") as GeoJSONSource | undefined;
+    const analysisSectionSource = map.getSource("analysis-sections") as GeoJSONSource | undefined;
+    const analysisStopSource = map.getSource("analysis-stops") as GeoJSONSource | undefined;
 
     routeSource?.setData(roadRoute ?? routeGeoJSON(stops));
     draftStopsSource?.setData(stopsGeoJSON(stops));
@@ -324,12 +398,21 @@ export function App() {
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
     if (cityPlaces) cityPlaceSource?.setData(cityPlaces);
+    if (assignmentResult) {
+      analysisSectionSource?.setData(assignmentSectionGeoJSON(assignmentResult, stops));
+      analysisStopSource?.setData(assignmentStopGeoJSON(assignmentResult, stops));
+    } else {
+      analysisSectionSource?.setData({ type: "FeatureCollection", features: [] });
+      analysisStopSource?.setData(emptyPointCollection());
+    }
+    if (map.getLayer("analysis-section-loads")) map.setLayoutProperty("analysis-section-loads", "visibility", showPassengerFlow ? "visible" : "none");
+    if (map.getLayer("analysis-stop-loads")) map.setLayoutProperty("analysis-stop-loads", "visibility", showStationLoads ? "visible" : "none");
 
     if (map.getLayer("city-road-lines")) map.setLayoutProperty("city-road-lines", "visibility", showRoads ? "visible" : "none");
     if (map.getLayer("city-connector-circles")) map.setLayoutProperty("city-connector-circles", "visibility", showConnectors ? "visible" : "none");
     if (map.getLayer("city-stop-circles")) map.setLayoutProperty("city-stop-circles", "visibility", showStops ? "visible" : "none");
     if (map.getLayer("city-place-circles")) map.setLayoutProperty("city-place-circles", "visibility", showPlaces ? "visible" : "none");
-  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, showRoads, showStops, showPlaces, showConnectors]);
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, showRoads, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headways),
@@ -492,6 +575,26 @@ export function App() {
   }
 
 
+
+  async function runPreviewAssignment() {
+    if (stops.length < 2) return;
+    setBusy(true);
+    setMessage("Расчёт проверочного пассажиропотока…");
+    try {
+      const result = await calculateAssignment(
+        network,
+        [{ origin_zone_id: stops[0].id, destination_zone_id: stops[stops.length - 1].id, trips_per_day: previewTrips, purpose: "all" }],
+        stops.map((stop) => ({ id: stop.id, centroid_x: toLocalMeters(stop.lon, stop.lat, stops[0].lon, stops[0].lat).x, centroid_y: toLocalMeters(stop.lon, stop.lat, stops[0].lon, stops[0].lat).y })),
+        "morning_peak",
+      );
+      setAssignmentResult(result);
+      setMessage(`Пассажиропоток рассчитан: transit ${result.metrics.transit_share.toFixed(1)}%`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка расчёта пассажиропотока");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function generateTimetable() {
     const service = network.services[0];
     if (!service) return;
