@@ -284,3 +284,22 @@ def test_router_includes_intermediate_dwell_once():
     )
     expected = run_only + 20.0 / 60.0
     assert abs(journey.duration_min - expected) < 1e-9
+
+
+def test_router_applies_segment_crowding_penalty_to_runtime():
+    network = make_network()
+    router = TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0))
+    base = router.shortest(
+        network.stops["a"],
+        network.stops["c"],
+        period_id="am",
+    )
+    crowded = router.shortest(
+        network.stops["a"],
+        network.stops["c"],
+        period_id="am",
+        segment_crowding_penalties={("r1", "b", "c"): 5.0},
+    )
+
+    assert base is not None and crowded is not None
+    assert abs(crowded.duration_min - base.duration_min - 5.0) < 1e-9
