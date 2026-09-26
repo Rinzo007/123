@@ -107,3 +107,12 @@ def test_demand_layers_consume_place_purpose_aliases():
     assert totals["edu"] > 0
     assert totals["shop"] > 0
     assert totals["air"] > 0
+
+
+def test_reference_minimum_headway_rules():
+    from transit_planner.reference_model import minimum_station_headway_min, minimum_track_headway_min
+
+    assert minimum_station_headway_min("bus", route_closed=False) == 5.0 / 6.0
+    assert minimum_station_headway_min("bus", route_closed=True)[1] == "dwell"
+    assert minimum_station_headway_min("rail", route_closed=False)[1] in {"dwell", "turnback"}
+    assert minimum_track_headway_min(30.0) == 2.0
