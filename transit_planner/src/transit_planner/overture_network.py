@@ -150,7 +150,12 @@ class OvertureNetworkProvider:
         self.bbox = bbox
         self.snap_max_distance_m = snap_max_distance_m
 
-    def load(self) -> OvertureNetwork:
+    def load(
+        self,
+        *,
+        include_connectors: bool = True,
+        include_stops: bool = True,
+    ) -> OvertureNetwork:
         transportation = OvertureTransportationProvider(
             source=self.source,
             bbox=self.bbox,
@@ -166,11 +171,19 @@ class OvertureNetworkProvider:
 
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="overture") as pool:
             roads_future = pool.submit(transportation.load_roads)
-            connectors_future = pool.submit(connector_provider.load_connectors)
-            stops_future = pool.submit(transit.load_stops)
+            connectors_future = (
+                pool.submit(connector_provider.load_connectors)
+                if include_connectors
+                else None
+            )
+            stops_future = (
+                pool.submit(transit.load_stops)
+                if include_stops
+                else None
+            )
             roads = roads_future.result()
-            connectors = connectors_future.result()
-            stops = stops_future.result()
+            connectors = () if connectors_future is None else connectors_future.result()
+            stops = () if stops_future is None else stops_future.result()
 
         origin_lon, origin_lat = self._origin(stops)
         return build_overture_network(
