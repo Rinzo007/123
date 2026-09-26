@@ -10,23 +10,23 @@
   export let showConnectors=false; export let showPopulation=false; export let showDemandStreets=true;
   export let showPassengerFlow=true; export let showStationLoads=true; export let drawMode=false;
   export let onPreview:()=>void=()=>{}; export let onEconomics:()=>void=()=>{}; export let onCityAssignment:()=>void=()=>{};
-  export let onRemoveStop:(id:string)=>void=()=>{}; export let onClear:()=>void=()=>{};
+  export let onRemoveStop:(id:string)=>void=()=>{}; export let onClear:()=>void=()=>{}; export let onChange:()=>void=()=>{};
 </script>
 <aside class="sidebar">
  <section>
   <div class="section-title">Маршрут</div>
-  <label>Название<input bind:value={routeName}/></label>
-  <label>Вид транспорта<select bind:value={mode}>{#each Object.entries(modeLabels) as [value,label]}<option value={value}>{label}</option>{/each}</select></label>
+  <label>Название<input bind:value={routeName} on:input={onChange}/></label>
+  <label>Вид транспорта<select bind:value={mode} on:change={onChange}>{#each Object.entries(modeLabels) as [value,label]}<option value={value}>{label}</option>{/each}</select></label>
   <div class="preview-demand"><div class="section-title">Проверочный расчёт</div>
-   <label>Спрос, поездок/сутки<input type="number" min="1" max="100000" bind:value={previewTrips}/></label>
+   <label>Спрос, поездок/сутки<input type="number" min="1" max="100000" bind:value={previewTrips} on:input={onChange}/></label>
    <button class="primary" on:click={onPreview} disabled={busy||stops.length<2}>Рассчитать пассажиропоток</button>
    <button on:click={onEconomics} disabled={busy||stops.length<2}>Рассчитать экономику</button>
    <button on:click={onCityAssignment} disabled={busy||stops.length<2}>Рассчитать городскую сеть</button>
-   <label>Тариф за поездку<input type="number" min="0" step="0.01" bind:value={farePerTransitTrip}/></label>
-   <label>Дней в году<input type="number" min="1" max="366" bind:value={annualDays}/></label>
+   <label>Тариф за поездку<input type="number" min="0" step="0.01" bind:value={farePerTransitTrip} on:input={onChange}/></label>
+   <label>Дней в году<input type="number" min="1" max="366" bind:value={annualDays} on:input={onChange}/></label>
   </div>
   <div class="period-headways"><div class="section-title">Интервалы</div>
-   {#each periods as period}<label>{period.id}<input type="number" min="1" max="120" step="1" bind:value={headways[period.id]}/></label>{/each}
+   {#each periods as period}<label>{period.id}<input type="number" min="1" max="120" step="1" bind:value={headways[period.id]} on:input={onChange}/></label>{/each}
   </div>
  </section>
  <section><div class="section-title">Остановки ({stops.length})</div>
