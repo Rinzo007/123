@@ -157,3 +157,92 @@ export function closeReferenceEvaluation(client: ReferenceEvaluationClient | nul
 export function networkForReference(network: NetworkPayload): NetworkPayload {
   return network;
 }
+
+
+export type ReferenceLine = {
+  id: string;
+  mode: "bus" | "tram" | "metro" | "rail";
+  stops: Array<[number, number]>;
+  headways: number[];
+  row?: string;
+  closed?: boolean;
+};
+
+export type ReferenceDemand = {
+  pts: Array<[number, number, number, number]>;
+  od: Array<[number, number, number, number]>;
+  model?: Record<string, unknown>;
+};
+
+function fromLocalMeters(x: number, y: number, lon0: number, lat0: number): [number, number] {
+  const earthRadius = 6378137;
+  const cosLat = Math.cos((lat0 * Math.PI) / 180);
+  return [
+    lon0 + (x / Math.max(1e-9, earthRadius * cosLat)) * 180 / Math.PI,
+    lat0 + (y / earthRadius) * 180 / Math.PI,
+  ];
+}
+
+export function toReferenceDemand(network: NetworkPayload, trips = 1000): ReferenceDemand {
+  const lon0 = network.origin_lon ?? 39.2;
+  const lat0 = network.origin_lat ?? 51.67;
+  const pts: Array<[number, number, number, number]> = network.stops.map((stop) => {
+    const [lon, lat] = fromLocalMeters(stop.location.x, stop.location.y, lon0, lat0);
+    return [lon, lat, 1, 1];
+  });
+  const last = Math.max(0, pts.length - 1);
+  return {
+    pts,
+    od: pts.length >= 2 ? [[0, last, Math.max(0, trips), 0]] : [],
+    model: {},
+  };
+}
+
+export function toReferenceLines(network: NetworkPayload): ReferenceLine[] {
+  const byId = new Map(network.stops.map((stop) => [stop.id, stop]));
+  return network.routes.map((route) => {
+    const service = network.services.find((item) => item.route_id === route.id);
+    const stopCoords = route.stop_ids
+      .map((id) => byId.get(id))
+      .filter((stop): stop is NonNullable<typeof stop> => Boolean(stop))
+      .map((stop) => fromLocalMeters(
+        stop.location.x,
+        stop.location.y,
+        network.origin_lon ?? 39.2,
+        network.origin_lat ?? 51.67,
+      ));
+    return {
+      id: route.id,
+      mode: route.mode,
+      stops: stopCoords,
+      headways: network.periods.map((period) => service?.headway_by_period[period.id] ?? 0),
+    };
+  });
+}
+
+export function toReferenceGeometries(network: NetworkPayload): Array<{
+  stops: Array<[number, number]>;
+  cum: number[];
+}> {
+  return toReferenceLines(network).map((line) => {
+    const cum = [0];
+    for (let i = 1; i < line.stops.length; i += 1) {
+      const [lon1, lat1] = line.stops[i - 1];
+      const [lon2, lat2] = line.stops[i];
+      const dx = (lon2 - lon1) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+      const dy = (lat2 - lat1) * 111000;
+      cum.push(cum[i - 1] + Math.hypot(dx, dy));
+    }
+    return { stops: line.stops, cum };
+  });
+}
+
+export async function runReferencePreview(
+  client: ReferenceEvaluationClient,
+  network: NetworkPayload,
+  trips = 1000,
+): Promise<ReferenceEvaluationResult> {
+  const demand = toReferenceDemand(network, trips);
+  client.init(Date.now(), demand, undefined, [], network.origin_lat ?? 51.67);
+  return client.run(toReferenceLines(network), toReferenceGeometries(network), false, 0);
+}
