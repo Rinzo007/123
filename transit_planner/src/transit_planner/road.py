@@ -5,6 +5,7 @@ from heapq import heappop, heappush
 from math import inf
 
 from .data import ProhibitedTransition
+from .geo import Point
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +27,7 @@ class RoadEdge:
     from_connector_id: str | None = None
     to_connector_id: str | None = None
     direction: str | None = None
-    geometry: tuple[object, ...] | None = None
+    geometry: tuple[Point, ...] | None = None
 
     @property
     def travel_time_minutes(self) -> float:
@@ -56,8 +57,8 @@ class RoadGraph:
     def path_travel_time_minutes(self, path: tuple[str, ...]) -> float:
         return sum(self.edges[edge_id].travel_time_minutes for edge_id in path)
 
-    def path_geometry(self, path: tuple[str, ...]) -> tuple[object, ...]:
-        points: list[object] = []
+    def path_geometry(self, path: tuple[str, ...]) -> tuple[Point, ...]:
+        points: list[Point] = []
         for edge_id in path:
             edge = self.edges[edge_id]
             shape = tuple(edge.geometry) if edge.geometry is not None else (
