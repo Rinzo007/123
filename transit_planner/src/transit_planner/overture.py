@@ -104,6 +104,7 @@ class OvertureTransportationProvider:
             )
             refs = _parse_connector_refs(connector_refs)
             source_id = f"overture:{road_id}"
+            forward_allowed, backward_allowed = _access_directions(access_restrictions)
             restrictions = _parse_prohibited_transitions(
                 prohibited_transitions,
                 source_segment_id=source_id,
@@ -117,9 +118,11 @@ class OvertureTransportationProvider:
                     geometry=LineString(points),
                     speed_kph=_effective_speed_kph(speed_limits, class_speed),
                     road_type=road_type,
-                    oneway=bool(oneway) or _is_oneway(access_restrictions),
+                    oneway=bool(oneway) or (forward_allowed and not backward_allowed),
                     connectors=refs,
                     length_m=_haversine_linestring_m(points),
+                    forward_allowed=forward_allowed,
+                    backward_allowed=backward_allowed,
                     prohibited_transitions=restrictions,
                 )
             )
@@ -431,6 +434,41 @@ def _when_has_only_heading(when, heading: str) -> bool:
         if value not in (None, (), [], ""):
             return False
     return True
+
+
+def _access_directions(access_restrictions) -> tuple[bool, bool]:
+    if not access_restrictions:
+        return True, True
+
+    forward_allowed = True
+    backward_allowed = True
+    for rule in access_restrictions:
+        if _field(rule, "between") not in (None, (), []):
+            continue
+        when = _field(rule, "when")
+        scoped = False
+        for name in ("during", "mode", "using", "recognized", "vehicle"):
+            value = _field(when, name)
+            if value not in (None, (), [], {}, ""):
+                scoped = True
+                break
+        if scoped:
+            continue
+
+        access_type = str(_field(rule, "access_type") or "").lower()
+        if access_type not in ("allowed", "denied"):
+            continue
+        value = access_type == "allowed"
+        heading = _field(when, "heading")
+        if heading is None:
+            forward_allowed = value
+            backward_allowed = value
+        elif str(heading).lower() == "forward":
+            forward_allowed = value
+        elif str(heading).lower() == "backward":
+            backward_allowed = value
+
+    return forward_allowed, backward_allowed
 
 
 def _is_oneway(access_restrictions) -> bool:
