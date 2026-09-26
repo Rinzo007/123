@@ -7,7 +7,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
-from .economics import EconomicsConfig, calculate_economics
+from .economics import (
+    EconomicsConfig,
+    aggregate_temporal_economics,
+    calculate_economics,
+    calculate_temporal_economics,
+)
 from .infrastructure import TrackType
 from .analytics import _service_analytics
 from .temporal_assignment import assign_temporal_demand
@@ -695,13 +700,28 @@ def city_assignment(payload: dict) -> dict:
             origin_lat=origin_lat,
             config=demand_config,
         )
+        assignment_config = AssignmentConfig(**payload["config"])
         temporal_result = assign_temporal_demand(
             network,
             temporal_demand,
             zones={zone.id: zone for zone in zones},
-            config=AssignmentConfig(**payload["config"]),
+            config=assignment_config,
         )
         result = temporal_result.aggregate()
+        economics_config = _economics_config_from_payload(
+            payload,
+            default_period_id=assignment_config.period_id,
+        )
+        temporal_economics = calculate_temporal_economics(
+            network,
+            temporal_result,
+            config=economics_config,
+        )
+        economics = aggregate_temporal_economics(
+            network,
+            temporal_result,
+            config=economics_config,
+        )
     except HTTPException:
         raise
     except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
@@ -744,6 +764,7 @@ def city_assignment(payload: dict) -> dict:
                 for item in result.stop_flows
             ],
         },
+        "economics": _economics_result_to_dict(economics),
         "periods": [
             {
                 "period_id": item.period_id,
@@ -758,8 +779,11 @@ def city_assignment(payload: dict) -> dict:
                 "average_transfers": item.result.metrics.average_transfers,
                 "average_wait_time_min": item.result.metrics.average_wait_time_min,
                 "max_load_ratio": item.result.max_load_ratio,
+                "economics": _economics_result_to_dict(
+                    temporal_economics[index]
+                ),
             }
-            for item in temporal_result.periods
+            for index, item in enumerate(temporal_result.periods)
         ],
     }
 
