@@ -159,7 +159,8 @@ class RoadGraph:
                 if not sequence or len(sequence) != source_offset:
                     continue
 
-                window = prior_edges[-(source_offset - 1):] + (candidate,)
+                prefix_edges = () if source_offset == 1 else prior_edges[-(source_offset - 1):]
+                window = prefix_edges + (candidate,)
                 source_heading = getattr(rule, "when_heading", None)
                 if source_heading is not None and source_edge.direction != source_heading:
                     continue
