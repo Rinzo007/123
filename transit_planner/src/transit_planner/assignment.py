@@ -253,7 +253,11 @@ def _assign_once(
                 transfers=journey.transfers,
                 transit_fare=config.transit_fare,
                 fare_weight=config.mode_choice.transit_fare_weight,
-                route_penalties=route_penalties,
+                route_penalized=any(
+                    route_penalties.get(leg.route_id or "", 0.0) > 0.0
+                    for leg in journey.legs
+                    if leg.kind == "transit"
+                ),
             )
             loss_reasons[reason] = loss_reasons.get(reason, 0.0) + lost_trips
 
