@@ -57,3 +57,57 @@ def test_default_service_periods_match_reference_model():
         for period in REFERENCE_PERIODS
     ]
     assert actual == expected
+
+
+def test_closed_route_exposes_closing_segment() -> None:
+    from transit_planner.infrastructure import TrackSection
+
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 2000)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_track_section(TrackSection("t1", 1.0))
+    network.add_track_section(TrackSection("t2", 1.0))
+    network.add_track_section(TrackSection("t3", 1.0))
+    route = Route(
+        "loop",
+        "Loop",
+        TransitMode.TRAM,
+        ("a", "b", "c"),
+        track_section_ids=("t1", "t2", "t3"),
+        closed=True,
+    )
+    assert route.segment_pairs() == (("a", "b"), ("b", "c"), ("c", "a"))
+    assert route.track_section_for_segment(2) == "t3"
+
+
+def test_route_rejects_wrong_closed_track_count() -> None:
+    from transit_planner.infrastructure import TrackSection
+
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 2000)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    for track_id in ("t1", "t2"):
+        network.add_track_section(TrackSection(track_id, 1.0))
+
+    try:
+        Route(
+            "loop",
+            "Loop",
+            TransitMode.TRAM,
+            ("a", "b", "c"),
+            track_section_ids=("t1", "t2"),
+            closed=True,
+        )
+    except ValueError as exc:
+        assert "match route segments" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_route_rejects_fewer_than_two_stops() -> None:
+    try:
+        Route("broken", "Broken", TransitMode.BUS, ("a",))
+    except ValueError as exc:
+        assert "at least two stops" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
