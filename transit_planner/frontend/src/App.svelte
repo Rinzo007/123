@@ -19,7 +19,7 @@
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
-  import { disposeComputationWorkers, evaluateNetwork } from "./workers";
+  import { disposeComputationWorkers, evaluateNetwork, runClientPreview } from "./workers";
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
@@ -397,6 +397,8 @@
     busy = true;
     message = "Расчёт проверочного пассажиропотока…";
     try {
+      const clientPreview = await runClientPreview(network);
+      evaluationSummary = clientPreview.evaluation;
       const demand = [{
         origin_zone_id: $stopsStore[0].id,
         destination_zone_id: $stopsStore[$stopsStore.length - 1].id,
@@ -405,6 +407,7 @@
       }];
       const result = await calculateAssignment(network, demand, previewZones(), "am");
       assignmentResult = result;
+      message = `Локальный предрасчёт: ${clientPreview.operations.dailyDepartures} отправлений, парк до ${clientPreview.operations.fleetEstimate}.`;
       demandStreets = await loadDemandStreets(demand, previewZones(), $stopsStore[0].lon, $stopsStore[0].lat);
       message = `Пассажиропоток рассчитан: transit ${(result.metrics.transit_share * 100).toFixed(1)}%`;
     } catch (error) {
