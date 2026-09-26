@@ -2,6 +2,10 @@ import type {NetworkPayload} from "../types";
 export type EvaluationSummary={lines:number;stops:number;dailyDepartures:number};
 export type MatrixResult={ids:string[];times:number[]};
 export type ChoiceResult={shares:{transit:number;car:number;walk:number;bike:number};trips:{transit:number;car:number;walk:number;bike:number}};
+export type ClientPreviewResult={
+  evaluation: EvaluationSummary;
+  operations: {dailyDepartures:number; fleetEstimate:number};
+};
 
 type WorkerKind="evaluation"|"assignment"|"matrix"|"demand-choice";
 const workers:Partial<Record<WorkerKind,Worker>>={};
@@ -32,3 +36,11 @@ export function estimateDepartures(network:NetworkPayload){return request<{kind:
 export function buildZoneMatrix(zones:Array<{id:string;centroid_x:number;centroid_y:number}>){return request<MatrixResult>("matrix",{kind:"matrix",zones});}
 export function chooseModes(trips:number,utilities:{transit:number;car:number;walk:number;bike:number}){return request<ChoiceResult>("demand-choice",{kind:"choice",trips,utilities});}
 export function disposeComputationWorkers(){for(const worker of Object.values(workers)) worker?.terminate(); for(const key of Object.keys(workers) as WorkerKind[]) delete workers[key];}
+
+export async function runClientPreview(network:NetworkPayload):Promise<ClientPreviewResult>{
+  const [evaluation, operations] = await Promise.all([
+    evaluateNetwork(network),
+    estimateDepartures(network),
+  ]);
+  return {evaluation, operations};
+}
