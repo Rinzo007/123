@@ -374,7 +374,7 @@ def _assign_once(
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
         bike_trips=total_bike,
         average_wait_time_min=(
-            0.0 if total_transit <= 0 else weighted_wait_time / total_transit
+            0.0 if total_transit <= 0 else weighted_wait / total_transit
         ),
     )
     losses = tuple(
