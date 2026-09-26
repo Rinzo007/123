@@ -65,3 +65,34 @@ def test_one_way_service_analytics_uses_one_direction_of_vehicle_km():
     assert service.departures == 6
     assert service.daily_vehicle_km == 6.0
     assert service.daily_opex == 12.0
+
+def test_analytics_uses_physical_segment_length_for_passenger_km():
+    from transit_planner.infrastructure import TrackSection
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_track_section(TrackSection("physical", 3.0))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.BUS,
+            ("a", "b"),
+            track_section_ids=("physical",),
+        )
+    )
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 10),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = analyze_network(network, assignment)
+
+    forward = next(section for section in result.sections if section.from_stop_id == "a")
+    assert forward.distance_km == 3.0
+    assert result.passenger_km == forward.passengers * 3.0
