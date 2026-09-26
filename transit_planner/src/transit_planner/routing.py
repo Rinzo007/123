@@ -78,6 +78,25 @@ class TransitRouter:
         self._walking_neighbors_cache = self._build_walking_neighbors()
         self._transit_options_by_period = self._build_transit_options()
 
+    @classmethod
+    def from_overture_network(
+        cls,
+        network: Network,
+        overture_network,
+        *,
+        config: RouterConfig = RouterConfig(),
+    ) -> TransitRouter:
+        stop_road_nodes = {
+            snap.stop_id: snap.road_node_id
+            for snap in overture_network.stop_snaps
+        }
+        return cls(
+            network,
+            config=config,
+            road_graph=overture_network.graph,
+            stop_road_nodes=stop_road_nodes,
+        )
+
     def shortest(
         self,
         origin: Stop,
