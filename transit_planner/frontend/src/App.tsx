@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
+import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
 import {
   loadOvertureNetwork,
   validateNetwork,
@@ -158,7 +158,7 @@ export function App() {
   useEffect(() => {
     if (!mapContainer.current) return;
 
-    const map = new maplibregl.Map({
+    const map = new MapLibreMap({
       container: mapContainer.current,
       style: MAP_STYLE,
       center: DEFAULT_CENTER,
@@ -167,9 +167,9 @@ export function App() {
     });
 
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new NavigationControl(), "top-right");
 
-    const handleMapClick = (event: maplibregl.MapMouseEvent) => {
+    const handleMapClick = (event: MapMouseEvent) => {
       if (!drawModeRef.current) return;
 
       const id = `stop-${Date.now()}-${Math.round(event.lngLat.lng * 1000)}`;
