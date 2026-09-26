@@ -16,9 +16,20 @@ from .assignment import (
     StopFlow,
     assign_demand,
 )
-from .calibration import CalibrationReport, ObservedRouteRidership, calibrate_route_ridership, route_boardings_from_assignment
-from .city_demand import build_city_daily_demand, build_city_demand, build_city_demand_layers
+from .calibration import (
+    CalibrationReport,
+    ObservedRouteRidership,
+    calibrate_route_ridership,
+    route_boardings_from_assignment,
+)
 from .city import City, DemandZone
+from .city_demand import (
+    CityDemandConfig,
+    build_city_daily_demand,
+    build_city_demand,
+    build_city_demand_layers,
+    build_city_temporal_demand,
+)
 from .data import (
     ConnectorRecord,
     ConnectorRef,
@@ -26,18 +37,14 @@ from .data import (
     ProhibitedTransitionSequenceEntry,
     RoadRecord,
 )
-from .demand import DemandMatrix, ODPairDemand
+from .demand import (
+    DemandMatrix,
+    ODPairDemand,
+    PeriodODPairDemand,
+    TemporalDemandMatrix,
+)
 from .demand_streets import DemandStreet, build_demand_streets, demand_streets_to_geojson
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
-from .places import CityPlace, PlacePurpose, PlacePurposeMapper, aggregate_place_attractions
-from .network import Network, default_service_periods, default_vehicle_type
-from .od import GravityParameters, gravity_od
-from .choice import ChoiceConfig
-from .temporal_assignment import (
-    PeriodAssignment,
-    TemporalAssignmentResult,
-    assign_temporal_demand,
-)
 from .infrastructure import (
     ConstructionProject,
     ConstructionRates,
@@ -49,13 +56,19 @@ from .infrastructure import (
     shared_track_departure_capacity,
     total_reserved_capital,
 )
-from .zones import generate_grid_zones, generate_zones_from_population_raster, nearest_zone
-from .overture_network import (
-    OvertureNetwork,
-    OvertureNetworkProvider,
-    RoadRouteResult,
-    build_overture_network,
+from .network import (
+    Network,
+    Route,
+    Service,
+    ServicePeriod,
+    Stop,
+    TransitMode,
+    VehicleType,
+    default_service_periods,
+    default_vehicle_type,
 )
+from .od import GravityParameters, gravity_od
+from .choice import ChoiceConfig
 from .overture import (
     DEFAULT_RELEASE,
     OvertureConnectorProvider,
@@ -63,6 +76,13 @@ from .overture import (
     OvertureTransitProvider,
     OvertureTransportationProvider,
 )
+from .overture_network import (
+    OvertureNetwork,
+    OvertureNetworkProvider,
+    RoadRouteResult,
+    build_overture_network,
+)
+from .places import CityPlace, PlacePurpose, PlacePurposeMapper, aggregate_place_attractions
 from .road import RoadEdge, RoadGraph, RoadNode
 from .road_builder import (
     RoadGraphBuildResult,
@@ -80,6 +100,21 @@ from .scenario import (
     run_scenario,
 )
 from .simulation import SimulationResult, simulate_capacity
+from .temporal_assignment import (
+    PeriodAssignment,
+    TemporalAssignmentResult,
+    assign_temporal_demand,
+)
+from .timetable import (
+    PeriodTimetable,
+    ServiceTimetable,
+    connection_wait,
+    generate_service_timetable,
+    next_departure,
+    wait_minutes,
+)
+from .zones import generate_grid_zones, generate_zones_from_population_raster, nearest_zone
+
 
 __all__ = [
     "AccessibilityResult",
@@ -101,35 +136,31 @@ __all__ = [
     "calibrate_route_ridership",
     "route_boardings_from_assignment",
     "City",
-    "build_city_demand_layers",
-"build_city_daily_demand",
-"ChoiceConfig",
+    "CityDemandConfig",
     "build_city_demand",
+    "build_city_daily_demand",
+    "build_city_demand_layers",
+    "build_city_temporal_demand",
     "DemandZone",
     "CityPlace",
     "PlacePurpose",
     "PlacePurposeMapper",
+    "aggregate_place_attractions",
     "ConnectorRecord",
     "ConnectorRef",
     "ProhibitedTransition",
     "ProhibitedTransitionSequenceEntry",
     "RoadRecord",
-    "generate_grid_zones",
-    "generate_zones_from_population_raster",
-    "nearest_zone",
     "DemandMatrix",
     "ODPairDemand",
+    "PeriodODPairDemand",
+    "TemporalDemandMatrix",
     "DemandStreet",
     "build_demand_streets",
     "demand_streets_to_geojson",
     "EconomicsConfig",
     "EconomicsResult",
     "calculate_economics",
-    "Network",
-    "default_service_periods",
-    "default_vehicle_type",
-    "GravityParameters",
-    "gravity_od",
     "ConstructionProject",
     "ConstructionRates",
     "ProjectCost",
@@ -139,7 +170,18 @@ __all__ = [
     "estimate_project_cost",
     "shared_track_departure_capacity",
     "total_reserved_capital",
-    "aggregate_place_attractions",
+    "Network",
+    "Route",
+    "Service",
+    "ServicePeriod",
+    "Stop",
+    "TransitMode",
+    "VehicleType",
+    "default_service_periods",
+    "default_vehicle_type",
+    "GravityParameters",
+    "gravity_od",
+    "ChoiceConfig",
     "PeriodTimetable",
     "ServiceTimetable",
     "connection_wait",
@@ -177,6 +219,7 @@ __all__ = [
     "run_scenario",
     "SimulationResult",
     "simulate_capacity",
+    "generate_grid_zones",
+    "generate_zones_from_population_raster",
+    "nearest_zone",
 ]
-
-from .timetable import PeriodTimetable, ServiceTimetable, connection_wait, generate_service_timetable, next_departure, wait_minutes
