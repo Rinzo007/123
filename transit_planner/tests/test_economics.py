@@ -95,3 +95,39 @@ def test_linked_track_sections_drive_capital_cost_by_track_type():
     )
 
     assert result.capital_cost == 1.25 * 10.0 + 2 * 3.0
+
+
+def test_route_capital_cost_is_not_duplicated_across_services() -> None:
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_track_section(TrackSection("s1", 1.0, TrackType.SURFACE))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.TRAM,
+            ("a", "b"),
+            track_section_ids=("s1",),
+        )
+    )
+    network.add_service(Service("svc-am-1", "r1", "tram", {"am": 10}))
+    network.add_service(Service("svc-am-2", "r1", "tram", {"am": 15}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 1.0),)),
+        config=AssignmentConfig(period_id="am", max_access_distance_m=0),
+    )
+    result = calculate_economics(
+        network,
+        assignment,
+        config=EconomicsConfig(
+            period_id="am",
+            infrastructure_cost_per_track_km={TrackType.SURFACE: 7.0},
+        ),
+    )
+
+    assert result.capital_cost == 7.0
