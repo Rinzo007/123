@@ -5,7 +5,9 @@ from transit_planner.overture import (
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
+    _effective_speed_kph,
     _haversine_linestring_m,
+    _is_oneway,
     _parse_connector_refs,
 )
 
@@ -65,3 +67,20 @@ def test_overture_length_helper_returns_metric_polyline_length():
 
     length = _haversine_linestring_m((Point(39.2, 51.7), Point(39.21, 51.7)))
     assert 650.0 < length < 750.0
+
+def test_explicit_backward_access_denial_marks_segment_oneway():
+    assert _is_oneway([
+        {"access_type": "denied", "when": {"heading": "backward"}}
+    ])
+    assert not _is_oneway([
+        {"access_type": "denied", "when": {"heading": "backward", "mode": ["bus"]}}
+    ])
+
+def test_global_overture_speed_limit_overrides_class_speed():
+    assert round(_effective_speed_kph([
+        {"max_speed": {"value": 30, "unit": "mph"}}
+    ], 60.0), 3) == round(30 * 1.609344, 3)
+    assert _effective_speed_kph(
+        [{"max_speed": {"value": 50, "unit": "km/h"}, "between": [0.0, 0.5]}],
+        60.0,
+    ) == 60.0
