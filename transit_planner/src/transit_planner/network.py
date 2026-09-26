@@ -175,6 +175,16 @@ class Network:
             self.stops[right_id].location,
         )
 
+    def route_segment_run_time_min(self, route: Route, index: int) -> float:
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        section_id = route.track_section_for_segment(index)
+        speed = profile.rows[profile.default_row].speed_kph
+        if section_id is not None:
+            section = self.track_sections[section_id]
+            if section.speed_limit_kph is not None:
+                speed = section.speed_limit_kph
+        return self.route_segment_length_km(route, index) / speed * 60.0
+
     def route_length_km(self, route: Route) -> float:
         return sum(
             self.route_segment_length_km(route, index)
@@ -182,15 +192,10 @@ class Network:
         )
 
     def route_run_time_min(self, route: Route) -> float:
-        total = 0.0
-        profile = REFERENCE_MODE_PROFILES[route.mode.value]
-        fallback_speed = profile.rows[profile.default_row].speed_kph
-        for index in range(len(route.segment_pairs())):
-            section_id = route.track_section_for_segment(index)
-            section = None if section_id is None else self.track_sections[section_id]
-            speed = fallback_speed if section is None or section.speed_limit_kph is None else section.speed_limit_kph
-            total += self.route_segment_length_km(route, index) / speed * 60.0
-        return total
+        return sum(
+            self.route_segment_run_time_min(route, index)
+            for index in range(len(route.segment_pairs()))
+        )
 
     @staticmethod
     def _add_unique(collection: dict[str, object], item_id: str, kind: str) -> None:
