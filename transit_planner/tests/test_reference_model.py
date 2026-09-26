@@ -43,6 +43,10 @@ def test_mode_profiles_expose_capacity_dwell_and_row_cost():
     assert REFERENCE_MODE_PROFILES["tram"].dwell_per_passenger_s == 0.6
     assert REFERENCE_MODE_PROFILES["metro"].rows["reserved"].cost_per_km == 32.0
     assert REFERENCE_MODE_PROFILES["rail"].platform_m == 140.0
+    assert REFERENCE_MODE_PROFILES["bus"].lateral_acceleration_mps2 == 1.1
+    assert REFERENCE_MODE_PROFILES["tram"].lateral_acceleration_mps2 == 0.9
+    assert REFERENCE_MODE_PROFILES["metro"].infill_m == 60.0
+    assert REFERENCE_MODE_PROFILES["rail"].infill_m == 35.0
 
 
 def test_reference_generalized_cost_defaults():
