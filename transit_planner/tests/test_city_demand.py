@@ -1,5 +1,5 @@
 from transit_planner.city import DemandZone
-from transit_planner.city_demand import CityDemandConfig, build_city_demand
+from transit_planner.city_demand import build_city_demand
 from transit_planner.geo import Point
 from transit_planner.places import CityPlace
 
@@ -19,7 +19,6 @@ def test_build_city_demand_uses_places_and_population():
         places,
         origin_lon=39.2,
         origin_lat=51.67,
-        config=CityDemandConfig(trip_rate=0.1, decay=0.01),
     )
 
     assert demand.total_trips_per_day > 0
@@ -33,6 +32,6 @@ def test_city_demand_is_zero_for_empty_population():
         DemandZone("b", 1000, 0, population=0, jobs=0),
     )
 
-    demand = build_city_demand(zones, (), config=CityDemandConfig(trip_rate=0.1))
+    demand = build_city_demand(zones, ())
 
     assert demand.total_trips_per_day == 0
