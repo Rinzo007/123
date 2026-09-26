@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
 import {
+  createTimetable,
   loadOvertureNetwork,
   loadOvertureRoute,
   validateNetwork,
@@ -170,6 +171,7 @@ export function App() {
   const [showStops, setShowStops] = useState(true);
   const [showPlaces, setShowPlaces] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
+  const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
 
   useEffect(() => {
     drawModeRef.current = drawMode;
@@ -457,6 +459,22 @@ export function App() {
     }
   }
 
+
+  async function generateTimetable() {
+    const service = network.services[0];
+    if (!service) return;
+    setBusy(true);
+    setMessage("Формирование расписания…");
+    try {
+      const result = await createTimetable(service.id, network.periods, service.headway_by_period);
+      setTimetable(result);
+      setMessage("Расписание сформировано");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка формирования расписания");
+    } finally {
+      setBusy(false);
+    }
+  }
   function exportJson() {
     const blob = new Blob([JSON.stringify(network, null, 2)], {
       type: "application/json",
