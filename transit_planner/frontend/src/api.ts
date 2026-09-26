@@ -1,3 +1,4 @@
+import type { FeatureCollection } from "geojson";
 import type { NetworkPayload, ValidationResult } from "./types";
 
 export async function validateNetwork(
@@ -30,8 +31,8 @@ async function loadJson<T>(
 async function loadGeoJson(
   path: string,
   params: URLSearchParams,
-): Promise<GeoJSON.FeatureCollection> {
-  return loadJson<GeoJSON.FeatureCollection>(path, params);
+): Promise<FeatureCollection> {
+  return loadJson<FeatureCollection>(path, params);
 }
 
 export function loadOvertureStops(
@@ -39,7 +40,7 @@ export function loadOvertureStops(
   west: number,
   north: number,
   east: number,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<FeatureCollection> {
   return loadGeoJson(
     "/api/v1/data/overture/stops",
     new URLSearchParams({
@@ -56,7 +57,7 @@ export function loadOvertureRoads(
   west: number,
   north: number,
   east: number,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<FeatureCollection> {
   return loadGeoJson(
     "/api/v1/data/overture/roads",
     new URLSearchParams({
@@ -73,7 +74,7 @@ export function loadOvertureConnectors(
   west: number,
   north: number,
   east: number,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<FeatureCollection> {
   return loadGeoJson(
     "/api/v1/data/overture/connectors",
     new URLSearchParams({
@@ -86,10 +87,10 @@ export function loadOvertureConnectors(
 }
 
 export interface OvertureNetworkResponse {
-  roads: GeoJSON.FeatureCollection;
-  connectors: GeoJSON.FeatureCollection;
-  stops: GeoJSON.FeatureCollection;
-  places: GeoJSON.FeatureCollection;
+  roads: FeatureCollection;
+  connectors: FeatureCollection;
+  stops: FeatureCollection;
+  places: FeatureCollection;
   release: string;
   counts: {
     roads: number;
@@ -236,14 +237,14 @@ export function loadDemandStreets(
   zones: Array<{ id: string; centroid_x: number; centroid_y: number }>,
   originLon: number,
   originLat: number,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<FeatureCollection> {
   return fetch("/api/v1/demand/streets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ demand, zones, origin_lon: originLon, origin_lat: originLat }),
   }).then(async (response) => {
     if (!response.ok) throw new Error(await response.text() || "Не удалось построить demand streets");
-    return response.json() as Promise<GeoJSON.FeatureCollection>;
+    return response.json() as Promise<FeatureCollection>;
   });
 }
 export function loadPopulationZones(
@@ -251,7 +252,7 @@ export function loadPopulationZones(
   west: number,
   north: number,
   east: number,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<FeatureCollection> {
   return loadGeoJson(
     "/api/v1/demand/population-zones",
     new URLSearchParams({
