@@ -790,6 +790,39 @@ def city_assignment(payload: dict) -> dict:
                 "average_transfers": item.result.metrics.average_transfers,
                 "average_wait_time_min": item.result.metrics.average_wait_time_min,
                 "max_load_ratio": item.result.max_load_ratio,
+                "services": [
+                    {
+                        "service_id": service.service_id,
+                        "route_id": service.route_id,
+                        "period_id": service.period_id,
+                        "departures": service.departures,
+                        "fleet": service.fleet,
+                        "riders": service.riders,
+                        "peak_load_factor": service.peak_load_factor,
+                        "effective_headway_min": service.effective_headway_min,
+                        "minimum_station_headway_min": service.minimum_station_headway_min,
+                        "minimum_headway_min": service.minimum_headway_min,
+                        "minimum_headway_why": service.minimum_headway_why,
+                        "daily_vehicle_km": service.daily_vehicle_km,
+                        "daily_opex": service.daily_opex,
+                    }
+                    for service_id, service in (
+                        (
+                            service.service_id,
+                            service,
+                        )
+                        for service in (
+                            _service_analytics(
+                                network,
+                                service_id,
+                                item.period_id,
+                                assignment=item.result,
+                            )
+                            for service_id in network.services
+                            if item.period_id in network.services[service_id].headway_by_period
+                        )
+                    )
+                ],
                 "economics": _economics_result_to_dict(
                     temporal_economics[index]
                 ),
@@ -867,6 +900,8 @@ def calculate_assignment(payload: dict) -> dict:
                 "daily_vehicle_km": item.daily_vehicle_km,
                 "daily_opex": item.daily_opex,
                 "capacity_per_direction": item.capacity_per_direction,
+                "riders": item.riders,
+                "peak_load_factor": item.peak_load_factor,
                 "effective_headway_min": item.effective_headway_min,
                 "minimum_station_headway_min": item.minimum_station_headway_min,
                 "minimum_headway_min": item.minimum_headway_min,
