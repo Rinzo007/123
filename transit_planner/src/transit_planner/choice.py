@@ -6,6 +6,7 @@ from math import exp
 from .reference_model import (
     REFERENCE_CAR,
     REFERENCE_MOBILITY,
+    REFERENCE_NO_CAR_EFFECTIVENESS,
     REFERENCE_TRANSFER,
     REFERENCE_VOT_S_PER_EUR,
 )
@@ -37,6 +38,7 @@ class ChoiceConfig:
     walk_speed_kph: float = 5.0
     bike_speed_kph: float = REFERENCE_MOBILITY.two_wheel_speed_kph
     no_car_share: float = REFERENCE_MOBILITY.no_car_share
+    no_car_effectiveness: float = REFERENCE_NO_CAR_EFFECTIVENESS
 
     def __post_init__(self) -> None:
         if self.value_of_time_s_per_eur <= 0:
@@ -57,6 +59,8 @@ class ChoiceConfig:
             raise ValueError("Walking and cycling speeds must be positive")
         if not 0.0 <= self.no_car_share <= 1.0:
             raise ValueError("no_car_share must be in [0, 1]")
+        if not 0.0 <= self.no_car_effectiveness <= 1.0:
+            raise ValueError("no_car_effectiveness must be in [0, 1]")
         if not 0.0 <= self.two_wheel_share <= 1.0:
             raise ValueError("two_wheel_share must be in [0, 1]")
 
@@ -212,25 +216,18 @@ def probabilities(
 
 def alternative_probabilities(
     alternatives: tuple[tuple[float, float], ...],
-    *,
-    config: ChoiceConfig = ChoiceConfig(),
 ) -> tuple[float, ...]:
     """Split transit demand by inverse generalized travel time."""
     if not alternatives:
         return ()
-    generalized = tuple(
-        max(
-            1.0,
-            max(0.0, time_min)
-            + config.transit_wait_weight * max(0.0, wait_min)
-            + config.transit_bias_minutes,
-        )
-        for time_min, wait_min in alternatives
+    travel_times = tuple(
+        max(1.0, max(0.0, time_min))
+        for time_min, _wait_min in alternatives
     )
-    weights = tuple(1.0 / value for value in generalized)
+    weights = tuple(1.0 / value for value in travel_times)
     total = sum(weights)
     return (
         tuple(weight / total for weight in weights)
-        if total > 0
+        if total > 0.0
         else tuple(0.0 for _ in weights)
     )
