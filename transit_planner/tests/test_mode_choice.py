@@ -1,4 +1,4 @@
-from transit_planner.mode_choice import ModeChoiceConfig, probabilities, utilities
+from transit_planner.choice import ChoiceConfig, probabilities, utilities
 
 
 def test_logit_probabilities_sum_to_one():
@@ -6,7 +6,7 @@ def test_logit_probabilities_sum_to_one():
         walk_time_min=30,
         car_time_min=15,
         transit_time_min=20,
-        config=ModeChoiceConfig(scale=0.1),
+        config=ChoiceConfig(value_of_time_s_per_eur=600.0),
     )
     probs = probabilities(values)
     assert abs(sum(probs.values()) - 1.0) < 1e-12
