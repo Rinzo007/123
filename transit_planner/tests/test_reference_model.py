@@ -122,3 +122,12 @@ def test_reference_minimum_headway_rules():
 def test_reference_mobility_includes_no_car_defaults():
     assert REFERENCE_MOBILITY.no_car_share == 0.35
     assert REFERENCE_NO_CAR_EFFECTIVENESS == 0.78
+
+
+def test_lateral_speed_limit_uses_mode_acceleration():
+    from transit_planner.reference_model import lateral_speed_limit_kph
+
+    assert lateral_speed_limit_kph("bus", 0.0) == 0.0
+    expected = (1.1 * 100.0) ** 0.5 * 3.6
+    assert lateral_speed_limit_kph("bus", 100.0) == expected
+    assert lateral_speed_limit_kph("tram", 100.0) < lateral_speed_limit_kph("bus", 100.0)
