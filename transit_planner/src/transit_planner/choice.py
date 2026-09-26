@@ -6,7 +6,6 @@ from math import exp
 from .reference_model import (
     REFERENCE_CAR,
     REFERENCE_MOBILITY,
-    REFERENCE_NO_CAR_EFFECTIVENESS,
     REFERENCE_TRANSFER,
     REFERENCE_VOT_S_PER_EUR,
 )
@@ -38,7 +37,6 @@ class ChoiceConfig:
     walk_speed_kph: float = 5.0
     bike_speed_kph: float = REFERENCE_MOBILITY.two_wheel_speed_kph
     no_car_share: float = REFERENCE_MOBILITY.no_car_share
-    no_car_effectiveness: float = REFERENCE_NO_CAR_EFFECTIVENESS
 
     def __post_init__(self) -> None:
         if self.value_of_time_s_per_eur <= 0:
@@ -59,8 +57,6 @@ class ChoiceConfig:
             raise ValueError("Walking and cycling speeds must be positive")
         if not 0.0 <= self.no_car_share <= 1.0:
             raise ValueError("no_car_share must be in [0, 1]")
-        if not 0.0 <= self.no_car_effectiveness <= 1.0:
-            raise ValueError("no_car_effectiveness must be in [0, 1]")
         if not 0.0 <= self.two_wheel_share <= 1.0:
             raise ValueError("two_wheel_share must be in [0, 1]")
 
