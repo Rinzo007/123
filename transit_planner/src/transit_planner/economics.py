@@ -56,7 +56,6 @@ def calculate_economics(
     config: EconomicsConfig,
 ) -> EconomicsResult:
     period = network.periods[config.period_id]
-    duration = period.end_minute - period.start_minute
     daily_vehicle_km = 0.0
     daily_fleet_cost = 0.0
     daily_operating_cost = 0.0
@@ -69,7 +68,7 @@ def calculate_economics(
         headway = service.headway_by_period.get(config.period_id)
         if headway is None:
             continue
-        departures = ceil(duration / headway)
+        departures = network.service_departures(service, config.period_id)
         route = network.routes[service.route_id]
         active_routes.add(route.id)
         length_km = network.route_length_km(route)
