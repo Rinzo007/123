@@ -33,6 +33,7 @@ class TrackSection:
     capacity_departures_per_hour: float = 30.0
     shared_group: str | None = None
     station_ids: tuple[str, ...] = ()
+    speed_limit_kph: float | None = None
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -41,6 +42,8 @@ class TrackSection:
             raise ValueError("Track length cannot be negative")
         if self.capacity_departures_per_hour <= 0:
             raise ValueError("Track capacity must be positive")
+        if self.speed_limit_kph is not None and self.speed_limit_kph <= 0:
+            raise ValueError("Track speed limit must be positive")
 
 
 @dataclass(frozen=True, slots=True)
