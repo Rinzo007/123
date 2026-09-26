@@ -181,6 +181,7 @@ def build_temporal_demand(
                         period.key,
                         trips,
                         "work",
+                        pair.base_time_min,
                     )
                 )
 
@@ -217,6 +218,7 @@ def build_daily_demand(
             pair.destination_zone_id,
             pair.trips_per_day,
             "work",
+            pair.base_time_min,
         )
         for pair in commuter.pairs
         if pair.trips_per_day > 0
