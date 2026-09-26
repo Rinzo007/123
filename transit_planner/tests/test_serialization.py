@@ -1,4 +1,5 @@
 from transit_planner.geo import Point
+from transit_planner.serialization import network_from_dict, network_to_dict
 from transit_planner.infrastructure import TrackSection
 from transit_planner.network import (
     Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType,
