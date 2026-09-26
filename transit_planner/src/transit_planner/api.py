@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
-from .geojson import roads_to_geojson, stops_to_geojson
+from .geojson import connectors_to_geojson, roads_to_geojson, stops_to_geojson
 from .overture import (
+    OvertureConnectorProvider,
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
@@ -51,9 +52,7 @@ def _bbox(
 
 
 def _overture_source(release: str | None) -> OvertureSource:
-    return OvertureSource(
-        release=(release or DEFAULT_OVERTURE_RELEASE).strip()
-    )
+    return OvertureSource(release=(release or DEFAULT_OVERTURE_RELEASE).strip())
 
 
 @app.get("/health")
@@ -81,10 +80,9 @@ def overture_roads(
     release: str | None = Query(None),
 ) -> dict:
     try:
-        bbox = _bbox(south, west, north, east)
         roads = OvertureTransportationProvider(
             source=_overture_source(release),
-            bbox=bbox,
+            bbox=_bbox(south, west, north, east),
         ).load_roads()
     except (OSError, RuntimeError, TimeoutError) as exc:
         raise HTTPException(
@@ -92,6 +90,27 @@ def overture_roads(
             detail=f"Overture недоступен: {exc}",
         ) from exc
     return roads_to_geojson(roads)
+
+
+@app.get("/api/v1/data/overture/connectors")
+def overture_connectors(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+    release: str | None = Query(None),
+) -> dict:
+    try:
+        connectors = OvertureConnectorProvider(
+            source=_overture_source(release),
+            bbox=_bbox(south, west, north, east),
+        ).load_connectors()
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Overture недоступен: {exc}",
+        ) from exc
+    return connectors_to_geojson(connectors)
 
 
 @app.get("/api/v1/data/overture/stops")
@@ -103,10 +122,9 @@ def overture_stops(
     release: str | None = Query(None),
 ) -> dict:
     try:
-        bbox = _bbox(south, west, north, east)
         stops = OvertureTransitProvider(
             source=_overture_source(release),
-            bbox=bbox,
+            bbox=_bbox(south, west, north, east),
         ).load_stops()
     except (OSError, RuntimeError, TimeoutError) as exc:
         raise HTTPException(
