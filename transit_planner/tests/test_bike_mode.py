@@ -24,7 +24,7 @@ def test_assignment_includes_bike_in_mode_split():
             "z2": DemandZone("z2", 1000, 0, population=1000),
         },
         config=AssignmentConfig(
-            period_id="morning_peak",
+            period_id="peak",
             max_access_distance_m=0,
             mode_choice=ModeChoiceConfig(
                 scale=0.01,
