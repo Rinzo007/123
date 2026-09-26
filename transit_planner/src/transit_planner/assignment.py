@@ -12,6 +12,7 @@ from .reference_model import (
     CROWDED_LOAD_RATIO,
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
+    REFERENCE_TRANSFER,
     SEVERE_LOAD_RATIO,
 )
 
@@ -95,7 +96,7 @@ class AssignmentConfig:
     walking_speed_kph: float = 5.0
     bike_speed_kph: float = 15.12
     choice: ChoiceConfig = ChoiceConfig()
-    transfer_penalty_min: float = 5.0
+    transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
     crowding_penalty_min: float = 20.0
     crowding_start_ratio: float = 1.0
     iterations: int = 6
