@@ -73,7 +73,7 @@ class AssignmentConfig:
     period_id: str
     car_speed_kph: float = 30.0
     walking_speed_kph: float = 5.0
-    bike_speed_kph: float = 15.0
+    bike_speed_kph: float = 15.12
     choice: ChoiceConfig = ChoiceConfig()
     transfer_penalty_min: float = 5.0
     crowding_penalty_min: float = 20.0
@@ -224,6 +224,8 @@ def _assign_once(
                 car_time_min=car_time,
                 transit_time_min=transit_time,
                 bike_time_min=bike_time,
+                transit_fare=config.transit_fare,
+                car_distance_km=distance_m / 1000.0,
                 config=config.choice,
             )
         )
