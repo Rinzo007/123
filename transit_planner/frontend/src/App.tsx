@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
-import { loadOvertureRoads, loadOvertureStops, validateNetwork } from "./api";
+import {
+  loadOvertureConnectors,
+  loadOvertureRoads,
+  loadOvertureStops,
+  validateNetwork,
+} from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
 
@@ -140,6 +145,7 @@ export function App() {
   const [drawMode, setDrawMode] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([]);
   const [cityRoads, setCityRoads] = useState<FeatureCollection | null>(null);
+  const [cityConnectors, setCityConnectors] = useState<FeatureCollection | null>(null);
   const [cityStops, setCityStops] = useState<FeatureCollection | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
@@ -193,6 +199,21 @@ export function App() {
           "line-color": "#9ca3af",
           "line-width": 1.2,
           "line-opacity": 0.65,
+        },
+      });
+
+      map.addSource("city-connectors", {
+        type: "geojson",
+        data: emptyPointCollection(),
+      });
+      map.addLayer({
+        id: "city-connector-circles",
+        type: "circle",
+        source: "city-connectors",
+        paint: {
+          "circle-radius": 2.5,
+          "circle-color": "#f59e0b",
+          "circle-opacity": 0.7,
         },
       });
 
@@ -261,13 +282,15 @@ export function App() {
     const routeSource = map.getSource("draft-route") as GeoJSONSource | undefined;
     const draftStopsSource = map.getSource("draft-stops") as GeoJSONSource | undefined;
     const cityRoadSource = map.getSource("city-roads") as GeoJSONSource | undefined;
+    const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
 
     routeSource?.setData(routeGeoJSON(stops));
     draftStopsSource?.setData(stopsGeoJSON(stops));
     if (cityRoads) cityRoadSource?.setData(cityRoads);
+    if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
-  }, [stops, cityRoads, cityStops]);
+  }, [stops, cityRoads, cityConnectors, cityStops]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headway),
@@ -290,8 +313,14 @@ export function App() {
     setMessage("Загрузка Overture для текущей области…");
     try {
       const bounds = map.getBounds();
-      const [roads, stopsData] = await Promise.all([
+      const [roads, connectors, stopsData] = await Promise.all([
         loadOvertureRoads(
+          bounds.getSouth(),
+          bounds.getWest(),
+          bounds.getNorth(),
+          bounds.getEast(),
+        ),
+        loadOvertureConnectors(
           bounds.getSouth(),
           bounds.getWest(),
           bounds.getNorth(),
@@ -305,9 +334,10 @@ export function App() {
         ),
       ]);
       setCityRoads(roads);
+      setCityConnectors(connectors);
       setCityStops(stopsData);
       setMessage(
-        `Overture загружен: ${roads.features.length} участков, ${stopsData.features.length} остановок`,
+        `Overture загружен: ${roads.features.length} участков, ${connectors.features.length} коннекторов, ${stopsData.features.length} остановок`,
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка загрузки Overture");
@@ -455,6 +485,10 @@ export function App() {
             <div className="metric">
               <span>Overture-дороги</span>
               <b>{cityRoads?.features.length ?? 0}</b>
+            </div>
+            <div className="metric">
+              <span>Коннекторы</span>
+              <b>{cityConnectors?.features.length ?? 0}</b>
             </div>
           </section>
 
