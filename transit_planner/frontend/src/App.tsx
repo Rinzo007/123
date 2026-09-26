@@ -27,10 +27,9 @@ const MODE_LABELS: Record<TransitMode, string> = {
 
 const MODE_CAPACITY: Record<TransitMode, number> = {
   bus: 90,
-  trolleybus: 90,
   tram: 250,
   metro: 750,
-  regional_rail: 1000,
+  rail: 1000,
 };
 
 function toLocalMeters(
