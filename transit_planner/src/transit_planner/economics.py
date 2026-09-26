@@ -5,6 +5,7 @@ from math import ceil, sqrt
 
 from .assignment import AssignmentResult
 from .network import Network, TransitMode
+from .reference_model import REFERENCE_MODE_PROFILES
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +62,8 @@ def calculate_economics(
         # Service is represented per direction in this engine slice.
         vehicle_km = departures * length_km * 2.0
         daily_vehicle_km += vehicle_km
-        daily_operating_cost += vehicle_km * vehicle.operating_cost_per_km
+        operating_cost_per_km = vehicle.operating_cost_per_km or REFERENCE_MODE_PROFILES[route.mode.value].opex_per_vehicle_km
+        daily_operating_cost += vehicle_km * operating_cost_per_km
         capital_cost += length_km * infrastructure_costs.get(route.mode, 0.0)
         capital_cost += len(route.stop_ids) * config.station_cost
 
