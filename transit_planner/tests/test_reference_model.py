@@ -8,7 +8,10 @@ from transit_planner.reference_model import (
     CROWDED_LOAD_RATIO,
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
+    REFERENCE_CAR,
+    REFERENCE_MOBILITY,
     REFERENCE_PERIODS,
+    REFERENCE_TRANSFER,
     REFERENCE_PURPOSE_LAYERS,
     SEVERE_LOAD_RATIO,
 )
@@ -40,6 +43,14 @@ def test_mode_profiles_expose_capacity_dwell_and_row_cost():
     assert REFERENCE_MODE_PROFILES["tram"].dwell_per_passenger_s == 0.6
     assert REFERENCE_MODE_PROFILES["metro"].rows["reserved"].cost_per_km == 32.0
     assert REFERENCE_MODE_PROFILES["rail"].platform_m == 140.0
+
+
+def test_reference_generalized_cost_defaults():
+    assert REFERENCE_TRANSFER.base_s == 405.0
+    assert REFERENCE_CAR.cost_per_km_eur == 0.25
+    assert REFERENCE_CAR.parking_s == 240.0
+    assert REFERENCE_MOBILITY.two_wheel_speed_kph == 15.12
+    assert REFERENCE_MOBILITY.two_wheel_reach_m == 7000.0
 
 
 def test_crowding_thresholds_match_model_levels():
