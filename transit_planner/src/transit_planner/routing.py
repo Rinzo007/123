@@ -173,7 +173,7 @@ class TransitRouter:
                             "transit",
                             stop_id,
                             option.neighbor_stop_id,
-                            wait + run + penalty,
+                            run,
                             option.route_id,
                             wait_min=wait,
                         ),
@@ -204,7 +204,7 @@ class TransitRouter:
         return Journey(
             origin_stop_id=origin.id,
             destination_stop_id=destination.id,
-            duration_min=best[target_state],
+            duration_min=sum(leg.duration_min for leg in legs),
             transfers=transfers,
             legs=tuple(legs),
         )
