@@ -41,7 +41,6 @@ def build_city_demand(
     *,
     origin_lon: float | None = None,
     origin_lat: float | None = None,
-    config: CityDemandConfig = CityDemandConfig(),
 ) -> DemandMatrix:
     projected_places = _project_places(
         places,
@@ -49,12 +48,7 @@ def build_city_demand(
         origin_lat=origin_lat,
     )
     enriched_zones = aggregate_place_attractions(zones, projected_places)
-    return build_daily_demand(
-        enriched_zones,
-        trip_rate=config.trip_rate,
-        decay=config.decay,
-        reference_speed_kph=config.reference_speed_kph,
-    )
+    return build_daily_demand(enriched_zones)
 
 
 def build_city_demand_layers(
