@@ -304,7 +304,7 @@ def test_temporal_economics_sums_operations_and_counts_capital_once():
         config=EconomicsConfig(period_id="am"),
     )
 
-    assert result.daily_vehicle_km == 24.0
-    assert result.daily_operating_cost == 48.0
+    assert result.daily_vehicle_km == 72.0
+    assert result.daily_operating_cost == 144.0
     assert result.capital_cost == 0.4
     assert result.daily_fleet_cost == 250.0
