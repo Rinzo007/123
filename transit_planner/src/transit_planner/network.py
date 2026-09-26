@@ -208,7 +208,11 @@ class Network:
     def service_departures(self, service: Service, period_id: str) -> int:
         period = self.periods[period_id]
         headway = service.headway_by_period[period_id]
-        return ceil((period.end_minute - period.start_minute) / headway)
+        offset = service.departure_offset_by_period.get(period_id, 0.0)
+        first = period.start_minute + ((offset - period.start_minute) % headway)
+        if first >= period.end_minute:
+            return 0
+        return ceil((period.end_minute - first) / headway)
 
     @staticmethod
     def _add_unique(collection: dict[str, object], item_id: str, kind: str) -> None:
