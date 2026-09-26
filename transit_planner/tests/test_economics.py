@@ -137,11 +137,12 @@ def test_physical_station_links_prevent_duplicate_station_capex() -> None:
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0), True))
     network.add_stop(Stop("b", "B", Point(1000, 0), True))
+    network.add_stop(Stop("c", "C", Point(2000, 0), True))
     network.add_track_section(
         TrackSection("s1", 1.0, station_ids=("a", "b"))
     )
     network.add_track_section(
-        TrackSection("s2", 1.0, station_ids=("b",))
+        TrackSection("s2", 1.0, station_ids=("b", "c"))
     )
     network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
     network.add_period(ServicePeriod("am", 360, 540))
@@ -150,7 +151,7 @@ def test_physical_station_links_prevent_duplicate_station_capex() -> None:
             "r1",
             "1",
             TransitMode.TRAM,
-            ("a", "b", "a"),
+            ("a", "b", "c"),
             track_section_ids=("s1", "s2"),
             closed=False,
         )
@@ -171,4 +172,4 @@ def test_physical_station_links_prevent_duplicate_station_capex() -> None:
         ),
     )
 
-    assert result.capital_cost == 2 * 3.0
+    assert result.capital_cost == 3 * 3.0
