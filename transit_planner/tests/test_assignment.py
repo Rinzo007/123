@@ -66,6 +66,7 @@ def test_mode_shares_sum_to_one():
         result.metrics.transit_share
         + result.metrics.car_trips / total
         + result.metrics.walk_trips / total
+        + result.metrics.bike_trips / total
         - 1
     ) < 1e-9
 
