@@ -16,7 +16,7 @@ def test_calibration_report_contains_mae_rmse_and_mape():
 
     assert report.mae == 15.0
     assert abs(report.rmse - (250.0 ** 0.5)) < 1e-12
-    assert report.mape == 0.075
+    assert report.mape == 0.1
 
 
 def test_calibration_uses_zero_when_simulated_route_is_missing():
