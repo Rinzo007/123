@@ -37,6 +37,9 @@ def generate_grid_zones(
     if min_x >= max_x or min_y >= max_y:
         raise ValueError("Invalid zone extent")
 
+    population_points = tuple(population_points)
+    job_points = tuple(job_points)
+
     zones: list[DemandZone] = []
     y = min_y
     row = 0

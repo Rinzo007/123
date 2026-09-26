@@ -2,7 +2,13 @@ from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix
 from transit_planner.geo import Point
 from transit_planner.network import (
-    Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType,
+    Network,
+    Route,
+    Service,
+    ServicePeriod,
+    Stop,
+    TransitMode,
+    VehicleType,
 )
 from transit_planner.od import GravityParameters, gravity_od
 from transit_planner.routing import RouterConfig, TransitRouter
@@ -13,7 +19,10 @@ from transit_planner.zones import generate_grid_zones
 
 def test_grid_zones_aggregate_population_and_jobs():
     zones = generate_grid_zones(
-        0, 0, 200, 200,
+        0,
+        0,
+        200,
+        200,
         cell_size=100,
         population_points=((10, 10, 100), (150, 150, 50)),
         job_points=((10, 10, 40),),
@@ -31,7 +40,7 @@ def test_gravity_od_balances_to_origin_production():
     )
     demand = gravity_od(
         zones,
-        parameters=GravityParameters(impedance_minutes=20, decay=0.01),
+        parameters=GravityParameters(reference_speed_kph=30, decay=0.01),
         trip_rate=0.1,
     )
     assert isinstance(demand, DemandMatrix)
@@ -69,5 +78,4 @@ def test_router_waits_once_on_continuation():
     assert journey is not None
     assert journey.transfers == 0
     assert len(journey.legs) == 2
-    # 5 min wait + 2 km at 20 km/h = 11 min.
     assert abs(journey.duration_min - 11.0) < 1e-9

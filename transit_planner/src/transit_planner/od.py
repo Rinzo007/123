@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp, inf, isclose
+from math import exp, isclose
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
@@ -9,13 +9,13 @@ from .demand import DemandMatrix, ODPairDemand
 
 @dataclass(frozen=True, slots=True)
 class GravityParameters:
-    impedance_minutes: float = 20.0
+    reference_speed_kph: float = 30.0
     decay: float = 0.08
     intrazonal_factor: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.impedance_minutes <= 0:
-            raise ValueError("impedance_minutes must be positive")
+        if self.reference_speed_kph <= 0:
+            raise ValueError("reference_speed_kph must be positive")
         if self.decay <= 0:
             raise ValueError("decay must be positive")
         if not 0 < self.intrazonal_factor <= 1:
@@ -28,11 +28,6 @@ def gravity_od(
     parameters: GravityParameters = GravityParameters(),
     trip_rate: float = 0.12,
 ) -> DemandMatrix:
-    """Generate a balanced synthetic OD matrix.
-
-    Productions are population * trip_rate and attractions are proportional to jobs.
-    When no jobs exist, population is used as the attraction proxy.
-    """
     if trip_rate < 0:
         raise ValueError("trip_rate cannot be negative")
 
@@ -48,13 +43,13 @@ def gravity_od(
     raw: list[tuple[str, str, float]] = []
     for origin in zones:
         for destination in zones:
-            distance = _distance(origin, destination)
-            impedance = (
+            distance_m = _distance_m(origin, destination)
+            impedance_minutes = (
                 parameters.intrazonal_factor
-                if distance == 0
-                else distance / parameters.impedance_minutes
+                if distance_m == 0
+                else distance_m / 1000.0 / parameters.reference_speed_kph * 60.0
             )
-            friction = exp(-parameters.decay * impedance)
+            friction = exp(-parameters.decay * impedance_minutes)
             weight = attraction_base[destination] * friction
             raw.append((origin.id, destination.id, weight))
 
@@ -65,11 +60,18 @@ def gravity_od(
 
     for origin_id, destination_id, weight in raw:
         total = by_origin[origin_id]
-        trips = 0.0 if isclose(total, 0.0, abs_tol=1e-12) else productions[origin_id] * weight / total
+        trips = (
+            0.0
+            if isclose(total, 0.0, abs_tol=1e-12)
+            else productions[origin_id] * weight / total
+        )
         pairs.append(ODPairDemand(origin_id, destination_id, trips))
 
     return DemandMatrix(tuple(pairs))
 
 
-def _distance(a: DemandZone, b: DemandZone) -> float:
-    return ((a.centroid_x - b.centroid_x) ** 2 + (a.centroid_y - b.centroid_y) ** 2) ** 0.5
+def _distance_m(a: DemandZone, b: DemandZone) -> float:
+    return (
+        (a.centroid_x - b.centroid_x) ** 2
+        + (a.centroid_y - b.centroid_y) ** 2
+    ) ** 0.5

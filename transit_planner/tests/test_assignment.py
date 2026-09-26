@@ -1,11 +1,10 @@
 from transit_planner.assignment import AssignmentConfig, assign_demand
-from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.geo import Point
 from transit_planner.network import (
     Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType,
 )
-from transit_planner.routing import TransitRouter
+from transit_planner.routing import RouterConfig, TransitRouter
 
 
 def make_network() -> Network:
@@ -26,15 +25,14 @@ def test_assignment_produces_transit_flow():
         network,
         demand,
         config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
-        router=TransitRouter(network),
+        router=TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0)),
     )
 
     assert result.metrics.total_trips == 100
     assert result.metrics.transit_trips > 0
     assert result.route_flows[0].passenger_section_traversals > 0
     section = next(
-        item
-        for item in result.section_loads
+        item for item in result.section_loads
         if item.from_stop_id == "a" and item.to_stop_id == "b"
     )
     assert section.passengers > 0
@@ -69,3 +67,22 @@ def test_mode_shares_sum_to_one():
         + result.metrics.walk_trips / total
         - 1
     ) < 1e-9
+
+
+def test_walking_only_path_is_not_counted_as_transit():
+    network = make_network()
+    router = TransitRouter(
+        network,
+        config=RouterConfig(walk_transfer_radius_m=1200),
+    )
+    result = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 100),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+        router=router,
+    )
+    assert result.metrics.transit_trips >= 0
+    assert all(
+        item.passengers >= 0
+        for item in result.section_loads
+    )

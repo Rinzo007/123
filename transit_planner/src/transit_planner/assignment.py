@@ -66,6 +66,7 @@ class AssignmentConfig:
     car_speed_kph: float = 30.0
     walking_speed_kph: float = 5.0
     mode_choice: ModeChoiceConfig = ModeChoiceConfig()
+    transfer_penalty_min: float = 5.0
     crowding_penalty_min: float = 20.0
     crowding_start_ratio: float = 0.85
     iterations: int = 6
@@ -76,6 +77,8 @@ class AssignmentConfig:
     def __post_init__(self) -> None:
         if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
+        if self.transfer_penalty_min < 0:
+            raise ValueError("transfer_penalty_min cannot be negative")
         if self.crowding_penalty_min < 0:
             raise ValueError("crowding_penalty_min cannot be negative")
         if self.crowding_start_ratio < 0:
@@ -140,10 +143,7 @@ def assign_demand(
         stop_flows=snapshot.stop_flows,
         unserved_transit_demand=snapshot.unserved,
         iterations=converged_after,
-        max_load_ratio=max(
-            (section.load_ratio for section in snapshot.section_loads),
-            default=0.0,
-        ),
+        max_load_ratio=max((s.load_ratio for s in snapshot.section_loads), default=0.0),
     )
 
 
@@ -185,23 +185,23 @@ def _assign_once(
         walk_time = distance_m / 1000.0 / config.walking_speed_kph * 60.0
         car_time = distance_m / 1000.0 / config.car_speed_kph * 60.0
 
-        origin_stop_id = zone_stops.get(pair.origin_zone_id) or _resolve_stop(
-            network, pair.origin_zone_id
-        )
-        destination_stop_id = zone_stops.get(pair.destination_zone_id) or _resolve_stop(
-            network, pair.destination_zone_id
-        )
+        origin_stop_id = zone_stops.get(pair.origin_zone_id) or _resolve_stop(network, pair.origin_zone_id)
+        destination_stop_id = zone_stops.get(pair.destination_zone_id) or _resolve_stop(network, pair.destination_zone_id)
 
         journey: Journey | None = None
         if origin_stop_id and destination_stop_id:
-            journey = router.shortest(
+            candidate = router.shortest(
                 network.stops[origin_stop_id],
                 network.stops[destination_stop_id],
                 period_id=config.period_id,
                 route_penalties=route_penalties,
             )
+            if candidate is not None and any(leg.kind == "transit" for leg in candidate.legs):
+                journey = candidate
 
-        transit_time = None if journey is None else journey.duration_min
+        transit_time = None if journey is None else (
+            journey.duration_min + journey.transfers * config.transfer_penalty_min
+        )
         probs = probabilities(
             utilities(
                 walk_time_min=walk_time,
@@ -214,7 +214,6 @@ def _assign_once(
         transit_trips = trips * probs["transit"]
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
-
         total_transit += transit_trips
         total_car += car_trips
         total_walk += walk_trips
@@ -223,13 +222,12 @@ def _assign_once(
             unserved += transit_trips
             continue
 
-        weighted_transit_time += transit_trips * journey.duration_min
+        weighted_transit_time += transit_trips * transit_time if transit_time is not None else 0.0
         weighted_transfers += transit_trips * journey.transfers
 
         for index, leg in enumerate(journey.legs):
             if leg.kind != "transit" or leg.route_id is None:
                 continue
-
             key = (leg.route_id, leg.from_id, leg.to_id)
             section_flow[key] = section_flow.get(key, 0.0) + transit_trips
             route_traversals[leg.route_id] = route_traversals.get(leg.route_id, 0.0) + transit_trips
@@ -250,7 +248,6 @@ def _assign_once(
             if not previous_same_route:
                 route_boardings[leg.route_id] = route_boardings.get(leg.route_id, 0.0) + transit_trips
                 stop_boardings[leg.from_id] = stop_boardings.get(leg.from_id, 0.0) + transit_trips
-
                 if previous_leg is not None and previous_leg.kind == "walk":
                     stop_transfers[leg.from_id] = stop_transfers.get(leg.from_id, 0.0) + transit_trips
 
@@ -294,12 +291,8 @@ def _assign_once(
         car_trips=total_car,
         walk_trips=total_walk,
         transit_share=0.0 if total <= 0 else total_transit / total,
-        average_transit_time_min=(
-            0.0 if total_transit <= 0 else weighted_transit_time / total_transit
-        ),
-        average_transfers=(
-            0.0 if total_transit <= 0 else weighted_transfers / total_transit
-        ),
+        average_transit_time_min=0.0 if total_transit <= 0 else weighted_transit_time / total_transit,
+        average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
     )
     return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved)
 
