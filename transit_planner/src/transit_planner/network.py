@@ -167,9 +167,9 @@ class Network:
 
     def route_segment_length_km(self, route: Route, index: int) -> float:
         left_id, right_id = route.segment_pairs()[index]
-        section = self._track_for_segment(route, index)
-        if section is not None:
-            return section.length_km
+        section_id = route.track_section_for_segment(index)
+        if section_id is not None:
+            return self.track_sections[section_id].length_km
         return _point_distance_km(
             self.stops[left_id].location,
             self.stops[right_id].location,
@@ -186,14 +186,11 @@ class Network:
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
         fallback_speed = profile.rows[profile.default_row].speed_kph
         for index in range(len(route.segment_pairs())):
-            section = self._track_for_segment(route, index)
+            section_id = route.track_section_for_segment(index)
+            section = None if section_id is None else self.track_sections[section_id]
             speed = fallback_speed if section is None or section.speed_limit_kph is None else section.speed_limit_kph
             total += self.route_segment_length_km(route, index) / speed * 60.0
         return total
-
-    def _track_for_segment(self, route: Route, index: int) -> TrackSection | None:
-        section_id = route.track_section_for_segment(index)
-        return None if section_id is None else self.track_sections[section_id]
 
     @staticmethod
     def _add_unique(collection: dict[str, object], item_id: str, kind: str) -> None:
