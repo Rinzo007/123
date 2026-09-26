@@ -379,19 +379,29 @@ def compare_scenario_payload(payload: dict) -> dict:
             payload["alternative"],
             default_id="alternative",
         )
-        base = run_scenario(
-            base_definition,
-            economics_config=_economics_config_from_payload(
+        base_economics_config = (
+            _economics_config_from_payload(
                 payload["base"],
                 default_period_id=base_definition.assignment_config.period_id,
-            ),
+            )
+            if "economics_config" in payload["base"]
+            else None
+        )
+        alternative_economics_config = (
+            _economics_config_from_payload(
+                payload["alternative"],
+                default_period_id=alternative_definition.assignment_config.period_id,
+            )
+            if "economics_config" in payload["alternative"]
+            else None
+        )
+        base = run_scenario(
+            base_definition,
+            economics_config=base_economics_config,
         )
         alternative = run_scenario(
             alternative_definition,
-            economics_config=_economics_config_from_payload(
-                payload["alternative"],
-                default_period_id=alternative_definition.assignment_config.period_id,
-            ),
+            economics_config=alternative_economics_config,
         )
         comparison = compare_scenarios(base, alternative)
     except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
