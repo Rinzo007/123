@@ -664,7 +664,7 @@ export function App() {
               <div className="network-header">
                 <div>
                   <h2>Network View</h2>
-                  <p>Текущая схема линий, периодов и частоты обслуживания</p>
+                  <p>Текущая схема линий, периодов и частоты обслуживания</p><button onClick={generateTimetable} disabled={busy || network.services.length === 0}>Сформировать расписание</button>
                 </div>
                 <div className="network-kpis">
                   <div><span>Линий</span><b>{network.routes.length}</b></div>
@@ -706,6 +706,21 @@ export function App() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+              {timetable && (
+                <div className="timetable-panel">
+                  <div className="section-title">Отправления сервиса {timetable.service_id}</div>
+                  {timetable.periods.map((period) => (
+                    <div className="timetable-row" key={period.period_id}>
+                      <strong>{period.period_id}</strong>
+                      <span>{period.departures_minute.slice(0, 8).map((minute) => {
+                        const hours = Math.floor(minute / 60).toString().padStart(2, "0");
+                        const mins = Math.round(minute % 60).toString().padStart(2, "0");
+                        return `${hours}:${mins}`;
+                      }).join(", ")}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
