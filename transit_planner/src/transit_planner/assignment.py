@@ -51,13 +51,20 @@ class AssignmentMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class DemandLoss:
+    reason: str
+    trips: float
+
+
+@dataclass(frozen=True, slots=True)
 class AssignmentResult:
     metrics: AssignmentMetrics
     route_flows: tuple[RouteFlow, ...]
     section_loads: tuple[SectionLoad, ...]
     stop_flows: tuple[StopFlow, ...]
     unserved_transit_demand: float
-    iterations: int
+    loss_reasons: tuple[DemandLoss, ...] = ()
+    iterations: int = 0
     max_load_ratio: float
 
 
@@ -73,6 +80,7 @@ class AssignmentConfig:
     crowding_start_ratio: float = 0.85
     iterations: int = 6
     damping: float = 0.5
+    transit_fare: float = 0.0
     convergence_tolerance: float = 1e-4
     max_access_distance_m: float = 1500.0
 
@@ -89,6 +97,8 @@ class AssignmentConfig:
             raise ValueError("iterations must be positive")
         if not 0 < self.damping <= 1:
             raise ValueError("damping must be in (0, 1]")
+        if self.transit_fare < 0:
+            raise ValueError("transit_fare cannot be negative")
         if self.convergence_tolerance <= 0:
             raise ValueError("convergence_tolerance must be positive")
         if self.max_access_distance_m < 0:
