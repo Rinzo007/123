@@ -23,7 +23,7 @@
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
-  import { $stopsStoreRef as stopsStore, mode as modeStore, $routeNameStoreRef as routeNameStore, $headwaysStoreRef as headwaysStore } from "./stores/network";
+  import { stops as stopsStore, mode as modeStore, routeName as routeNameStore, headways as headwaysStore } from "./stores/network";
   import { project as projectStore, markProjectDirty } from "./stores/project";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
@@ -54,10 +54,10 @@
   type ProjectFile = {
     format: "transit-planner-project";
     version: number;
-    $routeNameStoreRef: string;
+    routeName: string;
     mode: TransitMode;
-    $headwaysStoreRef: Record<string, number>;
-    $stopsStoreRef: StopDraft[];
+    headways: Record<string, number>;
+    stops: StopDraft[];
     network: NetworkPayload;
     roadRoute?: FeatureCollection<LineString, object> | null;
     economics?: { farePerTransitTrip?: number; annualDays?: number };
@@ -112,7 +112,7 @@
   let scenarioComparison: Awaited<ReturnType<typeof compareScenarios>> | null = null;
   let timetable: Awaited<ReturnType<typeof createTimetable>> | null = null;
 
-  let evaluationSummary = { lines: 0, $stopsStoreRef: 0, dailyDepartures: 0 };
+  let evaluationSummary = { lines: 0, stops: 0, dailyDepartures: 0 };
   let busy = false;
   let message = "Готово к редактированию";
   let initialized = false;
@@ -153,7 +153,7 @@
     return {
       origin_lon: origin.lon,
       origin_lat: origin.lat,
-      $stopsStoreRef: metricStops,
+      stops: metricStops,
       routes: $stopsStoreRef.length >= 2
         ? [{ id: "draft-route", name: $routeNameStoreRef, $modeStoreRef, stop_ids: $stopsStoreRef.map((stop) => stop.id), geometry }]
         : [],
@@ -567,7 +567,7 @@
     $routeNameStoreRef = String(project.$routeNameStoreRef ?? "Новый маршрут");
     $modeStoreRef = (project.$modeStoreRef ?? "bus") as TransitMode;
     $headwaysStoreRef = { ...$headwaysStoreRef, ...(project.$headwaysStoreRef ?? {}) };
-    $stopsStoreRef = Array.isArray(project.$stopsStoreRef) ? project.$stopsStoreRef : [];
+    $stopsStoreRef = Array.isArray(project.$stopsStoreRef) ? project.stops: [];
     roadRoute = version >= 3 && project.roadRoute?.type === "FeatureCollection" ? project.roadRoute : null;
     const economics = project.economics ?? {};
     farePerTransitTrip = Number.isFinite(Number(economics.farePerTransitTrip)) ? Math.max(0, Number(economics.farePerTransitTrip)) : 0;
