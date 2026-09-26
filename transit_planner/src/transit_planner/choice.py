@@ -194,19 +194,22 @@ def alternative_probabilities(
     *,
     config: ChoiceConfig = ChoiceConfig(),
 ) -> tuple[float, ...]:
-    """Split transit demand across journeys by generalized transit cost."""
+    """Split transit demand by inverse generalized travel time."""
     if not alternatives:
         return ()
-    values = tuple(
-        -config.time_coefficient
-        * (
+    generalized = tuple(
+        max(
+            1.0,
             max(0.0, time_min)
             + config.transit_wait_weight * max(0.0, wait_min)
-            + config.transit_bias_minutes
+            + config.transit_bias_minutes,
         )
         for time_min, wait_min in alternatives
     )
-    maximum = max(values)
-    weights = tuple(exp(value - maximum) for value in values)
+    weights = tuple(1.0 / value for value in generalized)
     total = sum(weights)
-    return tuple(weight / total for weight in weights) if total > 0 else tuple(0.0 for _ in values)
+    return (
+        tuple(weight / total for weight in weights)
+        if total > 0
+        else tuple(0.0 for _ in weights)
+    )
