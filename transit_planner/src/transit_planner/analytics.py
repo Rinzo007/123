@@ -163,15 +163,8 @@ def _service_analytics(
     headway = service.headway_by_period[period_id]
     duration_min = period.end_minute - period.start_minute
     departures = ceil(duration_min / headway)
-    length_km = sum(
-        _stop_distance_km(
-            network.stops[left_id],
-            network.stops[right_id],
-        )
-        for left_id, right_id in route.segment_pairs()
-    )
-    speed_kph = profile.rows[profile.default_row].speed_kph
-    run_min = 2.0 * length_km / speed_kph * 60.0
+    length_km = network.route_length_km(route)
+    run_min = 2.0 * network.route_run_time_min(route)
     dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
     turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
     cycle_min = run_min + dwell_min + turnback_min
