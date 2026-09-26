@@ -111,7 +111,6 @@ def test_economics_endpoint_calculates_report():
 
 def test_city_assignment_exposes_temporal_economics(monkeypatch):
     import transit_planner.api as api_module
-    from transit_planner.economics import EconomicsConfig, aggregate_temporal_economics
     from transit_planner.geo import Point
     from transit_planner.network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
     from transit_planner.temporal_assignment import PeriodAssignment, TemporalAssignmentResult
