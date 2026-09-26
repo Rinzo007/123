@@ -34,11 +34,14 @@ class ProhibitedTransitionSequenceEntry:
 
 @dataclass(frozen=True, slots=True)
 class ProhibitedTransition:
+    source_segment_id: str
     sequence: tuple[ProhibitedTransitionSequenceEntry, ...]
     final_heading: str | None = None
     when_heading: str | None = None
 
     def __post_init__(self) -> None:
+        if not self.source_segment_id.strip():
+            raise ValueError("source_segment_id cannot be empty")
         if not self.sequence:
             raise ValueError("A prohibited transition needs at least one sequence entry")
         if self.final_heading not in (None, "forward", "backward"):
