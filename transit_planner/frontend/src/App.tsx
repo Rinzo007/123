@@ -663,10 +663,17 @@ export function App() {
         network.origin_lon ?? bounds.getCenter().lng,
         network.origin_lat ?? bounds.getCenter().lat,
         "am",
+        Math.max(0, farePerTransitTrip),
+        Math.max(1, Math.min(366, Math.round(annualDays))),
       );
       setAssignmentResult(result.assignment);
       setCityAssignmentMeta(result.data);
       setCityAssignmentPeriods(result.periods);
+      setEconomicsResult({
+        scenario_id: "citywide",
+        name: "Городская сеть",
+        economics: result.economics,
+      });
       setMessage(`Citywide: ${result.data.zones} зон, ${result.data.places} Places, ${result.data.od_pairs} OD-пар`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Городской расчёт недоступен");
@@ -1221,6 +1228,8 @@ export function App() {
                         <span>спрос {period.demand_trips.toFixed(0)}</span>
                         <span>transit {(period.transit_share * 100).toFixed(1)}%</span>
                         <span>load {(period.max_load_ratio * 100).toFixed(0)}%</span>
+                        <span>opex {period.economics.daily_operating_cost.toFixed(1)}</span>
+                        <span>выручка {period.economics.daily_fare_revenue.toFixed(1)}</span>
                       </div>
                     ))}
                   </div>
