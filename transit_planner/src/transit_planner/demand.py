@@ -9,10 +9,13 @@ class ODPairDemand:
     destination_zone_id: str
     trips_per_day: float
     purpose: str = "all"
+    base_time_min: float | None = None
 
     def __post_init__(self) -> None:
         if self.trips_per_day < 0:
             raise ValueError("Trips cannot be negative")
+        if self.base_time_min is not None and self.base_time_min < 0:
+            raise ValueError("base_time_min cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,10 +34,13 @@ class PeriodODPairDemand:
     period_id: str
     trips: float
     purpose: str = "all"
+    base_time_min: float | None = None
 
     def __post_init__(self) -> None:
         if self.trips < 0:
             raise ValueError("Trips cannot be negative")
+        if self.base_time_min is not None and self.base_time_min < 0:
+            raise ValueError("base_time_min cannot be negative")
         if not self.period_id.strip():
             raise ValueError("period_id cannot be empty")
 
