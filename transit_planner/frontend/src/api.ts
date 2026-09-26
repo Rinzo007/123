@@ -257,6 +257,18 @@ export function loadPopulationZones(
 export interface CityAssignmentResponse {
   data: { zones: number; places: number; od_pairs: number; total_demand_trips: number };
   assignment: AssignmentResponse;
+  periods: Array<{
+    period_id: string;
+    demand_trips: number;
+    transit_trips: number;
+    car_trips: number;
+    walk_trips: number;
+    bike_trips: number;
+    transit_share: number;
+    average_transit_time_min: number;
+    average_transfers: number;
+    max_load_ratio: number;
+  }>;
 }
 
 export function calculateCityAssignment(
