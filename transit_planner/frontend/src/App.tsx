@@ -27,11 +27,11 @@ const MODE_LABELS: Record<TransitMode, string> = {
 };
 
 const MODE_CAPACITY: Record<TransitMode, number> = {
-  bus: 80,
-  trolleybus: 80,
-  tram: 200,
-  metro: 600,
-  regional_rail: 800,
+  bus: 90,
+  trolleybus: 90,
+  tram: 250,
+  metro: 750,
+  regional_rail: 1000,
 };
 
 function toLocalMeters(
@@ -92,11 +92,11 @@ function buildNetworkPayload(
     routes: stops.length >= 2 ? [route] : [],
     vehicle_types: [vehicleType],
     periods: [
-      { id: "night", start_minute: 0, end_minute: 360 },
-      { id: "morning_peak", start_minute: 360, end_minute: 600 },
-      { id: "daytime", start_minute: 600, end_minute: 960 },
-      { id: "evening_peak", start_minute: 960, end_minute: 1200 },
-      { id: "late_evening", start_minute: 1200, end_minute: 1440 },
+      { id: "early", start_minute: 240, end_minute: 360 },
+      { id: "am", start_minute: 360, end_minute: 540 },
+      { id: "mid", start_minute: 540, end_minute: 900 },
+      { id: "pm", start_minute: 900, end_minute: 1140 },
+      { id: "eve", start_minute: 1140, end_minute: 1440 },
     ],
     services:
       stops.length >= 2
@@ -106,11 +106,11 @@ function buildNetworkPayload(
               route_id: "draft-route",
               vehicle_type_id: vehicleType.id,
               headway_by_period: {
-                night: headways.night,
-                morning_peak: headways.morning_peak,
-                daytime: headways.daytime,
-                evening_peak: headways.evening_peak,
-                late_evening: headways.late_evening,
+                early: headways.early,
+                am: headways.am,
+                mid: headways.mid,
+                pm: headways.pm,
+                eve: headways.eve,
               },
             },
           ]
@@ -205,7 +205,7 @@ export function App() {
   const [roadRoute, setRoadRoute] = useState<FeatureCollection<LineString, object> | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
-  const [headways, setHeadways] = useState<Record<string, number>>({ night: 20, morning_peak: 10, daytime: 12, evening_peak: 10, late_evening: 20 });
+  const [headways, setHeadways] = useState<Record<string, number>>({ early: 20, am: 10, mid: 12, pm: 10, eve: 20 });
   const [message, setMessage] = useState("Готово к редактированию");
   const [busy, setBusy] = useState(false);
   const [viewMode, setViewMode] = useState<"map" | "network">("map");
@@ -648,7 +648,7 @@ export function App() {
         bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
         network.origin_lon ?? bounds.getCenter().lng,
         network.origin_lat ?? bounds.getCenter().lat,
-        "morning_peak",
+        "am",
       );
       setAssignmentResult(result.assignment);
       setCityAssignmentMeta(result.data);
@@ -921,7 +921,7 @@ export function App() {
             </div>
             <div className="metric">
               <span>Интервал</span>
-              <b>{headways.morning_peak} мин peak</b>
+              <b>{headways.am} мин пик</b>
             </div>
             <div className="metric">
               <span>Вместимость</span>
