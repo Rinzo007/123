@@ -348,6 +348,62 @@ export interface ScenarioPayload {
     no_car_share?: number;
   }>;
   config: { period_id: string };
+  economics_config?: {
+    period_id?: string;
+    fare_per_transit_trip?: number;
+    annual_days?: number;
+  };
+}
+
+export interface EconomicsResult {
+  daily_vehicle_km: number;
+  daily_fleet_cost: number;
+  daily_operating_cost: number;
+  daily_fare_revenue: number;
+  annual_fleet_cost: number;
+  annual_operating_cost: number;
+  annual_fare_revenue: number;
+  capital_cost: number;
+  operating_cost_per_transit_trip: number;
+  revenue_per_transit_trip: number;
+}
+
+export interface EconomicsResponse {
+  scenario_id: string;
+  name: string;
+  economics: EconomicsResult;
+}
+
+export function calculateEconomics(
+  network: NetworkPayload,
+  demand: ScenarioPayload["demand"],
+  zones: ScenarioPayload["zones"],
+  periodId = "am",
+  farePerTransitTrip = 0,
+  annualDays = 365,
+): Promise<EconomicsResponse> {
+  return fetch("/api/v1/economics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "economics",
+      name: "Текущий сценарий",
+      network,
+      demand,
+      zones,
+      config: { period_id: periodId },
+      economics_config: {
+        period_id: periodId,
+        fare_per_transit_trip: farePerTransitTrip,
+        annual_days: annualDays,
+      },
+    }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(await response.text() || "Не удалось рассчитать экономику");
+    }
+    return response.json() as Promise<EconomicsResponse>;
+  });
 }
 
 export function compareScenarios(
