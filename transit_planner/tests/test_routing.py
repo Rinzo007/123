@@ -176,3 +176,29 @@ def test_router_applies_reference_transfer_penalty_and_multiplier():
     assert journey is not None
     assert journey.transfers == 1
     assert any(leg.kind == "transit" and leg.wait_min >= 0 for leg in journey.legs)
+
+
+def test_router_can_return_route_diverse_alternatives():
+    network = Network()
+    for stop_id, x, y in (("a", 0, 0), ("b", 1000, 0), ("c", 1000, 1000), ("d", 2000, 0)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, y)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("direct", "Direct", TransitMode.BUS, ("a", "b", "d")))
+    network.add_route(Route("detour", "Detour", TransitMode.BUS, ("a", "c", "d")))
+    network.add_service(Service("direct-service", "direct", "bus", {"am": 10}))
+    network.add_service(Service("detour-service", "detour", "bus", {"am": 10}))
+
+    alternatives = TransitRouter(network).shortest_alternatives(
+        network.stops["a"],
+        network.stops["d"],
+        period_id="am",
+        max_alternatives=2,
+    )
+
+    assert len(alternatives) == 2
+    sequences = [
+        tuple(leg.route_id for leg in journey.legs if leg.kind == "transit")
+        for journey in alternatives
+    ]
+    assert sequences[0] != sequences[1]
