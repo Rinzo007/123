@@ -104,6 +104,9 @@ class Network:
         missing = [sid for sid in route.stop_ids if sid not in self.stops]
         if missing:
             raise ValueError(f"Route {route.id} references unknown stops: {missing}")
+        missing_tracks = [sid for sid in route.track_section_ids if sid not in self.track_sections]
+        if missing_tracks:
+            raise ValueError(f"Route {route.id} references unknown track sections: {missing_tracks}")
         self.routes[route.id] = route
 
     def add_vehicle_type(self, vehicle: VehicleType) -> None:
@@ -114,6 +117,9 @@ class Network:
         self._add_unique(self.periods, period.id, "service period")
         self.periods[period.id] = period
 
+    def add_track_section(self, section: TrackSection) -> None:
+        self._add_unique(self.track_sections, section.id, "track section")
+        self.track_sections[section.id] = section
     def add_service(self, service: Service) -> None:
         self._add_unique(self.services, service.id, "service")
         if service.route_id not in self.routes:
