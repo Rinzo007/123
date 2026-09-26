@@ -16,6 +16,7 @@ from .overture import (
     OvertureTransitProvider,
     OvertureTransportationProvider,
 )
+from .overture_network import OvertureNetworkProvider
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
