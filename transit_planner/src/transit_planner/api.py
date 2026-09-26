@@ -347,7 +347,13 @@ def city_demand(payload: dict) -> dict:
         decay=float(payload.get("decay", 0.08)),
         reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
     )
-    demand = build_city_demand(zones, places, config=config)
+    demand = build_city_demand(
+        zones,
+        places,
+        origin_lon=payload.get("origin_lon"),
+        origin_lat=payload.get("origin_lat"),
+        config=config,
+    )
     return {
         "total_trips_per_day": demand.total_trips_per_day,
         "pairs": [
