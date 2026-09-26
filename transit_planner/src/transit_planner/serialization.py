@@ -39,6 +39,7 @@ def network_to_dict(network: Network) -> dict:
         ],
         "periods": [asdict(period) for period in network.periods.values()],
         "services": [asdict(service) for service in network.services.values()],
+        "track_sections": [asdict(section) for section in network.track_sections.values()],
     }
 
 
@@ -65,6 +66,20 @@ def network_from_dict(data: dict) -> Network:
         )
     for raw in data.get("periods", []):
         network.add_period(ServicePeriod(**raw))
+    from .infrastructure import TrackSection, TrackType
+
+    for raw in data.get("track_sections", []):
+        network.add_track_section(
+            TrackSection(
+                id=raw["id"],
+                length_km=float(raw["length_km"]),
+                track_type=TrackType(raw.get("track_type", "surface")),
+                capacity_departures_per_hour=float(raw.get("capacity_departures_per_hour", 30.0)),
+                shared_group=raw.get("shared_group"),
+                station_ids=tuple(raw.get("station_ids", ())),
+            )
+        )
+
     for raw in data.get("routes", []):
         geometry = raw.get("geometry")
         line = None
