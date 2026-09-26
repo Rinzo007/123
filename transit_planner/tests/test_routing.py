@@ -232,3 +232,38 @@ def test_router_applies_service_headway_feedback_factor():
     assert base is not None and slowed is not None
     assert slowed.legs[0].wait_min == 10.0
     assert base.legs[0].wait_min == 5.0
+
+
+def test_router_uses_route_geometry_curve_runtime():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0.0, 0.0)))
+    network.add_stop(Stop("b", "B", Point(20.0, 0.0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "curve",
+            "Curve",
+            TransitMode.BUS,
+            ("a", "b"),
+            geometry=__import__("transit_planner.geo", fromlist=["LineString"]).LineString(
+                (
+                    Point(0.0, 0.0),
+                    Point(10.0, 10.0),
+                    Point(20.0, 0.0),
+                )
+            ),
+        )
+    )
+    network.add_service(Service("curve-service", "curve", "bus", {"am": 10}))
+
+    router = TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0))
+    journey = router.shortest(
+        network.stops["a"],
+        network.stops["b"],
+        period_id="am",
+    )
+
+    assert journey is not None
+    expected_straight = network.stops["a"].location.x
+    assert journey.duration_min > network.route_length_km(network.routes["curve"]) / 18.0 * 60.0
