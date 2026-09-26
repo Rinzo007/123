@@ -39,7 +39,7 @@ class ReferenceDemandLayers:
         return TemporalDemandMatrix(tuple(pairs))
 
 
-def generate_reference_purpose_layer(
+def generate_purpose_layer(
     zones: tuple[DemandZone, ...],
     *,
     purpose: ReferencePurposeLayer,
@@ -78,7 +78,7 @@ def generate_reference_purpose_layer(
         if not candidates:
             continue
 
-        selected = _select_reference_candidates(
+        selected = _select_candidates(
             candidates,
             purpose.max_destinations,
             purpose.attraction_distance_m,
@@ -120,18 +120,18 @@ def generate_reference_purpose_layer(
     )
 
 
-def build_reference_demand_layers(
+def build_demand_layers(
     zones: tuple[DemandZone, ...],
 ) -> ReferenceDemandLayers:
     return ReferenceDemandLayers(
         tuple(
-            generate_reference_purpose_layer(zones, purpose=purpose)
+            generate_purpose_layer(zones, purpose=purpose)
             for purpose in REFERENCE_PURPOSE_LAYERS
         )
     )
 
 
-def build_reference_daily_demand(
+def build_daily_demand(
     zones: tuple[DemandZone, ...],
 ) -> DemandMatrix:
     # The reference runtime has a base commuter matrix plus auxiliary
@@ -145,7 +145,7 @@ def build_reference_daily_demand(
         ),
         trip_rate=0.12,
     )
-    layers = build_reference_demand_layers(zones)
+    layers = build_demand_layers(zones)
     pairs = [
         ODPairDemand(
             pair.origin_zone_id,
@@ -168,7 +168,7 @@ def build_reference_daily_demand(
         )
     return DemandMatrix(tuple(pairs))
 
-def _select_reference_candidates(
+def _select_candidates(
     candidates: list[tuple[DemandZone, float, float]],
     max_destinations: int,
     distance_scale_m: float,
