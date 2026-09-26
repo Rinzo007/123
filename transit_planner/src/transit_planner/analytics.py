@@ -212,9 +212,27 @@ def _service_analytics(
     vehicle_km = departures * length_km * direction_factor
     vehicle = network.vehicle_types[service.vehicle_type_id]
     opex = vehicle_km * (vehicle.operating_cost_per_km or profile.opex_per_vehicle_km)
+    service_boardings_per_hour = 0.0
+    period_hours = (period.end_minute - period.start_minute) / 60.0
+    direction_count = 1.0 if route.closed and not route.both_ways else 2.0
+    if period_hours > 0 and direction_count > 0:
+        boardings_by_stop = {
+            item.stop_id: item.boardings
+            for item in assignment.stop_flows
+        }
+        service_boardings_per_hour = max(
+            (
+                boardings_by_stop.get(stop_id, 0.0)
+                / period_hours
+                / direction_count
+                for stop_id in route.stop_ids
+            ),
+            default=0.0,
+        )
     station_headway, station_why = minimum_station_headway_min(
         route.mode.value,
         route_closed=route.closed,
+        boardings_per_hour=service_boardings_per_hour,
     )
     track_headways: list[float] = []
     own_tph = 60.0 / headway
