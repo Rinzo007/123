@@ -8,6 +8,7 @@ from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfi
 from .od import purpose_gravity_od
 from .projection import project_wgs84_point
 from .places import CityPlace, aggregate_place_attractions
+from .reference_demand import ReferenceDemandLayers, build_reference_daily_demand, build_reference_demand_layers
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,3 +64,15 @@ def build_city_demand(
         decay=config.decay,
         reference_speed_kph=config.reference_speed_kph,
     )
+
+
+def build_reference_city_demand_layers(
+    zones: tuple[DemandZone, ...],
+) -> ReferenceDemandLayers:
+    return build_reference_demand_layers(zones)
+
+
+def build_reference_city_daily_demand(
+    zones: tuple[DemandZone, ...],
+) -> DemandMatrix:
+    return build_reference_daily_demand(zones)
