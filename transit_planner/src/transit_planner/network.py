@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .geo import LineString, Point
+from .infrastructure import TrackSection
 from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_PERIODS
 
 
@@ -46,12 +47,15 @@ class Route:
     mode: TransitMode
     stop_ids: tuple[str, ...]
     geometry: LineString | None = None
+    track_section_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Route id cannot be empty")
         if len(self.stop_ids) < 2:
             raise ValueError("A route needs at least two stops")
+        if self.track_section_ids and len(self.track_section_ids) != len(self.stop_ids) - 1:
+            raise ValueError("track_section_ids must match route segments")
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +93,7 @@ class Network:
     vehicle_types: dict[str, VehicleType] = field(default_factory=dict)
     periods: dict[str, ServicePeriod] = field(default_factory=dict)
     services: dict[str, Service] = field(default_factory=dict)
+    track_sections: dict[str, TrackSection] = field(default_factory=dict)
 
     def add_stop(self, stop: Stop) -> None:
         self._add_unique(self.stops, stop.id, "stop")
