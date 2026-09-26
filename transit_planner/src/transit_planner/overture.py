@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from threading import Lock
 from math import asin, cos, radians, sin, sqrt
 
 from .data import (
@@ -16,6 +17,7 @@ from .network import Stop
 
 DEFAULT_RELEASE = "2026-09-23.1"
 DEFAULT_S3_ROOT = "s3://overturemaps-us-west-2/release"
+_DUCKDB_EXTENSION_LOCK = Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,8 +292,11 @@ def _query_duckdb(sql: str):
 
     connection = duckdb.connect()
     try:
-        connection.execute("INSTALL httpfs; LOAD httpfs;")
-        connection.execute("INSTALL spatial; LOAD spatial;")
+        with _DUCKDB_EXTENSION_LOCK:
+            connection.execute("INSTALL httpfs")
+            connection.execute("LOAD httpfs")
+            connection.execute("INSTALL spatial")
+            connection.execute("LOAD spatial")
         connection.execute("SET s3_region='us-west-2'")
         return connection.execute(sql).fetchall()
     finally:
