@@ -747,6 +747,17 @@ def city_assignment(payload: dict) -> dict:
                 "average_transfers": result.metrics.average_transfers,
                 "average_wait_time_min": result.metrics.average_wait_time_min,
             },
+            "track_capacity": [
+                {
+                    "shared_group": item.shared_group,
+                    "period_id": item.period_id,
+                    "route_ids": list(item.route_ids),
+                    "tph": item.tph,
+                    "limit_tph": item.limit_tph,
+                    "utilization": item.utilization,
+                }
+                for item in _track_capacity_analytics(network)
+            ],
             "max_load_ratio": result.max_load_ratio,
             "unserved_transit_demand": result.unserved_transit_demand,
             "loss_reasons": [{"reason": item.reason, "trips": item.trips} for item in result.loss_reasons],
