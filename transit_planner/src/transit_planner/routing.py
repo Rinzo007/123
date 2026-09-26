@@ -211,8 +211,15 @@ class TransitRouter:
             legs=tuple(legs),
         )
 
-    def _run_time_between(self, from_id: str, to_id: str, mode: TransitMode) -> float:
-        cache_key = (from_id, to_id, mode)
+    def _run_time_between(
+        self,
+        from_id: str,
+        to_id: str,
+        mode: TransitMode,
+        *,
+        speed_limit_kph: float | None = None,
+    ) -> float:
+        cache_key = (from_id, to_id, mode, speed_limit_kph)
         if cache_key in self._road_run_time_cache:
             cached = self._road_run_time_cache[cache_key]
             if cached is not None:
@@ -224,7 +231,10 @@ class TransitRouter:
             if origin_node is not None and destination_node is not None:
                 _, path = self.road_graph.shortest_path(origin_node, destination_node)
                 if path:
-                    mode_speed = self._SPEEDS.get(mode, self.config.default_transit_speed_kph)
+                    mode_speed = speed_limit_kph or self._SPEEDS.get(
+                        mode,
+                        self.config.default_transit_speed_kph,
+                    )
                     road_time = 0.0
                     for edge_id in path:
                         edge = self.road_graph.edges[edge_id]
@@ -237,7 +247,10 @@ class TransitRouter:
         a = self.network.stops[from_id]
         b = self.network.stops[to_id]
         distance_km = self._point_distance(a, b) / 1000.0
-        speed = self._SPEEDS.get(mode, self.config.default_transit_speed_kph)
+        speed = speed_limit_kph or self._SPEEDS.get(
+            mode,
+            self.config.default_transit_speed_kph,
+        )
         direct_time = distance_km / speed * 60.0
         self._road_run_time_cache[cache_key] = direct_time
         return direct_time
