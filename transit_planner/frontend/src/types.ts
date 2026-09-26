@@ -13,6 +13,8 @@ export interface StopDraft {
 }
 
 export interface NetworkPayload {
+  origin_lon?: number;
+  origin_lat?: number;
   stops: Array<{
     id: string;
     name: string;
