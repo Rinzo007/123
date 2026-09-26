@@ -781,7 +781,7 @@
       bind:annualDays
       periods={PERIODS}
       bind:value={$headwaysStore}
-      stops={$stopsStore}
+      bind:stops={$stopsStore}
       busy={busy}
       message={message}
       bind:showRoads
