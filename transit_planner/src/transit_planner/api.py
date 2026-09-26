@@ -452,6 +452,80 @@ def temporal_demand(payload: dict) -> dict:
         ],
     }
 
+@app.post("/api/v1/assignment/city")
+def city_assignment(payload: dict) -> dict:
+    raster_path = os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
+    if not raster_path:
+        raise HTTPException(status_code=503, detail="TRANSIT_PLANNER_POPULATION_RASTER не настроен")
+
+    try:
+        network = network_from_dict(payload["network"])
+        south = float(payload["south"])
+        west = float(payload["west"])
+        north = float(payload["north"])
+        east = float(payload["east"])
+        bounds = _bbox(south, west, north, east)
+        origin_lon = float(payload.get("origin_lon", (west + east) / 2.0))
+        origin_lat = float(payload.get("origin_lat", (south + north) / 2.0))
+        zones = generate_zones_from_population_raster(
+            raster_path,
+            bbox=bounds,
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+        )
+        places = OverturePlacesProvider(
+            source=_overture_source(payload.get("release")),
+            bbox=bounds,
+        ).load_places()
+        demand = build_city_demand(
+            zones,
+            places,
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+            config=CityDemandConfig(
+                trip_rate=float(payload.get("trip_rate", 0.12)),
+                decay=float(payload.get("decay", 0.08)),
+                reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
+            ),
+        )
+        result = assign_demand(
+            network,
+            demand,
+            zones={zone.id: zone for zone in zones},
+            config=AssignmentConfig(**payload["config"]),
+        )
+    except HTTPException:
+        raise
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail=f"Citywide demand calculation failed: {exc}") from exc
+
+    return {
+        "data": {
+            "zones": len(zones),
+            "places": len(places),
+            "od_pairs": len(demand.pairs),
+            "total_demand_trips": demand.total_trips_per_day,
+        },
+        "assignment": {
+            "metrics": {
+                "total_trips": result.metrics.total_trips,
+                "transit_trips": result.metrics.transit_trips,
+                "car_trips": result.metrics.car_trips,
+                "walk_trips": result.metrics.walk_trips,
+                "bike_trips": result.metrics.bike_trips,
+                "transit_share": result.metrics.transit_share,
+                "average_transit_time_min": result.metrics.average_transit_time_min,
+                "average_transfers": result.metrics.average_transfers,
+            },
+            "max_load_ratio": result.max_load_ratio,
+            "unserved_transit_demand": result.unserved_transit_demand,
+            "loss_reasons": [{"reason": item.reason, "trips": item.trips} for item in result.loss_reasons],
+            "route_flows": [{"route_id": item.route_id, "boardings": item.boardings, "passenger_section_traversals": item.passenger_section_traversals} for item in result.route_flows],
+            "section_loads": [{"route_id": item.route_id, "from_stop_id": item.from_stop_id, "to_stop_id": item.to_stop_id, "passengers": item.passengers, "capacity": item.capacity, "load_ratio": item.load_ratio} for item in result.section_loads],
+            "stop_flows": [{"stop_id": item.stop_id, "boardings": item.boardings, "alightings": item.alightings, "transfers": item.transfers} for item in result.stop_flows],
+        },
+    }
+
 @app.post("/api/v1/assignment")
 def calculate_assignment(payload: dict) -> dict:
     network = network_from_dict(payload["network"])
