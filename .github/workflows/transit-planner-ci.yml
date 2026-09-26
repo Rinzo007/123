@@ -10,6 +10,10 @@ on:
       - "transit_planner/**"
       - ".github/workflows/transit-planner-ci.yml"
 
+concurrency:
+  group: transit-planner-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     name: Python tests
