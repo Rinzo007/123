@@ -1,3 +1,4 @@
+export {};
 // The browser worker is a thin compatibility adapter. The original reference
 // implementation is kept byte-for-byte under public/assets and is the runtime
 // source for the reference worker protocol.
