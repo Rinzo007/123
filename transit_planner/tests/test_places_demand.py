@@ -1,8 +1,7 @@
 from transit_planner.city import DemandZone
-from transit_planner.demand_profile import TripPurpose
 from transit_planner.geo import Point
-from transit_planner.od import purpose_gravity_od
 from transit_planner.places import CityPlace, PlacePurposeMapper, aggregate_place_attractions
+from transit_planner.reference_demand import build_demand_layers
 
 
 def test_places_are_aggregated_to_nearest_zone_by_purpose():
@@ -32,50 +31,40 @@ def test_places_are_aggregated_to_nearest_zone_by_purpose():
     assert result[0].attractions["shopping"] == 3.0
 
 
-def test_purpose_gravity_od_produces_purpose_labeled_daily_demand():
+def test_canonical_demand_uses_place_purpose_aliases():
     zones = (
+        DemandZone("o", 0, 0, population=1000),
         DemandZone(
-            "a",
-            0,
-            0,
-            population=1000,
-            purpose_attractions=(("education", 100.0),),
-        ),
-        DemandZone(
-            "b",
+            "d",
             1000,
             0,
             population=500,
-            jobs=200.0,
-            purpose_attractions=(("education", 300.0),),
+            purpose_attractions=(
+                ("education", 100.0),
+                ("shopping", 100.0),
+                ("airport", 100.0),
+            ),
         ),
     )
+    layers = build_demand_layers(zones)
+    totals = {layer.purpose: layer.total_trips for layer in layers.layers}
 
-    demand = purpose_gravity_od(
-        zones,
-        trip_rate=0.1,
-        decay=0.01,
-    )
-
-    assert demand.total_trips_per_day > 0
-    purposes = {pair.purpose for pair in demand.pairs}
-    assert TripPurpose.EDUCATION.value in purposes
+    assert totals["edu"] > 0
+    assert totals["shop"] > 0
+    assert totals["air"] > 0
 
 
-def test_purpose_gravity_work_uses_jobs_when_no_explicit_attraction():
+def test_place_mapper_keeps_reference_layer_inputs_compatible():
     zones = (
-        DemandZone("a", 0, 0, population=1000, jobs=10),
-        DemandZone("b", 1000, 0, population=500, jobs=1000),
+        DemandZone("o", 0, 0, population=1000),
+        DemandZone("d", 1000, 0, population=500),
     )
-
-    demand = purpose_gravity_od(
-        zones,
-        trip_rate=0.1,
+    places = (
+        CityPlace("school", "School", Point(1000, 0), basic_category="school", importance=10),
+        CityPlace("mall", "Mall", Point(1000, 0), basic_category="shopping_mall", importance=20),
     )
-
-    work_destinations = {
-        pair.destination_zone_id
-        for pair in demand.pairs
-        if pair.purpose == TripPurpose.WORK.value
-    }
-    assert "b" in work_destinations
+    enriched = aggregate_place_attractions(zones, places, mapper=PlacePurposeMapper())
+    layers = build_demand_layers(enriched)
+    totals = {layer.purpose: layer.total_trips for layer in layers.layers}
+    assert totals["edu"] > 0
+    assert totals["shop"] > 0
