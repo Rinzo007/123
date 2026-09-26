@@ -100,3 +100,27 @@ def test_stop_flow_exposes_reference_dwell_time():
     )
     stop_a = next(item for item in result.stop_flows if item.stop_id == "a")
     assert stop_a.dwell_seconds > 0.0
+
+
+def test_mode_access_limit_overrides_global_access_radius():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    zones = {
+        "o": DemandZone("o", 550, 0, population=1000),
+        "d": DemandZone("d", 1450, 0, population=1000),
+    }
+    result = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("o", "d", 100),)),
+        zones=zones,
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=1500),
+    )
+
+    assert result.metrics.transit_trips == 0.0
+    assert result.unserved_transit_demand == 0.0
