@@ -9,6 +9,7 @@ from .overture import (
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
+    OverturePlacesProvider,
 )
 from .projection import project_roads_wgs84, project_stops_wgs84
 from .road import RoadGraph
@@ -16,6 +17,7 @@ from .road_builder import RoadGraphBuildResult, build_topological_road_graph
 from .snap import StopSnap, snap_stops_to_road_graph
 from .data import ConnectorRecord, RoadRecord
 from .geo import Point
+from .places import CityPlace
 from .network import Stop
 
 
@@ -33,6 +35,7 @@ class OvertureNetwork:
     roads: tuple[RoadRecord, ...]
     connectors: tuple[ConnectorRecord, ...]
     stops: tuple[Stop, ...]
+    places: tuple[CityPlace, ...]
     roads_metric: tuple[RoadRecord, ...]
     stops_metric: tuple[Stop, ...]
     graph: RoadGraph
@@ -101,6 +104,7 @@ def build_overture_network(
     roads: tuple[RoadRecord, ...],
     connectors: tuple[ConnectorRecord, ...],
     stops: tuple[Stop, ...],
+    places: tuple[CityPlace, ...] = (),
     *,
     origin_lon: float,
     origin_lat: float,
@@ -126,6 +130,7 @@ def build_overture_network(
         roads=roads,
         connectors=connectors,
         stops=stops,
+        places=places,
         roads_metric=roads_metric,
         stops_metric=stops_metric,
         graph=graph_build.graph,
@@ -155,6 +160,7 @@ class OvertureNetworkProvider:
         *,
         include_connectors: bool = True,
         include_stops: bool = True,
+        include_places: bool = True,
     ) -> OvertureNetwork:
         transportation = OvertureTransportationProvider(
             source=self.source,
@@ -165,6 +171,10 @@ class OvertureNetworkProvider:
             bbox=self.bbox,
         )
         transit = OvertureTransitProvider(
+            source=self.source,
+            bbox=self.bbox,
+        )
+        places_provider = OverturePlacesProvider(
             source=self.source,
             bbox=self.bbox,
         )
@@ -181,15 +191,22 @@ class OvertureNetworkProvider:
                 if include_stops
                 else None
             )
+            places_future = (
+                pool.submit(places_provider.load_places)
+                if include_places
+                else None
+            )
             roads = roads_future.result()
             connectors = () if connectors_future is None else connectors_future.result()
             stops = () if stops_future is None else stops_future.result()
+            places = () if places_future is None else places_future.result()
 
         origin_lon, origin_lat = self._origin(stops)
         return build_overture_network(
             roads,
             connectors,
             stops,
+            places,
             origin_lon=origin_lon,
             origin_lat=origin_lat,
             snap_max_distance_m=self.snap_max_distance_m,
