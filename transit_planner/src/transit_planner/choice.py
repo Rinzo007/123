@@ -6,6 +6,7 @@ from math import exp
 from .reference_model import (
     REFERENCE_CAR,
     REFERENCE_MOBILITY,
+    REFERENCE_TRANSFER,
     REFERENCE_VOT_S_PER_EUR,
 )
 
@@ -20,12 +21,12 @@ class ChoiceConfig:
     walk_constant: float = 0.0
     bike_constant: float = 0.0
     transit_fare_weight: float = 0.0
-    transit_wait_weight: float = 1.0
+    transit_wait_weight: float = REFERENCE_TRANSFER.wait_multiplier
     car_cost_per_km_eur: float = REFERENCE_CAR.cost_per_km_eur
     car_parking_eur: float = REFERENCE_CAR.parking_eur
     car_parking_minutes: float = REFERENCE_CAR.parking_s / 60.0
     car_circuity: float = REFERENCE_CAR.circuity
-    walk_circuity: float = 1.25
+    walk_circuity: float = 1.25 * REFERENCE_TRANSFER.walk_multiplier
     bike_circuity: float = 1.25
     bike_cost_per_km_eur: float = REFERENCE_MOBILITY.two_wheel_per_km_eur
     bike_fixed_minutes: float = REFERENCE_CAR.parking_s / 60.0
