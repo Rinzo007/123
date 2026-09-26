@@ -7,8 +7,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
+from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
-from .city_demand import build_city_demand
+from .city_demand import build_city_demand, build_city_temporal_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
@@ -445,18 +446,19 @@ def city_assignment(payload: dict) -> dict:
             source=_overture_source(payload.get("release")),
             bbox=bounds,
         ).load_places()
-        demand = build_city_demand(
+        temporal_demand = build_city_temporal_demand(
             zones,
             places,
             origin_lon=origin_lon,
             origin_lat=origin_lat,
         )
-        result = assign_demand(
+        temporal_result = assign_temporal_demand(
             network,
-            demand,
+            temporal_demand,
             zones={zone.id: zone for zone in zones},
             config=AssignmentConfig(**payload["config"]),
         )
+        result = temporal_result.aggregate()
     except HTTPException:
         raise
     except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
@@ -466,8 +468,8 @@ def city_assignment(payload: dict) -> dict:
         "data": {
             "zones": len(zones),
             "places": len(places),
-            "od_pairs": len(demand.pairs),
-            "total_demand_trips": demand.total_trips_per_day,
+            "od_pairs": len(temporal_demand.pairs),
+            "total_demand_trips": temporal_result.total_demand_trips,
         },
         "assignment": {
             "metrics": {
