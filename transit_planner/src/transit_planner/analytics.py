@@ -165,8 +165,13 @@ def _segment_index(
     key = (route.id, from_stop_id, to_stop_id)
     if key in cache:
         return cache[key]
-    for index, pair in enumerate(route.segment_pairs()):
-        if pair == (from_stop_id, to_stop_id) or pair == (to_stop_id, from_stop_id):
+    pairs = route.segment_pairs()
+    for index, pair in enumerate(pairs):
+        if pair == (from_stop_id, to_stop_id):
+            cache[key] = index
+            return index
+    for index, pair in enumerate(pairs):
+        if pair == (to_stop_id, from_stop_id):
             cache[key] = index
             return index
     raise ValueError(
