@@ -137,3 +137,12 @@ def test_network_uses_physical_track_length_and_runtime() -> None:
 
     assert network.route_length_km(route) == 2.0
     assert network.route_run_time_min(route) == 6.0
+
+def test_service_departures_use_period_window():
+    network = make_network()
+    service = network.services["svc"]
+
+    assert network.service_departures(service, "peak") == 18
+
+    network.periods["peak"] = ServicePeriod("peak", 400, 455)
+    assert network.service_departures(service, "peak") == 6
