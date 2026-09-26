@@ -71,12 +71,15 @@ class Service:
     route_id: str
     vehicle_type_id: str
     headway_by_period: dict[str, float]
+    departure_offset_by_period: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Service id cannot be empty")
         if any(headway <= 0 for headway in self.headway_by_period.values()):
             raise ValueError("Headways must be positive")
+        if any(offset < 0 or offset >= 1440 for offset in self.departure_offset_by_period.values()):
+            raise ValueError("Departure offsets must be within the day")
 
 
 @dataclass(slots=True)
@@ -115,6 +118,9 @@ class Network:
         missing = [pid for pid in service.headway_by_period if pid not in self.periods]
         if missing:
             raise ValueError(f"Service {service.id} references unknown periods: {missing}")
+        unknown_offsets = [pid for pid in service.departure_offset_by_period if pid not in self.periods]
+        if unknown_offsets:
+            raise ValueError(f"Service {service.id} references unknown offset periods: {unknown_offsets}")
         route = self.routes[service.route_id]
         vehicle = self.vehicle_types[service.vehicle_type_id]
         if route.mode != vehicle.mode:
