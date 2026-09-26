@@ -120,17 +120,8 @@ def generate_zones_from_population_raster(
             raise ValueError("Population raster must use EPSG:4326")
 
         transform = dataset.transform
-        rows, cols = data.shape if 'data' in locals() else (dataset.height, dataset.width)
-        center_lon = (
-            float(origin_lon)
-            if origin_lon is not None
-            else float((dataset.bounds.left + dataset.bounds.right) / 2.0)
-        )
-        center_lat = (
-            float(origin_lat)
-            if origin_lat is not None
-            else float((dataset.bounds.bottom + dataset.bounds.top) / 2.0)
-        )
+        center_lon = float(origin_lon) if origin_lon is not None else None
+        center_lat = float(origin_lat) if origin_lat is not None else None
 
         resolution_x_deg = abs(transform.a)
         resolution_y_deg = abs(transform.e)
@@ -151,19 +142,34 @@ def generate_zones_from_population_raster(
         step_y = max(1, int(round(target_size / max(native_y_m, 1e-9))))
         if bbox is None:
             window = None
+            if center_lon is None:
+                center_lon = float((dataset.bounds.left + dataset.bounds.right) / 2.0)
+            if center_lat is None:
+                center_lat = float((dataset.bounds.bottom + dataset.bounds.top) / 2.0)
         else:
             south, west, north, east = bbox
             if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
                 raise ValueError("Invalid population raster bbox")
+            if center_lon is None:
+                center_lon = (west + east) / 2.0
+            if center_lat is None:
+                center_lat = (south + north) / 2.0
             window = rasterio.windows.from_bounds(
                 west, south, east, north, transform=transform
             ).round_offsets().round_lengths()
+            window = window.intersection(
+                rasterio.windows.Window(
+                    0, 0, dataset.width, dataset.height
+                )
+            )
         if window is None:
             data = dataset.read(1, masked=True)
             raster_transform = transform
         else:
             data = dataset.read(1, window=window, masked=True)
             raster_transform = dataset.window_transform(window)
+
+        rows, cols = data.shape
 
     zones: list[DemandZone] = []
     jobs_points = tuple(jobs_points)
