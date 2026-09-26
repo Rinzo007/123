@@ -221,26 +221,35 @@ def _add_fallback_segment(
     from_node = endpoint_node(start.x, start.y)
     to_node = endpoint_node(end.x, end.y)
     length_m = _length_m(record, coordinate_to_metre)
-    graph.add_edge(
-        RoadEdge(
-            record.id,
-            from_node,
-            to_node,
-            length_m,
-            record.speed_kph,
-            record.road_type,
-            record.id,
-        )
-    )
-    if not record.oneway:
+    if record.forward_allowed:
         graph.add_edge(
-            f"{record.id}:reverse",
-            to_node,
-            from_node,
-            length_m,
-            record.speed_kph,
-            record.road_type,
-            record.id,
+            RoadEdge(
+                record.id,
+                from_node,
+                to_node,
+                length_m,
+                record.speed_kph,
+                record.road_type,
+                record.id,
+                None,
+                None,
+                "forward",
+            )
+        )
+    if record.backward_allowed and not record.oneway:
+        graph.add_edge(
+            RoadEdge(
+                f"{record.id}:reverse",
+                to_node,
+                from_node,
+                length_m,
+                record.speed_kph,
+                record.road_type,
+                record.id,
+                None,
+                None,
+                "backward",
+            )
         )
 
 
