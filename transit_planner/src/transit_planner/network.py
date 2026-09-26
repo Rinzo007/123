@@ -194,17 +194,18 @@ class Network:
             for stop_id in route.stop_ids
         )
         points = route.geometry.points
-        indices = _match_geometry_to_stops(points, stop_points, route.closed)
-        if indices is None:
+        matched = _match_geometry_to_stops(points, stop_points, route.closed)
+        if matched is None:
             return ()
+        geometry_points, indices = matched
         start = indices[index]
         if route.closed and index == len(pairs) - 1:
             first = indices[0]
-            return points[start:] + points[: first + 1]
+            return geometry_points[start:] + geometry_points[: first + 1]
         end = indices[index + 1]
         if end < start:
             return ()
-        return points[start : end + 1]
+        return geometry_points[start : end + 1]
 
     def route_segment_curve_speed_limit_kph(
         self,
@@ -308,11 +309,13 @@ def _match_geometry_to_stops(
     points: tuple[Point, ...],
     stops: tuple[Point, ...],
     closed: bool,
-) -> tuple[int, ...] | None:
+) -> tuple[tuple[Point, ...], tuple[int, ...]] | None:
     if len(points) < 2 or len(stops) < 2:
         return None
 
-    def match(sequence: tuple[Point, ...]) -> tuple[tuple[int, ...], float] | None:
+    def match(
+        sequence: tuple[Point, ...],
+    ) -> tuple[tuple[Point, ...], tuple[int, ...], float] | None:
         if not closed:
             indices: list[int] = []
             cursor = 0
@@ -324,12 +327,12 @@ def _match_geometry_to_stops(
                     range(cursor, len(sequence)),
                     key=lambda item: _point_distance_m(sequence[item], stop),
                 )
+                if indices and index <= indices[-1]:
+                    return None
                 score += _point_distance_m(sequence[index], stop) ** 2
                 indices.append(index)
-                cursor = index
-            if any(left >= right for left, right in zip(indices, indices[1:])):
-                return None
-            return tuple(indices), score
+                cursor = index + 1
+            return sequence, tuple(indices), score
 
         first = min(
             range(len(sequence)),
@@ -342,7 +345,6 @@ def _match_geometry_to_stops(
             candidates = [
                 first + offset
                 for offset in range(1, len(sequence) + 1)
-                if first + offset < first + len(sequence)
             ]
             index = min(
                 candidates,
@@ -351,22 +353,15 @@ def _match_geometry_to_stops(
                     stop,
                 ),
             )
+            if index <= cursor:
+                return None
             score += _point_distance_m(
                 sequence[index % len(sequence)],
                 stop,
             ) ** 2
             indices.append(index % len(sequence))
             cursor = index
-        if len(set(indices)) != len(indices):
-            return None
-        unwrapped = [first]
-        current = first
-        for index in indices[1:]:
-            while index <= current:
-                index += len(sequence)
-            unwrapped.append(index)
-            current = index
-        return tuple(item % len(sequence) for item in unwrapped), score
+        return sequence, tuple(indices), score
 
     candidates = [match(points)]
     if not closed:
@@ -374,7 +369,8 @@ def _match_geometry_to_stops(
     valid = [item for item in candidates if item is not None]
     if not valid:
         return None
-    return min(valid, key=lambda item: item[1])[0]
+    sequence, indices, _score = min(valid, key=lambda item: item[2])
+    return sequence, indices
 
 
 def default_service_periods() -> tuple[ServicePeriod, ...]:
