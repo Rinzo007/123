@@ -765,75 +765,38 @@
   </header>
 
   <div class="workspace">
-    <aside class="sidebar">
-      <section>
-        <div class="section-title">Маршрут</div>
-        <label>Название<input bind:value={routeName} /></label>
-        <label>Вид транспорта
-          <select bind:value={mode}>
-            {#each Object.entries(MODE_LABELS) as [value, label]}
-              <option value={value}>{label}</option>
-            {/each}
-          </select>
-        </label>
-
-        <div class="preview-demand">
-          <div class="section-title">Проверочный расчёт</div>
-          <label>Спрос, поездок/сутки<input type="number" min="1" max="100000" bind:value={previewTrips} /></label>
-          <button class="primary" on:click={runPreviewAssignment} disabled={busy || stops.length < 2}>Рассчитать пассажиропоток</button>
-          <button on:click={runEconomics} disabled={busy || stops.length < 2}>Рассчитать экономику</button>
-          <button on:click={runCityAssignment} disabled={busy || stops.length < 2}>Рассчитать городскую сеть</button>
-          <label>Тариф за поездку<input type="number" min="0" step="0.01" bind:value={farePerTransitTrip} /></label>
-          <label>Дней в году<input type="number" min="1" max="366" bind:value={annualDays} /></label>
-        </div>
-
-        <div class="period-headways">
-          <div class="section-title">Интервалы</div>
-          {#each PERIODS as period}
-            <label>{period.id}
-              <input type="number" min="1" max="120" step="1" bind:value={headways[period.id]} />
-            </label>
-          {/each}
-        </div>
-      </section>
-
-      <section>
-        <div class="section-title">Остановки ({stops.length})</div>
-        {#if stops.length === 0}
-          <div class="empty">Включите «Добавить остановки» и кликайте по карте.</div>
-        {:else}
-          {#each stops as stop, index}
-            <div class="stop-row">
-              <div><strong>{index + 1}. {stop.name}</strong><small>{stop.lon.toFixed(5)}, {stop.lat.toFixed(5)}</small></div>
-              <button on:click={() => removeStop(stop.id)}>Удалить</button>
-            </div>
-          {/each}
-          <button on:click={clearRoute}>Очистить маршрут</button>
-        {/if}
-      </section>
-
-      <section>
-        <div class="section-title">Слои</div>
-        <label class="check"><input type="checkbox" bind:checked={showRoads} /> Дороги</label>
-        <label class="check"><input type="checkbox" bind:checked={showRoadSpeed} /> Скорости дорог</label>
-        <label class="check"><input type="checkbox" bind:checked={showStops} /> Остановки Overture</label>
-        <label class="check"><input type="checkbox" bind:checked={showPlaces} /> Places Overture</label>
-        <label class="check"><input type="checkbox" bind:checked={showConnectors} /> Connectors</label>
-        <label class="check"><input type="checkbox" bind:checked={showPopulation} /> WorldPop</label>
-        <label class="check"><input type="checkbox" bind:checked={showDemandStreets} /> Demand streets</label>
-        <label class="check"><input type="checkbox" bind:checked={showPassengerFlow} /> Пассажиропоток</label>
-        <label class="check"><input type="checkbox" bind:checked={showStationLoads} /> Нагрузка остановок</label>
-      </section>
-
-      <div class="status" class:busy>{message}</div>
-    </aside>
+    <ControlPanel
+      bind:routeName
+      bind:mode
+      modeLabels={MODE_LABELS}
+      bind:previewTrips
+      bind:farePerTransitTrip
+      bind:annualDays
+      periods={PERIODS}
+      bind:headways
+      stops={stops}
+      busy={busy}
+      message={message}
+      bind:showRoads
+      bind:showRoadSpeed
+      bind:showStops
+      bind:showPlaces
+      bind:showConnectors
+      bind:showPopulation
+      bind:showDemandStreets
+      bind:showPassengerFlow
+      bind:showStationLoads
+      drawMode={drawMode}
+      onPreview={runPreviewAssignment}
+      onEconomics={runEconomics}
+      onCityAssignment={runCityAssignment}
+      onRemoveStop={removeStop}
+      onClear={clearRoute}
+    />
 
     <main class="main-panel">
       {#if viewMode === "map"}
-        <div class="map-wrap">
-          <div class="map" bind:this={mapContainer}></div>
-          {#if drawMode}<div class="map-hint">Кликайте по карте, чтобы добавлять остановки</div>{/if}
-        </div>
+        <MapView bind:mapElement={mapContainer} drawMode={drawMode} />
       {:else}
         <div class="network-view">
           <div class="network-header">
