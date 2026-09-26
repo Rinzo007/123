@@ -196,7 +196,7 @@ def overture_route(payload: dict) -> dict:
             source=_overture_source(payload.get("release")),
             bbox=bounds,
             snap_max_distance_m=float(payload.get("snap_distance_m", 150.0)),
-        ).load(include_connectors=False, include_stops=False)
+        ).load(include_connectors=False, include_stops=False, include_places=False)
         route = overture_network.route_points(points)
     except HTTPException:
         raise
