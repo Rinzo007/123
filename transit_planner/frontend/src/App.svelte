@@ -145,7 +145,7 @@
     const vehicleType = {
       id: `vehicle-${$modeStore}`,
       name: MODE_LABELS[$modeStore],
-      $modeStore,
+      mode: $modeStore,
       capacity: MODE_CAPACITY[$modeStore],
       operating_cost_per_km: 0,
     };
@@ -155,7 +155,7 @@
       origin_lat: origin.lat,
       stops: metricStops,
       routes: $stopsStore.length >= 2
-        ? [{ id: "draft-route", name: $routeNameStore, $modeStore, stop_ids: $stopsStore.map((stop) => stop.id), geometry }]
+        ? [{ id: "draft-route", name: $routeNameStore, mode: $modeStore, stop_ids: $stopsStore.map((stop) => stop.id), geometry }]
         : [],
       vehicle_types: [vehicleType],
       periods: PERIODS,
@@ -307,7 +307,7 @@
 
       cityRoads = data.roads;
       cityConnectors = data.connectors;
-      cityStops = data.$stopsStore;
+      cityStops = data.stops;
       cityPlaces = data.places;
 
       const populationKey = datasetCacheKey("population-zones", {
@@ -328,7 +328,7 @@
         }
       }
 
-      message = `${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.$stopsStore} остановок`;
+      message = `${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`;
     } catch (error) {
       message = error instanceof Error ? error.message : "Ошибка загрузки Overture";
     } finally {
@@ -564,10 +564,10 @@
     if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
     const version = Number(project.version ?? 1);
     if (version < 1 || version > 3) throw new Error("Неподдерживаемая версия проекта");
-    $routeNameStore = String(project.$routeNameStore ?? "Новый маршрут");
-    $modeStore = (project.$modeStore ?? "bus") as TransitMode;
-    $headwaysStore = { ...$headwaysStore, ...(project.$headwaysStore ?? {}) };
-    $stopsStore = Array.isArray(project.$stopsStore) ? project.stops: [];
+    $routeNameStore = String(project.routeName ?? "Новый маршрут");
+    $modeStore = (project.mode ?? "bus") as TransitMode;
+    $headwaysStore = { ...$headwaysStore, ...(project.headways ?? {}) };
+    $stopsStore = Array.isArray(project.stops) ? project.stops: [];
     roadRoute = version >= 3 && project.roadRoute?.type === "FeatureCollection" ? project.roadRoute : null;
     const economics = project.economics ?? {};
     farePerTransitTrip = Number.isFinite(Number(economics.farePerTransitTrip)) ? Math.max(0, Number(economics.farePerTransitTrip)) : 0;
@@ -638,20 +638,20 @@
       map.addLayer({ id: "city-connector-circles", type: "circle", source: "city-connectors", paint: { "circle-radius": 2.5, "circle-color": "#f59e0b", "circle-opacity": 0.7 } });
       map.addSource("city-places", { type: "geojson", data: emptyPoints() });
       map.addLayer({ id: "city-place-circles", type: "circle", source: "city-places", paint: { "circle-radius": 3, "circle-color": "#8b5cf6", "circle-opacity": 0.5 } });
-      map.addSource("city-$stopsStore", { type: "geojson", data: emptyPoints() });
-      map.addLayer({ id: "city-stop-circles", type: "circle", source: "city-$stopsStore", paint: { "circle-radius": 3.5, "circle-color": "#6b7280", "circle-opacity": 0.65, "circle-stroke-width": 1, "circle-stroke-color": "#fff" } });
+      map.addSource("city-stops", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "city-stop-circles", type: "circle", source: "city-stops", paint: { "circle-radius": 3.5, "circle-color": "#6b7280", "circle-opacity": 0.65, "circle-stroke-width": 1, "circle-stroke-color": "#fff" } });
       map.addSource("population-zones", { type: "geojson", data: blank });
       map.addLayer({ id: "population-zone-points", type: "circle", source: "population-zones", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "population"], 0, 2, 500, 5, 2000, 9, 5000, 15], "circle-opacity": 0.28, "circle-color": "#0f766e" } });
       map.addSource("demand-streets", { type: "geojson", data: blank });
       map.addLayer({ id: "demand-street-lines", type: "line", source: "demand-streets", paint: { "line-width": ["interpolate", ["linear"], ["get", "flow_weight"], 0, 1, 100, 3, 500, 7, 1000, 11], "line-opacity": 0.45, "line-color": "#7c3aed" } });
       map.addSource("analysis-sections", { type: "geojson", data: blank });
       map.addLayer({ id: "analysis-section-loads", type: "line", source: "analysis-sections", paint: { "line-width": 6, "line-opacity": 0.82, "line-color": ["interpolate", ["linear"], ["get", "load_ratio"], 0, "#22c55e", 0.7, "#eab308", 1, "#f97316", 1.5, "#dc2626"] } });
-      map.addSource("analysis-$stopsStore", { type: "geojson", data: emptyPoints() });
-      map.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-$stopsStore", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      map.addSource("analysis-stops", { type: "geojson", data: emptyPoints() });
+      map.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-stops", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
       map.addSource("draft-route", { type: "geojson", data: routeGeoJSON() });
       map.addLayer({ id: "draft-route-line", type: "line", source: "draft-route", paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2563eb" } });
-      map.addSource("draft-$stopsStore", { type: "geojson", data: stopsGeoJSON() });
-      map.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-$stopsStore", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+      map.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
+      map.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
       mapReady = true;
     });
     map.on("click", addStop);
@@ -694,15 +694,15 @@
   $: if (mapRef && mapReady) {
     const source = (id: string) => mapRef?.getSource(id) as GeoJSONSource | undefined;
     source("draft-route")?.setData(roadRoute ?? routeGeoJSON());
-    source("draft-$stopsStore")?.setData(stopsGeoJSON());
+    source("draft-stops")?.setData(stopsGeoJSON());
     if (cityRoads) source("city-roads")?.setData(cityRoads as any);
     if (cityConnectors) source("city-connectors")?.setData(cityConnectors as any);
-    if (cityStops) source("city-$stopsStore")?.setData(cityStops as any);
+    if (cityStops) source("city-stops")?.setData(cityStops as any);
     if (cityPlaces) source("city-places")?.setData(cityPlaces as any);
     if (populationZones) source("population-zones")?.setData(populationZones as any);
     if (demandStreets) source("demand-streets")?.setData(demandStreets as any);
     source("analysis-sections")?.setData(assignmentSectionGeoJSON() as any);
-    source("analysis-$stopsStore")?.setData(assignmentStopGeoJSON() as any);
+    source("analysis-stops")?.setData(assignmentStopGeoJSON() as any);
 
     const setVisibility = (id: string, visible: boolean) => {
       if (mapRef?.getLayer(id)) mapRef.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
@@ -772,15 +772,15 @@
 
   <div class="workspace">
     <ControlPanel
-      bind:$routeNameStore
-      bind:$modeStore
+      bind:value={$routeNameStore}
+      bind:value={$modeStore}
       modeLabels={MODE_LABELS}
       bind:previewTrips
       bind:farePerTransitTrip
       bind:annualDays
       periods={PERIODS}
-      bind:$headwaysStore
-      $stopsStore={$stopsStore}
+      bind:value={$headwaysStore}
+      stops={$stopsStore}
       busy={busy}
       message={message}
       bind:showRoads
