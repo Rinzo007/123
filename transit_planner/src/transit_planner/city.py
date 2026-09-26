@@ -29,9 +29,19 @@ class DemandZone:
     centroid_y: float
     population: float = 0.0
     jobs: float = 0.0
+    purpose_attractions: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Demand zone id cannot be empty")
         if self.population < 0 or self.jobs < 0:
             raise ValueError("Population and jobs cannot be negative")
+        if any(value < 0 for _, value in self.purpose_attractions):
+            raise ValueError("Purpose attractions cannot be negative")
+        keys = [purpose for purpose, _ in self.purpose_attractions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Purpose attractions must have unique purposes")
+
+    @property
+    def attractions(self) -> dict[str, float]:
+        return dict(self.purpose_attractions)
