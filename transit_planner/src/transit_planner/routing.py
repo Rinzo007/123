@@ -235,7 +235,61 @@ class TransitRouter:
             legs=adjusted_legs,
         )
 
-    def _run_time_between(
+
+    def shortest_alternatives(
+        self,
+        origin: Stop,
+        destination: Stop,
+        *,
+        period_id: str,
+        max_alternatives: int = 3,
+        route_penalties: dict[str, float] | None = None,
+        diversity_penalty_min: float = 15.0,
+    ) -> tuple[Journey, ...]:
+        """Return route-diverse journeys using deterministic route penalties.
+
+        The first journey is the normal shortest path. Subsequent journeys are
+        encouraged to avoid route IDs already used by earlier alternatives.
+        This is intentionally lightweight and deterministic so it remains
+        suitable for large OD matrices before a full Yen-style enumerator is
+        introduced.
+        """
+        if max_alternatives <= 0:
+            return ()
+        if diversity_penalty_min < 0:
+            raise ValueError("diversity_penalty_min cannot be negative")
+
+        base_penalties = dict(route_penalties or {})
+        results: list[Journey] = []
+        seen_sequences: set[tuple[str, ...]] = set()
+        penalties = dict(base_penalties)
+
+        for rank in range(max_alternatives):
+            journey = self.shortest(
+                origin,
+                destination,
+                period_id=period_id,
+                route_penalties=penalties,
+            )
+            if journey is None:
+                break
+            sequence = tuple(
+                leg.route_id
+                for leg in journey.legs
+                if leg.kind == "transit" and leg.route_id is not None
+            )
+            if sequence in seen_sequences:
+                break
+            seen_sequences.add(sequence)
+            results.append(journey)
+            increment = diversity_penalty_min * (rank + 1)
+            for route_id in sequence:
+                penalties[route_id] = max(
+                    penalties.get(route_id, 0.0),
+                    base_penalties.get(route_id, 0.0) + increment,
+                )
+        return tuple(results)
+\n    def _run_time_between(
         self,
         from_id: str,
         to_id: str,
