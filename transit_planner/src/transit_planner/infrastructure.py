@@ -123,9 +123,32 @@ def total_reserved_capital(
 def shared_track_departure_capacity(
     sections: tuple[TrackSection, ...],
 ) -> float:
+    """Return the bottleneck capacity for one shared corridor."""
+    groups = {section.shared_group for section in sections if section.shared_group is not None}
+    if len(groups) > 1:
+        raise ValueError(
+            "shared_track_departure_capacity expects sections from one shared_group"
+        )
     capacities = [
         section.capacity_departures_per_hour
         for section in sections
         if section.shared_group is not None
     ]
     return min(capacities) if capacities else float("inf")
+
+
+def shared_track_departure_capacities(
+    sections: tuple[TrackSection, ...],
+) -> dict[str, float]:
+    """Return independent bottleneck capacities for every shared corridor."""
+    grouped: dict[str, list[float]] = {}
+    for section in sections:
+        if section.shared_group is None:
+            continue
+        grouped.setdefault(section.shared_group, []).append(
+            section.capacity_departures_per_hour
+        )
+    return {
+        group: min(capacities)
+        for group, capacities in grouped.items()
+    }
