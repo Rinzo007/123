@@ -29,6 +29,10 @@ class ReferenceDemandLayerResult:
     label: str
     demand: TemporalDemandMatrix
 
+    @property
+    def total_trips(self) -> float:
+        return self.demand.total_trips
+
 
 @dataclass(frozen=True, slots=True)
 class ReferenceDemandLayers:
