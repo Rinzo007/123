@@ -1,5 +1,5 @@
-from transit_planner.data import GeoJSONRoadProvider
-from transit_planner.road_builder import build_road_graph
+from transit_planner.data import ConnectorRef, GeoJSONRoadProvider, RoadRecord
+from transit_planner.road_builder import build_road_graph, build_topological_road_graph
 from transit_planner.spatial import GridPointIndex, IndexedPoint
 
 
@@ -49,3 +49,67 @@ def test_grid_index_nearest():
 
     assert index.nearest(7, 6).id == 1
     assert index.nearest(7, 6, max_radius=1) is None
+
+
+def test_topological_graph_uses_shared_connectors_not_coincident_coordinates():
+    roads = (
+        RoadRecord(
+            "a",
+            __import__("transit_planner.geo", fromlist=["LineString"]).LineString((
+                __import__("transit_planner.geo", fromlist=["Point"]).Point(0, 0),
+                __import__("transit_planner.geo", fromlist=["Point"]).Point(1, 0),
+            )),
+            30,
+            connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            __import__("transit_planner.geo", fromlist=["LineString"]).LineString((
+                __import__("transit_planner.geo", fromlist=["Point"]).Point(1, 0),
+                __import__("transit_planner.geo", fromlist=["Point"]).Point(2, 0),
+            )),
+            30,
+            connectors=(ConnectorRef("c1", 0.0), ConnectorRef("c2", 1.0)),
+            length_m=200.0,
+        ),
+    )
+
+    result = build_topological_road_graph(roads)
+    graph = result.graph
+    start = graph.connector_nodes["c0"]
+    end = graph.connector_nodes["c2"]
+
+    travel_time, path = graph.shortest_path(start, end)
+    assert round(travel_time, 2) == 0.6
+    assert path == ("a:c0:c1", "b:c1:c2")
+
+
+def test_topological_graph_does_not_connect_by_coordinate_alone():
+    from transit_planner.geo import LineString, Point
+
+    roads = (
+        RoadRecord(
+            "a",
+            LineString((Point(0, 0), Point(1, 0))),
+            30,
+            connectors=(ConnectorRef("a0", 0.0), ConnectorRef("a1", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            LineString((Point(1, 0), Point(2, 0))),
+            30,
+            connectors=(ConnectorRef("b0", 0.0), ConnectorRef("b1", 1.0)),
+            length_m=100.0,
+        ),
+    )
+
+    result = build_topological_road_graph(roads)
+    graph = result.graph
+    start = graph.connector_nodes["a0"]
+    end = graph.connector_nodes["b1"]
+
+    travel_time, path = graph.shortest_path(start, end)
+    assert travel_time == float("inf")
+    assert path == ()
