@@ -64,12 +64,14 @@ def calculate_economics(
     infrastructure_costs = config.infrastructure_cost_per_km or {}
     track_infrastructure_costs = config.infrastructure_cost_per_track_km or {}
 
+    active_routes: set[str] = set()
     for service in network.services.values():
         headway = service.headway_by_period.get(config.period_id)
         if headway is None:
             continue
         departures = ceil(duration / headway)
         route = network.routes[service.route_id]
+        active_routes.add(route.id)
         length_km = _route_length_km(network, route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
@@ -87,6 +89,9 @@ def calculate_economics(
         daily_vehicle_km += vehicle_km
         operating_cost_per_km = vehicle.operating_cost_per_km or profile.opex_per_vehicle_km
         daily_operating_cost += vehicle_km * operating_cost_per_km
+    for route_id in active_routes:
+        route = network.routes[route_id]
+        length_km = _route_length_km(network, route)
         capital_cost += _route_capital_cost(
             network,
             route,
