@@ -1,6 +1,10 @@
 from transit_planner.assignment import AssignmentConfig, assign_demand
 from transit_planner.demand import DemandMatrix, ODPairDemand
-from transit_planner.economics import EconomicsConfig, calculate_economics
+from transit_planner.economics import (
+    EconomicsConfig,
+    aggregate_temporal_economics,
+    calculate_economics,
+)
 from transit_planner.infrastructure import TrackSection, TrackType
 from transit_planner.geo import Point
 from transit_planner.network import (
@@ -262,3 +266,45 @@ def test_reference_capital_cost_multipliers_apply_to_rows():
         ),
     )
     assert result.capital_cost == 18.0 * 2.0 * 1.5
+
+
+def test_temporal_economics_sums_operations_and_counts_capital_once():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80, 2.0))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_period(ServicePeriod("pm", 900, 1080))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_service(
+        Service("svc", "r1", "bus", {"am": 10, "pm": 10})
+    )
+
+    demand = DemandMatrix((ODPairDemand("a", "b", 100),))
+    am_assignment = assign_demand(
+        network,
+        demand,
+        config=AssignmentConfig(period_id="am", max_access_distance_m=0),
+    )
+    pm_assignment = assign_demand(
+        network,
+        demand,
+        config=AssignmentConfig(period_id="pm", max_access_distance_m=0),
+    )
+
+    from transit_planner.temporal_assignment import PeriodAssignment, TemporalAssignmentResult
+
+    temporal = TemporalAssignmentResult((
+        PeriodAssignment("am", demand.total_trips_per_day, am_assignment),
+        PeriodAssignment("pm", demand.total_trips_per_day, pm_assignment),
+    ))
+    result = aggregate_temporal_economics(
+        network,
+        temporal,
+        config=EconomicsConfig(period_id="am"),
+    )
+
+    assert result.daily_vehicle_km == 24.0
+    assert result.daily_operating_cost == 48.0
+    assert result.capital_cost == 0.4
+    assert result.daily_fleet_cost == 250.0
