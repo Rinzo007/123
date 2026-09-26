@@ -1,6 +1,6 @@
 from transit_planner.geo import Point
 from transit_planner.network import (
-    Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType,
+    Network, Route, Service, ServicePeriod, Stop, TransitMode, TrackRow, VehicleType,
 )
 
 
@@ -164,3 +164,20 @@ def test_service_departures_use_period_window():
         departure_offset_by_period={"peak": 470},
     )
     assert network.service_departures(shifted, "peak") == 2
+
+
+def test_route_supports_segment_reference_rows():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    route = Route(
+        "r1", "1", TransitMode.TRAM, ("a", "b", "c"),
+        row_by_segment=(TrackRow.RESERVED, TrackRow.GRADE),
+    )
+    network.add_route(route)
+    assert network.route_segment_row(route, 0) is TrackRow.RESERVED
+    assert network.route_segment_row(route, 1) is TrackRow.GRADE
+    assert network.route_segment_cost_per_km(route, 1) == 85.0
+    assert network.route_segment_run_time_min(route, 0) < network.route_segment_run_time_min(route, 1)
