@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .city import DemandZone
-from .demand import DemandMatrix
+from .demand import DemandMatrix, TemporalDemandMatrix
 from .places import CityPlace, aggregate_place_attractions
 from .projection import project_wgs84_point
 from .reference_demand import ReferenceDemandLayers, build_daily_demand, build_demand_layers
@@ -67,6 +67,21 @@ def build_city_demand_layers(
     return build_demand_layers(enriched_zones)
 
 
+
+def build_city_temporal_demand(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...] = (),
+    *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
+) -> TemporalDemandMatrix:
+    projected_places = _project_places(
+        places,
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    enriched_zones = aggregate_place_attractions(zones, projected_places)
+    return build_temporal_demand(enriched_zones)
 def build_city_daily_demand(
     zones: tuple[DemandZone, ...],
     places: tuple[CityPlace, ...] = (),
