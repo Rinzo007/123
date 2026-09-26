@@ -179,6 +179,7 @@ def test_via_prohibited_transition_blocks_two_segment_sequence():
             "a",
             LineString((Point(0, 0), Point(1, 0))),
             30,
+            oneway=True,
             connectors=(ConnectorRef("a0", 0.0), ConnectorRef("c1", 1.0)),
             prohibited_transitions=(
                 ProhibitedTransition(
@@ -197,6 +198,7 @@ def test_via_prohibited_transition_blocks_two_segment_sequence():
             "b",
             LineString((Point(1, 0), Point(2, 0))),
             30,
+            oneway=True,
             connectors=(ConnectorRef("c1", 0.0), ConnectorRef("c2", 1.0)),
             length_m=100.0,
         ),
@@ -204,6 +206,7 @@ def test_via_prohibited_transition_blocks_two_segment_sequence():
             "c",
             LineString((Point(2, 0), Point(3, 0))),
             30,
+            oneway=True,
             connectors=(ConnectorRef("c2", 0.0), ConnectorRef("c3", 1.0)),
             length_m=100.0,
         ),
