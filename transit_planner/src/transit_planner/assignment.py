@@ -210,11 +210,7 @@ def _assign_once(
                 network.stops[origin_stop_id],
                 network.stops[destination_stop_id],
                 period_id=config.period_id,
-                route_penalized=any(
-                    route_penalties.get(leg.route_id or "", 0.0) > 0.0
-                    for leg in journey.legs
-                    if leg.kind == "transit"
-                ),
+                route_penalties=route_penalties,
             )
             if candidate is not None and any(leg.kind == "transit" for leg in candidate.legs):
                 journey = candidate
