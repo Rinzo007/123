@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from .geometry import haversine_km
@@ -43,7 +43,7 @@ class RoadNetwork:
     отрезок ``(lat1, lon1) → (lat2, lon2)`` — ребро с весом ``haversine_km``.
     """
 
-    __slots__ = ("_adj", "_cells", "_comp", "_coords", "_next_id", "_snap_idx")
+    __slots__ = ("_adj", "_coords", "_next_id", "_snap_idx")
 
     def __init__(self) -> None:
         # node_id → [(neighbor_id, weight_km)]
@@ -112,65 +112,3 @@ class RoadNetwork:
         if geom_type == "LineString":
             coords = [(c[1], c[0]) for c in getattr(geom, "coords", ())]  # (lon, lat) → (lat, lon)
             self.add_linestring(coords)
-
-    # ------------------------------------------------------------------
-    # Метрика
-    # ------------------------------------------------------------------
-
-    def _ensure_components(self) -> None:
-        """Размечает компоненты связности один раз (обход по всему графу)."""
-        if self._comp is not None:
-            return
-        comp: dict[int, int] = {}
-        comp_id = 0
-        for start in self._adj:
-            if start in comp:
-                continue
-            self._fill_component(start, comp, comp_id)
-            comp_id += 1
-        self._comp = comp
-
-    # ------------------------------------------------------------------
-    # Snap: ближайший узел к точке
-    # ------------------------------------------------------------------
-
-    def _nearest_node_in_cells(
-        self, lat: float, lon: float, cells: Sequence[tuple[int, int]]
-    ) -> int | None:
-        """Ближайший к точке узел среди данных ячеек сетки или ``None``."""
-        best_id: int = -1
-        best_dist: float = math.inf
-        for cell in cells:
-            for nid in self._cells.get(cell, ()):
-                nlat, nlon = self._coords[nid]
-                d = haversine_km(lat, lon, nlat, nlon)
-                if d < best_dist:
-                    best_dist = d
-                    best_id = nid
-        return best_id if best_id >= 0 else None
-
-    # ------------------------------------------------------------------
-    # Кратчайший путь: Dijkstra (приоритетная очередь)
-    # ------------------------------------------------------------------
-
-    def _heuristic(
-        self, node_id: int, tlat: float, tlon: float, cos_lat: float
-    ) -> float:
-        """Эвристика A*: эквиперректangularное расстояние до цели (км/град).
-
-        Значительно дешевле гаверсинуса: один ``sqrt`` на вызов. Коэффициент
-        ``cos_lat`` (косинус средней широты) вычисляется один раз на запрос.
-        Оценка не завышает истинное кратчайшее расстояние (дороги не короче
-        прямой), поэтому A* остаётся точным.
-        """
-        nlat, nlon = self._coords[node_id]
-        dlat = (nlat - tlat) * _KM_PER_DEG_LAT
-        dlon = (nlon - tlon) * _KM_PER_DEG_LON * cos_lat
-        return math.sqrt(dlat * dlat + dlon * dlon)
-
-    # ------------------------------------------------------------------
-    # Вспомогательные методы для тестирования и отладки
-    # ------------------------------------------------------------------
-
-    def node_coord(self, node_id: int) -> Coordinate | None:
-        return self._coords.get(node_id)
