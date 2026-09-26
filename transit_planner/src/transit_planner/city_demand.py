@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .city import DemandZone
 from .demand import DemandMatrix
 from .places import CityPlace, aggregate_place_attractions
 from .projection import project_wgs84_point
 from .reference_demand import ReferenceDemandLayers, build_daily_demand, build_demand_layers
+
+
+@dataclass(frozen=True, slots=True)
+class CityDemandConfig:
+    trip_rate: float = 0.12
+    decay: float = 0.08
+    reference_speed_kph: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.trip_rate < 0:
+            raise ValueError("trip_rate cannot be negative")
+        if self.decay <= 0 or self.reference_speed_kph <= 0:
+            raise ValueError("decay and reference_speed_kph must be positive")
 
 
 def _project_places(
@@ -41,6 +56,7 @@ def build_city_demand(
     *,
     origin_lon: float | None = None,
     origin_lat: float | None = None,
+    config: CityDemandConfig = CityDemandConfig(),
 ) -> DemandMatrix:
     projected_places = _project_places(
         places,
@@ -48,7 +64,12 @@ def build_city_demand(
         origin_lat=origin_lat,
     )
     enriched_zones = aggregate_place_attractions(zones, projected_places)
-    return build_daily_demand(enriched_zones)
+    return build_daily_demand(
+        enriched_zones,
+        trip_rate=config.trip_rate,
+        decay=config.decay,
+        reference_speed_kph=config.reference_speed_kph,
+    )
 
 
 def build_city_demand_layers(
