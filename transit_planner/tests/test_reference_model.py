@@ -70,3 +70,25 @@ def test_demand_layers_and_daily_adapter_are_composable():
 
     assert len(layers.layers) == 5
     assert daily.total_trips_per_day > 0
+
+def test_demand_layers_consume_place_purpose_aliases():
+    zones = (
+        DemandZone("o", 0, 0, population=1000),
+        DemandZone(
+            "d",
+            1000,
+            0,
+            population=500,
+            purpose_attractions=(
+                ("education", 100.0),
+                ("shopping", 100.0),
+                ("airport", 100.0),
+            ),
+        ),
+    )
+    layers = build_demand_layers(zones)
+    totals = {layer.purpose: layer.total_trips for layer in layers.layers}
+
+    assert totals["edu"] > 0
+    assert totals["shop"] > 0
+    assert totals["air"] > 0
