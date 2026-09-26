@@ -186,3 +186,136 @@ input:focus, select:focus {
   .sidebar { border-right: 0; border-bottom: 1px solid #d1d5db; }
   .topbar { align-items: flex-start; flex-direction: column; }
 }
+
+
+.active-toggle {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #3730a3;
+}
+
+.check-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.check-row input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.network-area {
+  min-width: 0;
+  overflow: auto;
+  background: #f8fafc;
+}
+
+.network-view {
+  min-height: 100%;
+  padding: 24px;
+}
+
+.network-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.network-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.network-header p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.network-kpis {
+  display: flex;
+  gap: 10px;
+}
+
+.network-kpis > div {
+  min-width: 120px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: white;
+}
+
+.network-kpis span,
+.network-kpis b {
+  display: block;
+}
+
+.network-kpis span {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.network-kpis b {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.network-empty {
+  padding: 36px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: white;
+  color: #64748b;
+  text-align: center;
+}
+
+.network-table-wrap {
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: white;
+}
+
+.network-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.network-table th,
+.network-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.network-table th {
+  color: #6b7280;
+  background: #f8fafc;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.network-table tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 1000px) {
+  .network-header {
+    flex-direction: column;
+  }
+  .network-kpis {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
