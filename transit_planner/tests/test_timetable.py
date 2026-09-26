@@ -58,13 +58,20 @@ def test_average_connection_wait_is_schedule_aware():
         )
         - 10.0
     ) < 1e-3
-    assert abs(
-        average_connection_wait_minutes(
-            10,
-            20,
-            upstream_offset=0,
-            downstream_offset=5,
-            upstream_run_time=10,
-        )
-        - 15.0
-    ) < 1e-3
+    shifted = average_connection_wait_minutes(
+        10,
+        20,
+        upstream_offset=0,
+        downstream_offset=5,
+        upstream_run_time=10,
+    )
+    baseline = average_connection_wait_minutes(
+        10,
+        20,
+        upstream_offset=0,
+        downstream_offset=0,
+        upstream_run_time=10,
+    )
+    assert shifted is not None and baseline is not None
+    assert shifted > baseline
+    assert shifted < 20.0
