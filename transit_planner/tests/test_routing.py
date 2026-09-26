@@ -7,9 +7,10 @@ def make_network() -> Network:
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0)))
     network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(2000, 0)))
     network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
     network.add_period(ServicePeriod("am", 360, 540))
-    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b", "c")))
     network.add_service(Service("svc", "r1", "bus", {"am": 10}))
     return network
 
