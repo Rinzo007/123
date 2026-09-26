@@ -156,6 +156,7 @@ def assign_demand(
         unserved_transit_demand=snapshot.unserved,
         iterations=converged_after,
         max_load_ratio=max((s.load_ratio for s in snapshot.section_loads), default=0.0),
+        loss_reasons=snapshot.loss_reasons,
     )
 
 
@@ -166,6 +167,7 @@ class _FlowSnapshot:
     section_loads: tuple[SectionLoad, ...]
     stop_flows: tuple[StopFlow, ...]
     unserved: float
+    loss_reasons: tuple[DemandLoss, ...]
 
 
 def _assign_once(
@@ -187,6 +189,7 @@ def _assign_once(
     total_transit = total_car = total_walk = total_bike = 0.0
     weighted_transit_time = weighted_transfers = 0.0
     unserved = 0.0
+    loss_reasons: dict[str, float] = {}
 
     for pair in demand.pairs:
         trips = pair.trips_per_day
