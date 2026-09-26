@@ -1,4 +1,4 @@
-from transit_planner.data import ConnectorRef
+from transit_planner.data import ConnectorRef, ProhibitedTransitionSequenceEntry
 from transit_planner.overture import (
     DEFAULT_RELEASE,
     OvertureConnectorProvider,
@@ -7,6 +7,7 @@ from transit_planner.overture import (
     OvertureTransportationProvider,
     _effective_speed_kph,
     _haversine_linestring_m,
+    _parse_prohibited_transitions,
     _is_oneway,
     _parse_connector_refs,
 )
@@ -41,6 +42,7 @@ def test_overture_sql_uses_connectors():
     )
     sql = provider._sql()
     assert "connectors" in sql
+    assert "prohibited_transitions" in sql
     assert "ST_AsGeoJSON(ST_GeomFromWKB(geometry))" in sql
     assert "bbox.xmin" in sql
 
@@ -84,3 +86,29 @@ def test_global_overture_speed_limit_overrides_class_speed():
         [{"max_speed": {"value": 50, "unit": "km/h"}, "between": [0.0, 0.5]}],
         60.0,
     ) == 60.0
+
+def test_prohibited_transition_parser_prefixes_segment_ids_and_skips_scoped_rules():
+    raw = [
+        {
+            "sequence": [
+                {"segment_id": "target", "connector_id": "c1"},
+            ],
+            "final_heading": "forward",
+            "when": {"heading": "forward"},
+        },
+        {
+            "sequence": [
+                {"segment_id": "target-vehicle", "connector_id": "c2"},
+            ],
+            "final_heading": "forward",
+            "when": {"mode": ["motor_vehicle"]},
+        },
+    ]
+
+    parsed = _parse_prohibited_transitions(raw, source_segment_id="overture:source")
+
+    assert len(parsed) == 1
+    assert parsed[0].source_segment_id == "overture:source"
+    assert parsed[0].sequence == (
+        ProhibitedTransitionSequenceEntry("overture:target", "c1"),
+    )
