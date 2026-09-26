@@ -45,6 +45,8 @@ def project_roads_wgs84(
             speed_kph=road.speed_kph,
             road_type=road.road_type,
             oneway=road.oneway,
+            connectors=road.connectors,
+            length_m=road.length_m,
         )
         for road in roads
     )
