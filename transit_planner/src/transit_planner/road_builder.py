@@ -139,6 +139,9 @@ def build_topological_road_graph(
             else:
                 graph.add_connector_node(ref.connector_id, node)
 
+        for rule in record.prohibited_transitions:
+            graph.add_prohibited_transition(rule)
+
         for left_ref, right_ref in zip(refs, refs[1:]):
             left_node = graph.connector_nodes[left_ref.connector_id]
             right_node = graph.connector_nodes[right_ref.connector_id]
@@ -159,6 +162,9 @@ def build_topological_road_graph(
                     record.speed_kph,
                     record.road_type,
                     record.id,
+                    left_ref.connector_id,
+                    right_ref.connector_id,
+                    "forward",
                 )
             )
             if not record.oneway:
