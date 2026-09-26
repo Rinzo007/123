@@ -230,6 +230,7 @@ class TransitRouter:
             self.network,
             period_id,
             tuple(legs),
+            service_headway_factors=headway_factors,
         )
         return Journey(
             origin_stop_id=origin.id,
@@ -444,11 +445,14 @@ def _adjust_connection_waits(
     network: Network,
     period_id: str,
     legs: tuple[JourneyLeg, ...],
+    *,
+    service_headway_factors: dict[str, float] | None = None,
 ) -> tuple[JourneyLeg, ...]:
     if not legs:
         return legs
 
     result: list[JourneyLeg] = []
+    headway_factors = service_headway_factors or {}
     active_route_id: str | None = None
     active_service_id: str | None = None
     upstream_run = 0.0
@@ -477,8 +481,14 @@ def _adjust_connection_waits(
                         network.routes[upstream_service.route_id].mode.value
                     ]
                     wait = average_connection_wait_minutes(
-                        upstream_h,
-                        downstream_h,
+                        upstream_h * max(
+                            1.0,
+                            headway_factors.get(upstream_service.id, 1.0),
+                        ),
+                        downstream_h * max(
+                            1.0,
+                            headway_factors.get(downstream_service.id, 1.0),
+                        ),
                         upstream_offset=(
                             upstream_service.departure_offset_by_period.get(
                                 period_id,
