@@ -14,9 +14,10 @@
     loadPopulationZones,
     compareScenarios,
     type ScenarioPayload,
+    type OvertureNetworkResponse,
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
-  import { loadProject, loadUiSettings, saveProject, saveUiSettings } from "./storage";
+  import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
   const MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
@@ -278,27 +279,50 @@
     message = "Маршрут очищен";
   }
 
+  function datasetCacheKey(prefix: string, bounds: { south: number; west: number; north: number; east: number }) {
+    const round = (value: number) => value.toFixed(4);
+    return `${prefix}:${round(bounds.south)}:${round(bounds.west)}:${round(bounds.north)}:${round(bounds.east)}`;
+  }
+
   async function loadCityData() {
     if (!mapRef) return;
     busy = true;
-    message = "Загрузка Overture для текущей области…";
+    message = "Проверка локального кэша Overture…";
     try {
       const bounds = mapRef.getBounds();
-      const data = await loadOvertureNetwork(
+      const cacheKey = datasetCacheKey("overture-network", {
+        south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
+      });
+      const cached = await loadDataset<OvertureNetworkResponse>(cacheKey);
+      const data = cached ?? await loadOvertureNetwork(
         bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
       );
+      if (!cached) await saveDataset(cacheKey, data);
+
       cityRoads = data.roads;
       cityConnectors = data.connectors;
       cityStops = data.stops;
       cityPlaces = data.places;
-      try {
-        populationZones = await loadPopulationZones(
-          bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
-        );
-      } catch {
-        populationZones = null;
+
+      const populationKey = datasetCacheKey("population-zones", {
+        south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
+      });
+      const cachedPopulation = await loadDataset<FeatureCollection>(populationKey);
+      if (cachedPopulation) {
+        populationZones = cachedPopulation;
+      } else {
+        try {
+          const loadedPopulation = await loadPopulationZones(
+            bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+          );
+          populationZones = loadedPopulation;
+          await saveDataset(populationKey, loadedPopulation);
+        } catch {
+          populationZones = null;
+        }
       }
-      message = `Overture ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`;
+
+      message = `${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`;
     } catch (error) {
       message = error instanceof Error ? error.message : "Ошибка загрузки Overture";
     } finally {
