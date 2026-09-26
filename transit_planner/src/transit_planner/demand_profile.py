@@ -22,6 +22,29 @@ DEFAULT_PERIOD_IDS = (
 )
 
 
+
+@dataclass(frozen=True, slots=True)
+class DemandPeriod:
+    id: str
+    start_minute: int
+    end_minute: int
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Demand period id cannot be empty")
+        if not 0 <= self.start_minute < self.end_minute <= 1440:
+            raise ValueError("Invalid demand period window")
+
+
+DEFAULT_DEMAND_PERIODS = (
+    DemandPeriod("night", 0, 360),
+    DemandPeriod("morning_peak", 360, 600),
+    DemandPeriod("daytime", 600, 960),
+    DemandPeriod("evening_peak", 960, 1200),
+    DemandPeriod("late_evening", 1200, 1440),
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PurposeProfile:
     purpose: TripPurpose
