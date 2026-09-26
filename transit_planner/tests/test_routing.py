@@ -48,3 +48,6 @@ def test_router_uses_metric_geometry_for_run_time():
     assert journey is not None
     assert journey.duration_min >= 3.0
     assert journey.duration_min < 6.0
+    transit_legs = [leg for leg in journey.legs if leg.kind == "transit"]
+    assert transit_legs
+    assert 0.0 <= transit_legs[0].wait_min < 10.0
