@@ -52,6 +52,23 @@ def test_grid_index_nearest():
     assert index.nearest(7, 6, max_radius=1) is None
 
 
+def test_grid_index_exact_unbounded_search_reaches_far_cells():
+    index = GridPointIndex(cell_size=10)
+    index.insert(IndexedPoint(1, 5, 5))
+    index.insert(IndexedPoint(2, 25000, 5))
+
+    nearest = index.nearest(24995, 5)
+    assert nearest is not None
+    assert nearest.id == 2
+
+
+def test_grid_index_clear_resets_spatial_extent():
+    index = GridPointIndex(cell_size=10)
+    index.insert(IndexedPoint(1, 5, 5))
+    index.clear()
+    assert index.nearest(5, 5) is None
+
+
 def test_topological_graph_uses_shared_connectors_not_coincident_coordinates():
     roads = (
         RoadRecord(
