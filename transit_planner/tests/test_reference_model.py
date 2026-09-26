@@ -131,3 +131,11 @@ def test_lateral_speed_limit_uses_mode_acceleration():
     expected = (1.1 * 100.0) ** 0.5 * 3.6
     assert lateral_speed_limit_kph("bus", 100.0) == expected
     assert lateral_speed_limit_kph("tram", 100.0) < lateral_speed_limit_kph("bus", 100.0)
+
+
+def test_headway_unevenness_factor_matches_zero_demand_baseline():
+    from transit_planner.reference_model import headway_unevenness_factor
+
+    expected = 1.0 + (90.0 / 600.0) ** 2
+    assert headway_unevenness_factor("bus", 10.0, 3.0) == expected
+    assert headway_unevenness_factor("metro", 10.0, 3.0, (10000.0,)) >= 1.0
