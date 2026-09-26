@@ -163,6 +163,19 @@ def probabilities(
     return {key: weight / total for key, weight in weights.items()}
 
 
+def trip_suppression_factor(
+    base_time_min: float,
+    *,
+    config: ChoiceConfig = ChoiceConfig(),
+) -> float:
+    """Return the reference-style rest/trip-suppression factor."""
+    if base_time_min < 0:
+        raise ValueError("base_time_min cannot be negative")
+    return exp(
+        -base_time_min * 60.0 / config.value_of_time_s_per_eur
+    )
+
+
 def alternative_probabilities(
     alternatives: tuple[tuple[float, float], ...],
     *,
