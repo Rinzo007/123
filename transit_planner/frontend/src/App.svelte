@@ -23,7 +23,7 @@
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
-  import { $stopsStoreRef as stopsStore, $modeStoreRef as modeStore, $routeNameStoreRef as routeNameStore, $headwaysStoreRef as headwaysStore } from "./stores/network";
+  import { $stopsStoreRef as stopsStore, mode as modeStore, $routeNameStoreRef as routeNameStore, $headwaysStoreRef as headwaysStore } from "./stores/network";
   import { project as projectStore, markProjectDirty } from "./stores/project";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
@@ -55,7 +55,7 @@
     format: "transit-planner-project";
     version: number;
     $routeNameStoreRef: string;
-    $modeStoreRef: TransitMode;
+    mode: TransitMode;
     $headwaysStoreRef: Record<string, number>;
     $stopsStoreRef: StopDraft[];
     network: NetworkPayload;
