@@ -1,4 +1,4 @@
-from transit_planner.data import ConnectorRef, GeoJSONRoadProvider, RoadRecord
+from transit_planner.data import ConnectorRef, GeoJSONRoadProvider, ProhibitedTransition, ProhibitedTransitionSequenceEntry, RoadRecord
 from transit_planner.geo import LineString, Point
 from transit_planner.road_builder import build_road_graph, build_topological_road_graph
 from transit_planner.spatial import GridPointIndex, IndexedPoint
@@ -111,4 +111,92 @@ def test_topological_graph_does_not_connect_by_coordinate_alone():
 
     travel_time, path = graph.shortest_path(start, end)
     assert travel_time == float("inf")
+    assert path == ()
+
+def test_simple_prohibited_transition_blocks_forward_turn_only():
+    road_a = RoadRecord(
+        "a",
+        LineString((Point(0, 0), Point(1, 0))),
+        30,
+        connectors=(ConnectorRef("a0", 0.0), ConnectorRef("c1", 1.0)),
+        prohibited_transitions=(
+            ProhibitedTransition(
+                source_segment_id="a",
+                sequence=(ProhibitedTransitionSequenceEntry("b", "c1"),),
+                final_heading="forward",
+                when_heading="forward",
+            ),
+        ),
+        length_m=100.0,
+    )
+    road_b = RoadRecord(
+        "b",
+        LineString((Point(1, 0), Point(2, 0))),
+        30,
+        connectors=(ConnectorRef("c1", 0.0), ConnectorRef("b1", 1.0)),
+        length_m=100.0,
+    )
+
+    graph = build_topological_road_graph((road_a, road_b)).graph
+    forward_time, forward_path = graph.shortest_path(
+        graph.connector_nodes["a0"],
+        graph.connector_nodes["b1"],
+    )
+    reverse_time, reverse_path = graph.shortest_path(
+        graph.connector_nodes["b1"],
+        graph.connector_nodes["a0"],
+    )
+
+    assert forward_time == float("inf")
+    assert forward_path == ()
+    assert reverse_time < float("inf")
+    assert reverse_path == (
+        "b:c1:b1:reverse",
+        "a:a0:c1:reverse",
+    )
+
+
+def test_via_prohibited_transition_blocks_two_segment_sequence():
+    roads = (
+        RoadRecord(
+            "a",
+            LineString((Point(0, 0), Point(1, 0))),
+            30,
+            connectors=(ConnectorRef("a0", 0.0), ConnectorRef("c1", 1.0)),
+            prohibited_transitions=(
+                ProhibitedTransition(
+                    source_segment_id="a",
+                    sequence=(
+                        ProhibitedTransitionSequenceEntry("b", "c1"),
+                        ProhibitedTransitionSequenceEntry("c", "c2"),
+                    ),
+                    final_heading="forward",
+                    when_heading="forward",
+                ),
+            ),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            LineString((Point(1, 0), Point(2, 0))),
+            30,
+            connectors=(ConnectorRef("c1", 0.0), ConnectorRef("c2", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "c",
+            LineString((Point(2, 0), Point(3, 0))),
+            30,
+            connectors=(ConnectorRef("c2", 0.0), ConnectorRef("c3", 1.0)),
+            length_m=100.0,
+        ),
+    )
+
+    graph = build_topological_road_graph(roads).graph
+    time, path = graph.shortest_path(
+        graph.connector_nodes["a0"],
+        graph.connector_nodes["c3"],
+    )
+
+    assert time == float("inf")
     assert path == ()
