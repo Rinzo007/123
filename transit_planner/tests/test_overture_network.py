@@ -1,4 +1,4 @@
-from transit_planner.data import ConnectorRef, ProhibitedTransition, ProhibitedTransitionSequenceEntry, RoadRecord
+from transit_planner.data import ConnectorRecord, ConnectorRef, ProhibitedTransition, ProhibitedTransitionSequenceEntry, RoadRecord
 from transit_planner.geo import LineString, Point
 from transit_planner.network import Stop
 from transit_planner.overture_network import build_overture_network
