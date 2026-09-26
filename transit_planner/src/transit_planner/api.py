@@ -18,6 +18,7 @@ from .overture import (
     OvertureTransportationProvider,
 )
 from .overture_network import OvertureNetworkProvider
+from .timetable import generate_service_timetable
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -262,6 +263,28 @@ def overture_stops(
         ) from exc
     return stops_to_geojson(stops)
 
+
+@app.post("/api/v1/timetable")
+def create_timetable(payload: dict) -> dict:
+    service_id = str(payload.get("service_id", "service"))
+    periods = payload.get("periods", {})
+    headways = payload.get("headway_by_period", {})
+    timetable = generate_service_timetable(
+        service_id,
+        {str(key): (int(value["start_minute"]), int(value["end_minute"])) for key, value in periods.items()},
+        {str(key): float(value) for key, value in headways.items()},
+        offset_minute=int(payload.get("offset_minute", 0)),
+    )
+    return {
+        "service_id": timetable.service_id,
+        "periods": [
+            {
+                "period_id": period.period_id,
+                "departures_minute": list(period.departures_minute),
+            }
+            for period in timetable.periods
+        ],
+    }
 
 @app.post("/api/v1/demand/temporal")
 def temporal_demand(payload: dict) -> dict:
