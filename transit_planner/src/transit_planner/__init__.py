@@ -30,6 +30,7 @@ from .od import GravityParameters, gravity_od
 from .overture_network import (
     OvertureNetwork,
     OvertureNetworkProvider,
+    RoadRouteResult,
     build_overture_network,
 )
 from .overture import (
@@ -88,6 +89,7 @@ __all__ = [
     "gravity_od",
     "OvertureNetwork",
     "OvertureNetworkProvider",
+    "RoadRouteResult",
     "build_overture_network",
     "DEFAULT_RELEASE",
     "OvertureConnectorProvider",
