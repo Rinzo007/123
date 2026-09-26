@@ -49,6 +49,7 @@ def build_city_demand(
                 ),
                 basic_category=place.basic_category,
                 taxonomy_primary=place.taxonomy_primary,
+                taxonomy_hierarchy=place.taxonomy_hierarchy,
                 importance=place.importance,
             )
             for place in places
