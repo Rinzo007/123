@@ -21,7 +21,8 @@
 - OD-спрос;
 - дорожный граф;
 - топологический граф Overture segment + connector;
-- кратчайший путь;
+- кратчайший путь с учётом Overture connector topology;
+- простые и via-ограничения поворотов из prohibited_transitions;
 - пространственный индекс;
 - Overture Transportation Segment/Connector-провайдеры;
 - Overture Base Infrastructure transit-провайдер;
