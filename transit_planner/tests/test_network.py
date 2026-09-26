@@ -111,3 +111,29 @@ def test_route_rejects_fewer_than_two_stops() -> None:
         assert "at least two stops" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_network_uses_physical_track_length_and_runtime() -> None:
+    from transit_planner.infrastructure import TrackSection
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_track_section(
+        TrackSection(
+            "physical",
+            2.0,
+            speed_limit_kph=20.0,
+        )
+    )
+    route = Route(
+        "r1",
+        "1",
+        TransitMode.TRAM,
+        ("a", "b"),
+        track_section_ids=("physical",),
+    )
+    network.add_route(route)
+
+    assert network.route_length_km(route) == 2.0
+    assert network.route_run_time_min(route) == 6.0
