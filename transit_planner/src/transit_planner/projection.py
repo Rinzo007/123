@@ -23,6 +23,22 @@ def project_wgs84_point(
     return Point(x, y)
 
 
+
+def project_local_point_wgs84(
+    point: Point,
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> Point:
+    """Inverse of project_wgs84_point for city-scale local coordinates."""
+    cos_lat = cos(radians(origin_lat))
+    if abs(cos_lat) < 1e-12:
+        raise ValueError("origin_lat is too close to a pole")
+    lon = origin_lon + point.x / (EARTH_RADIUS_M * cos_lat) * 180.0 / 3.141592653589793
+    lat = origin_lat + point.y / EARTH_RADIUS_M * 180.0 / 3.141592653589793
+    return Point(lon, lat)
+
+
 def project_roads_wgs84(
     roads: tuple[RoadRecord, ...],
     *,
