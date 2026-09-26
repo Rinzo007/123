@@ -131,3 +131,44 @@ def test_route_capital_cost_is_not_duplicated_across_services() -> None:
     )
 
     assert result.capital_cost == 7.0
+
+
+def test_physical_station_links_prevent_duplicate_station_capex() -> None:
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0), True))
+    network.add_stop(Stop("b", "B", Point(1000, 0), True))
+    network.add_track_section(
+        TrackSection("s1", 1.0, station_ids=("a", "b"))
+    )
+    network.add_track_section(
+        TrackSection("s2", 1.0, station_ids=("b",))
+    )
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.TRAM,
+            ("a", "b", "a"),
+            track_section_ids=("s1", "s2"),
+            closed=False,
+        )
+    )
+    network.add_service(Service("svc", "r1", "tram", {"am": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 1.0),)),
+        config=AssignmentConfig(period_id="am", max_access_distance_m=0),
+    )
+    result = calculate_economics(
+        network,
+        assignment,
+        config=EconomicsConfig(
+            period_id="am",
+            station_cost=3.0,
+        ),
+    )
+
+    assert result.capital_cost == 2 * 3.0
