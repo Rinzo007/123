@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .city import DemandZone
 from .demand import DemandMatrix, TemporalDemandMatrix
 from .places import CityPlace, aggregate_place_attractions
 from .projection import project_wgs84_point
-from .reference_demand import ReferenceDemandLayers, build_daily_demand, build_demand_layers
+from .reference_demand import (
+    ReferenceDemandLayers,
+    build_daily_demand,
+    build_demand_layers,
+    build_temporal_demand,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CityDemandConfig:
+    """Настройки канонической городской модели спроса."""
+
+    trip_rate: float = 0.12
+    decay: float = 0.08
+    reference_speed_kph: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.trip_rate < 0:
+            raise ValueError("trip_rate cannot be negative")
+        if self.decay <= 0:
+            raise ValueError("decay must be positive")
+        if self.reference_speed_kph <= 0:
+            raise ValueError("reference_speed_kph must be positive")
 
 
 def _project_places(
@@ -35,20 +59,41 @@ def _project_places(
     )
 
 
+def _enrich_zones(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...],
+    *,
+    origin_lon: float | None,
+    origin_lat: float | None,
+) -> tuple[DemandZone, ...]:
+    projected_places = _project_places(
+        places,
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    return aggregate_place_attractions(zones, projected_places)
+
+
 def build_city_demand(
     zones: tuple[DemandZone, ...],
     places: tuple[CityPlace, ...] = (),
     *,
     origin_lon: float | None = None,
     origin_lat: float | None = None,
+    config: CityDemandConfig = CityDemandConfig(),
 ) -> DemandMatrix:
-    projected_places = _project_places(
+    enriched_zones = _enrich_zones(
+        zones,
         places,
         origin_lon=origin_lon,
         origin_lat=origin_lat,
     )
-    enriched_zones = aggregate_place_attractions(zones, projected_places)
-    return build_daily_demand(enriched_zones)
+    return build_daily_demand(
+        enriched_zones,
+        trip_rate=config.trip_rate,
+        decay=config.decay,
+        reference_speed_kph=config.reference_speed_kph,
+    )
 
 
 def build_city_demand_layers(
@@ -58,14 +103,13 @@ def build_city_demand_layers(
     origin_lon: float | None = None,
     origin_lat: float | None = None,
 ) -> ReferenceDemandLayers:
-    projected_places = _project_places(
+    enriched_zones = _enrich_zones(
+        zones,
         places,
         origin_lon=origin_lon,
         origin_lat=origin_lat,
     )
-    enriched_zones = aggregate_place_attractions(zones, projected_places)
     return build_demand_layers(enriched_zones)
-
 
 
 def build_city_temporal_demand(
@@ -74,24 +118,34 @@ def build_city_temporal_demand(
     *,
     origin_lon: float | None = None,
     origin_lat: float | None = None,
+    config: CityDemandConfig = CityDemandConfig(),
 ) -> TemporalDemandMatrix:
-    projected_places = _project_places(
+    enriched_zones = _enrich_zones(
+        zones,
         places,
         origin_lon=origin_lon,
         origin_lat=origin_lat,
     )
-    enriched_zones = aggregate_place_attractions(zones, projected_places)
-    return build_temporal_demand(enriched_zones)
+    return build_temporal_demand(
+        enriched_zones,
+        trip_rate=config.trip_rate,
+        decay=config.decay,
+        speed_kph=config.reference_speed_kph,
+    )
+
+
 def build_city_daily_demand(
     zones: tuple[DemandZone, ...],
     places: tuple[CityPlace, ...] = (),
     *,
     origin_lon: float | None = None,
     origin_lat: float | None = None,
+    config: CityDemandConfig = CityDemandConfig(),
 ) -> DemandMatrix:
     return build_city_demand(
         zones,
         places,
         origin_lon=origin_lon,
         origin_lat=origin_lat,
+        config=config,
     )
