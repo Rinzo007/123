@@ -184,8 +184,7 @@ def _service_analytics(
     period = network.periods[period_id]
     profile = REFERENCE_MODE_PROFILES[route.mode.value]
     headway = service.headway_by_period[period_id]
-    duration_min = period.end_minute - period.start_minute
-    departures = ceil(duration_min / headway)
+    departures = network.service_departures(service, period_id)
     length_km = network.route_length_km(route)
     fleet = max(1, ceil(network.route_cycle_time_min(route) / headway))
     direction_factor = 1.0 if not route.both_ways else 2.0
