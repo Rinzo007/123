@@ -93,6 +93,7 @@ class Service:
     vehicle_type_id: str
     headway_by_period: dict[str, float]
     departure_offset_by_period: dict[str, float] = field(default_factory=dict)
+    phase_by_period: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -150,6 +151,10 @@ class Network:
         unknown_offsets = [pid for pid in service.departure_offset_by_period if pid not in self.periods]
         if unknown_offsets:
             raise ValueError(f"Service {service.id} references unknown offset periods: {unknown_offsets}")
+        invalid_phases = [pid for pid, phase in service.phase_by_period.items()
+                          if pid not in self.periods or phase < 0 or phase >= 1440]
+        if invalid_phases:
+            raise ValueError(f"Service {service.id} references invalid phase periods: {invalid_phases}")
         route = self.routes[service.route_id]
         vehicle = self.vehicle_types[service.vehicle_type_id]
         if route.mode != vehicle.mode:
