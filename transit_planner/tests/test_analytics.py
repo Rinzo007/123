@@ -139,3 +139,46 @@ def test_analytics_keeps_distinct_closed_reverse_segments():
     reverse = next(section for section in result.sections if section.from_stop_id == "b")
     assert forward.distance_km == 1.0
     assert reverse.distance_km == 3.0
+
+
+def test_service_analytics_accounts_for_competing_shared_track_service():
+    from transit_planner.assignment import AssignmentResult, AssignmentMetrics, RouteFlow, SectionLoad, StopFlow
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(0, 1000)))
+    network.add_stop(Stop("d", "D", Point(1000, 1000)))
+    network.add_track_section(
+        TrackSection(
+            "shared",
+            1.0,
+            capacity_departures_per_hour=20.0,
+            shared_group="corridor",
+        )
+    )
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route("r1", "R1", TransitMode.TRAM, ("a", "b"), track_section_ids=("shared",))
+    )
+    network.add_route(
+        Route("r2", "R2", TransitMode.TRAM, ("c", "d"), track_section_ids=("shared",))
+    )
+    network.add_service(Service("s1", "r1", "tram", {"am": 15}))
+    network.add_service(Service("s2", "r2", "tram", {"am": 15}))
+
+    assignment = AssignmentResult(
+        metrics=AssignmentMetrics(0, 0, 0, 0, 0, 0, 0),
+        route_flows=(),
+        section_loads=(),
+        stop_flows=(),
+        unserved_transit_demand=0,
+        iterations=1,
+        max_load_ratio=0,
+    )
+    result = analyze_network(network, assignment)
+
+    service = next(item for item in result.services if item.service_id == "s1")
+    assert service.minimum_headway_why == "track"
+    assert abs(service.minimum_headway_min - 3.75) < 1e-9
