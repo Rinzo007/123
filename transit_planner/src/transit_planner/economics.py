@@ -98,11 +98,19 @@ def calculate_economics(
             mode_costs=infrastructure_costs,
             track_costs=track_infrastructure_costs,
         )
-        capital_cost += sum(
-            config.station_cost
-            for stop_id in route.stop_ids
-            if network.stops[stop_id].is_station
-        )
+        physical_station_ids = {
+            station_id
+            for section_id in route.track_section_ids
+            for station_id in network.track_sections[section_id].station_ids
+        }
+        if physical_station_ids:
+            capital_cost += len(physical_station_ids) * config.station_cost
+        else:
+            capital_cost += sum(
+                config.station_cost
+                for stop_id in route.stop_ids
+                if network.stops[stop_id].is_station
+            )
 
     transit_trips = assignment.metrics.transit_trips
     daily_fare_revenue = transit_trips * config.fare_per_transit_trip
