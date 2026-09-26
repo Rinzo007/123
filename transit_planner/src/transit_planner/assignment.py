@@ -10,6 +10,7 @@ from .network import Network
 from .routing import Journey, TransitRouter
 from .reference_model import (
     CROWDED_LOAD_RATIO,
+    REFERENCE_MOBILITY,
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
     REFERENCE_TRANSFER,
@@ -265,6 +266,15 @@ def _assign_once(
         )
         journey_wait = 0.0 if journey is None else journey_stats[0][1]
         transit_time = None if journey is None else journey_stats[0][0]
+        no_car_share = _no_car_share(
+            pair,
+            zones,
+            default_share=config.choice.no_car_share,
+        )
+        car_availability = 1.0 - min(
+            1.0,
+            no_car_share * config.choice.no_car_effectiveness,
+        )
         probs = probabilities(
             utilities(
                 walk_time_min=walk_time,
@@ -276,7 +286,8 @@ def _assign_once(
                 car_distance_km=distance_m / 1000.0,
                 bike_distance_km=distance_m / 1000.0,
                 config=config.choice,
-            )
+            ),
+            car_availability=car_availability,
         )
 
         transit_trips = trips * probs["transit"]
@@ -433,6 +444,18 @@ def _assign_once(
         for reason, trips in sorted(loss_reasons.items())
     )
     return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved, losses)
+
+
+def _no_car_share(
+    pair: ODPairDemand,
+    zones: dict[str, DemandZone],
+    *,
+    default_share: float,
+) -> float:
+    zone = zones.get(pair.origin_zone_id)
+    if zone is not None:
+        return zone.no_car_share
+    return default_share if 0.0 <= default_share <= 1.0 else REFERENCE_MOBILITY.no_car_share
 
 
 def _classify_demand_loss(
