@@ -549,6 +549,7 @@ def calculate_assignment(payload: dict) -> dict:
                 "passengers": item.passengers,
                 "capacity": item.capacity,
                 "load_ratio": item.load_ratio,
+                "crowding_level": item.crowding_level,
             }
             for item in result.section_loads
         ],
@@ -558,6 +559,8 @@ def calculate_assignment(payload: dict) -> dict:
                 "boardings": item.boardings,
                 "alightings": item.alightings,
                 "transfers": item.transfers,
+                "dwell_seconds": item.dwell_seconds,
+                "platform_m": item.platform_m,
             }
             for item in result.stop_flows
         ],
