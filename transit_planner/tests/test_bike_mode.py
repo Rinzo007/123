@@ -2,7 +2,7 @@ from transit_planner.assignment import AssignmentConfig, assign_demand
 from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.geo import Point
-from transit_planner.mode_choice import ModeChoiceConfig
+from transit_planner.choice import ChoiceConfig
 from transit_planner.network import Network, ServicePeriod, Stop
 
 
@@ -26,8 +26,8 @@ def test_assignment_includes_bike_in_mode_split():
         config=AssignmentConfig(
             period_id="peak",
             max_access_distance_m=0,
-            mode_choice=ModeChoiceConfig(
-                scale=0.01,
+            choice=ChoiceConfig(
+                value_of_time_s_per_eur=360.0,
                 bike_constant=0.2,
             ),
         ),
