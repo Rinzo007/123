@@ -89,11 +89,13 @@ export interface OvertureNetworkResponse {
   roads: GeoJSON.FeatureCollection;
   connectors: GeoJSON.FeatureCollection;
   stops: GeoJSON.FeatureCollection;
+  places: GeoJSON.FeatureCollection;
   release: string;
   counts: {
     roads: number;
     connectors: number;
     stops: number;
+    places: number;
   };
 }
 
