@@ -189,3 +189,27 @@ def test_zone_no_car_share_reduces_car_trips():
         config=AssignmentConfig(period_id="peak"),
     )
     assert 0.0 < result.metrics.car_trips < baseline.metrics.car_trips
+
+
+def test_assignment_exposes_reference_rest_demand():
+    network = make_network()
+    result = assign_demand(
+        network,
+        DemandMatrix((
+            ODPairDemand("a", "c", 100.0, base_time_min=20.0),
+        )),
+        config=AssignmentConfig(
+            period_id="peak",
+            max_access_distance_m=0,
+        ),
+    )
+
+    modes = (
+        result.metrics.transit_trips
+        + result.metrics.car_trips
+        + result.metrics.walk_trips
+        + result.metrics.bike_trips
+        + result.metrics.rest_trips
+    )
+    assert result.metrics.rest_trips > 0.0
+    assert abs(modes - 100.0) < 1e-9
