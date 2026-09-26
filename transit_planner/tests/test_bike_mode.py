@@ -108,3 +108,31 @@ def test_choice_defaults_match_reference_active_mode_parameters():
     assert config.walk_circuity == 1.33
     assert config.bike_circuity == 1.25
     assert config.two_wheel_share == 0.30
+
+
+def test_reference_mode_split_separates_rest_from_transport_modes():
+    values = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=8.0,
+        base_time_min=30.0,
+        bike_distance_km=5.0,
+    )
+    shares = probabilities(
+        values,
+        bike_availability=0.30,
+        no_car_share=0.35,
+    )
+    assert 0.0 < shares["rest"] < 1.0
+    assert abs(sum(shares.values()) - 1.0) < 1e-12
+
+
+def test_reference_mode_split_keeps_rest_zero_without_base_time():
+    values = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=8.0,
+        bike_distance_km=5.0,
+    )
+    shares = probabilities(values, bike_availability=0.30, no_car_share=0.35)
+    assert shares["rest"] == 0.0
