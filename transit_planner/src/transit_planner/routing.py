@@ -52,7 +52,6 @@ class _TransitOption:
     neighbor_stop_id: str
     headway: float
     departure_offset: float
-    phase_minute: float
     mode: TransitMode
     physical_run_time_min: float | None = None
 
@@ -318,7 +317,6 @@ class TransitRouter:
                             to_id,
                             headway,
                             offset,
-                            service.phase_by_period.get(period_id, 0.0),
                             route.mode,
                             physical_run_time_min,
                         )
