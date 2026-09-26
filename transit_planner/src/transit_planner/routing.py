@@ -41,11 +41,16 @@ class RouterConfig:
             raise ValueError("wait_weight cannot be negative")
 
 
-class TransitRouter:
-    """Time-dependent stop router with walking links and route-level penalties.
+@dataclass(frozen=True, slots=True)
+class _TransitOption:
+    route_id: str
+    neighbor_stop_id: str
+    headway: float
+    mode: TransitMode
 
-    Stop coordinates are expected in a metric coordinate system.
-    """
+
+class TransitRouter:
+    """Time-dependent stop router with precomputed network adjacency."""
 
     _SPEEDS = {
         TransitMode.BUS: 20.0,
@@ -63,15 +68,8 @@ class TransitRouter:
     ) -> None:
         self.network = network
         self.config = config
-        self._route_neighbors_by_route: dict[str, dict[str, tuple[str, ...]]] = {}
-        for route in network.routes.values():
-            neighbors: dict[str, list[str]] = {sid: [] for sid in route.stop_ids}
-            for a, b in zip(route.stop_ids, route.stop_ids[1:]):
-                neighbors[a].append(b)
-                neighbors[b].append(a)
-            self._route_neighbors_by_route[route.id] = {
-                sid: tuple(items) for sid, items in neighbors.items()
-            }
+        self._walking_neighbors_cache = self._build_walking_neighbors()
+        self._transit_options_by_period = self._build_transit_options()
 
     def shortest(
         self,
@@ -88,6 +86,7 @@ class TransitRouter:
         if origin.id == destination.id:
             return Journey(origin.id, destination.id, 0.0, 0, ())
 
+        options_by_stop = self._transit_options_by_period.get(period_id, {})
         penalties = route_penalties or {}
         State = tuple[str, str | None]
         start: State = (origin.id, None)
@@ -106,7 +105,7 @@ class TransitRouter:
                 target_state = state
                 break
 
-            for neighbor_id, walk_time in self._walking_neighbors(stop_id):
+            for neighbor_id, walk_time in self._walking_neighbors_cache.get(stop_id, ()):
                 next_state: State = (neighbor_id, None)
                 candidate = cost + walk_time
                 if candidate < best.get(next_state, inf):
@@ -118,37 +117,31 @@ class TransitRouter:
                     heappush(queue, (candidate, serial, next_state))
                     serial += 1
 
-            for service in self.network.services.values():
-                headway = service.headway_by_period.get(period_id)
-                if headway is None:
-                    continue
-                route = self.network.routes[service.route_id]
-                neighbors = self._route_neighbors_by_route[route.id].get(stop_id, ())
-                for neighbor_id in neighbors:
-                    board = current_route != route.id
-                    wait = (
-                        headway / 2.0 * self.config.wait_weight
-                        if board
-                        else 0.0
+            for option in options_by_stop.get(stop_id, ()):
+                board = current_route != option.route_id
+                wait = option.headway / 2.0 * self.config.wait_weight if board else 0.0
+                penalty = penalties.get(option.route_id, 0.0) if board else 0.0
+                run = self._run_time_between(
+                    stop_id,
+                    option.neighbor_stop_id,
+                    option.mode,
+                )
+                next_state = (option.neighbor_stop_id, option.route_id)
+                candidate = cost + wait + run + penalty
+                if candidate < best.get(next_state, inf):
+                    best[next_state] = candidate
+                    previous[next_state] = (
+                        state,
+                        JourneyLeg(
+                            "transit",
+                            stop_id,
+                            option.neighbor_stop_id,
+                            wait + run + penalty,
+                            option.route_id,
+                        ),
                     )
-                    penalty = penalties.get(route.id, 0.0) if board else 0.0
-                    run = self._run_time_between(stop_id, neighbor_id, route.mode)
-                    next_state = (neighbor_id, route.id)
-                    candidate = cost + wait + run + penalty
-                    if candidate < best.get(next_state, inf):
-                        best[next_state] = candidate
-                        previous[next_state] = (
-                            state,
-                            JourneyLeg(
-                                "transit",
-                                stop_id,
-                                neighbor_id,
-                                wait + run + penalty,
-                                route.id,
-                            ),
-                        )
-                        heappush(queue, (candidate, serial, next_state))
-                        serial += 1
+                    heappush(queue, (candidate, serial, next_state))
+                    serial += 1
 
         if target_state is None:
             return None
@@ -178,21 +171,48 @@ class TransitRouter:
             legs=tuple(legs),
         )
 
-    def _walking_neighbors(self, stop_id: str) -> tuple[tuple[str, float], ...]:
-        origin = self.network.stops[stop_id]
-        result: list[tuple[str, float]] = []
-        for candidate in self.network.stops.values():
-            if candidate.id == stop_id:
-                continue
-            distance_m = self._point_distance(origin, candidate)
-            if distance_m <= self.config.walk_transfer_radius_m:
-                result.append(
-                    (
-                        candidate.id,
-                        distance_m / 1000.0 / self.config.walking_speed_kph * 60.0,
+    def _build_walking_neighbors(self) -> dict[str, tuple[tuple[str, float], ...]]:
+        if self.config.walk_transfer_radius_m <= 0:
+            return {stop_id: () for stop_id in self.network.stops}
+
+        result: dict[str, list[tuple[str, float]]] = {
+            stop_id: [] for stop_id in self.network.stops
+        }
+        stops = tuple(self.network.stops.values())
+        for index, origin in enumerate(stops):
+            for candidate in stops[index + 1:]:
+                distance_m = self._point_distance(origin, candidate)
+                if distance_m > self.config.walk_transfer_radius_m:
+                    continue
+                duration = distance_m / 1000.0 / self.config.walking_speed_kph * 60.0
+                result[origin.id].append((candidate.id, duration))
+                result[candidate.id].append((origin.id, duration))
+        return {stop_id: tuple(items) for stop_id, items in result.items()}
+
+    def _build_transit_options(
+        self,
+    ) -> dict[str, dict[str, tuple[_TransitOption, ...]]]:
+        result: dict[str, dict[str, list[_TransitOption]]] = {
+            period_id: {} for period_id in self.network.periods
+        }
+        for service in self.network.services.values():
+            route = self.network.routes[service.route_id]
+            for period_id, headway in service.headway_by_period.items():
+                stop_map = result.setdefault(period_id, {})
+                for from_id, to_id in zip(route.stop_ids, route.stop_ids[1:]):
+                    stop_map.setdefault(from_id, []).append(
+                        _TransitOption(route.id, to_id, headway, route.mode)
                     )
-                )
-        return tuple(result)
+                    stop_map.setdefault(to_id, []).append(
+                        _TransitOption(route.id, from_id, headway, route.mode)
+                    )
+        return {
+            period_id: {
+                stop_id: tuple(options)
+                for stop_id, options in stop_map.items()
+            }
+            for period_id, stop_map in result.items()
+        }
 
     def _run_time_between(self, from_id: str, to_id: str, mode: TransitMode) -> float:
         a = self.network.stops[from_id]

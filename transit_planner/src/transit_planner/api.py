@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from urllib.error import URLError
 
 from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
+from .geojson import roads_to_geojson, stops_to_geojson
+from .osm import OverpassRoadProvider, OverpassStopProvider
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -21,39 +24,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get('/health')
-def health() -> dict[str, str]:
-    return {'status': 'ok'}
+MAX_BBOX_AREA = 0.04
 
-@app.post('/api/v1/network/validate')
+
+def _bbox(south: float, west: float, north: float, east: float) -> tuple[float, float, float, float]:
+    if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
+        raise HTTPException(status_code=400, detail="Некорректная географическая область")
+    if (north - south) * (east - west) > MAX_BBOX_AREA:
+        raise HTTPException(status_code=400, detail="Слишком большая область. Уменьшите масштаб карты.")
+    return south, west, north, east
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/api/v1/network/validate")
 def validate_network(payload: dict) -> dict:
     network = network_from_dict(payload)
     errors = network.validate()
-    return {'valid': not errors, 'errors': errors}
+    return {"valid": not errors, "errors": errors}
 
-@app.post('/api/v1/assignment')
+
+@app.get("/api/v1/data/osm/stops")
+def osm_stops(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+) -> dict:
+    try:
+        stops = OverpassStopProvider(_bbox(south, west, north, east)).load_stops()
+    except (OSError, URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail="Overpass недоступен") from exc
+    return stops_to_geojson(stops)
+
+
+@app.get("/api/v1/data/osm/roads")
+def osm_roads(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+) -> dict:
+    try:
+        roads = OverpassRoadProvider(_bbox(south, west, north, east)).load_roads()
+    except (OSError, URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail="Overpass недоступен") from exc
+    return roads_to_geojson(roads)
+
+
+@app.post("/api/v1/assignment")
 def calculate_assignment(payload: dict) -> dict:
-    network = network_from_dict(payload['network'])
+    network = network_from_dict(payload["network"])
     pairs = tuple(
         ODPairDemand(
-            origin_zone_id=str(item['origin_zone_id']),
-            destination_zone_id=str(item['destination_zone_id']),
-            trips_per_day=float(item['trips_per_day']),
-            purpose=str(item.get('purpose', 'all')),
+            origin_zone_id=str(item["origin_zone_id"]),
+            destination_zone_id=str(item["destination_zone_id"]),
+            trips_per_day=float(item["trips_per_day"]),
+            purpose=str(item.get("purpose", "all")),
         )
-        for item in payload.get('demand', [])
+        for item in payload.get("demand", [])
     )
     zones = {
-        str(item['id']): DemandZone(
-            id=str(item['id']),
-            centroid_x=float(item['centroid_x']),
-            centroid_y=float(item['centroid_y']),
-            population=float(item.get('population', 0.0)),
-            jobs=float(item.get('jobs', 0.0)),
+        str(item["id"]): DemandZone(
+            id=str(item["id"]),
+            centroid_x=float(item["centroid_x"]),
+            centroid_y=float(item["centroid_y"]),
+            population=float(item.get("population", 0.0)),
+            jobs=float(item.get("jobs", 0.0)),
         )
-        for item in payload.get('zones', [])
+        for item in payload.get("zones", [])
     }
-    config = AssignmentConfig(**payload['config'])
+    config = AssignmentConfig(**payload["config"])
     result = assign_demand(
         network,
         DemandMatrix(pairs),
@@ -61,27 +105,44 @@ def calculate_assignment(payload: dict) -> dict:
         config=config,
     )
     return {
-        'metrics': {
-            'total_trips': result.metrics.total_trips,
-            'transit_trips': result.metrics.transit_trips,
-            'car_trips': result.metrics.car_trips,
-            'walk_trips': result.metrics.walk_trips,
-            'transit_share': result.metrics.transit_share,
-            'average_transit_time_min': result.metrics.average_transit_time_min,
-            'average_transfers': result.metrics.average_transfers,
+        "metrics": {
+            "total_trips": result.metrics.total_trips,
+            "transit_trips": result.metrics.transit_trips,
+            "car_trips": result.metrics.car_trips,
+            "walk_trips": result.metrics.walk_trips,
+            "transit_share": result.metrics.transit_share,
+            "average_transit_time_min": result.metrics.average_transit_time_min,
+            "average_transfers": result.metrics.average_transfers,
         },
-        'iterations': result.iterations,
-        'max_load_ratio': result.max_load_ratio,
-        'unserved_transit_demand': result.unserved_transit_demand,
-        'route_flows': [
-            {'route_id': item.route_id, 'boardings': item.boardings,
-             'passenger_section_traversals': item.passenger_section_traversals}
+        "iterations": result.iterations,
+        "max_load_ratio": result.max_load_ratio,
+        "unserved_transit_demand": result.unserved_transit_demand,
+        "route_flows": [
+            {
+                "route_id": item.route_id,
+                "boardings": item.boardings,
+                "passenger_section_traversals": item.passenger_section_traversals,
+            }
             for item in result.route_flows
         ],
-        'section_loads': [
-            {'route_id': item.route_id, 'from_stop_id': item.from_stop_id,
-             'to_stop_id': item.to_stop_id, 'passengers': item.passengers,
-             'capacity': item.capacity, 'load_ratio': item.load_ratio}
+        "section_loads": [
+            {
+                "route_id": item.route_id,
+                "from_stop_id": item.from_stop_id,
+                "to_stop_id": item.to_stop_id,
+                "passengers": item.passengers,
+                "capacity": item.capacity,
+                "load_ratio": item.load_ratio,
+            }
             for item in result.section_loads
+        ],
+        "stop_flows": [
+            {
+                "stop_id": item.stop_id,
+                "boardings": item.boardings,
+                "alightings": item.alightings,
+                "transfers": item.transfers,
+            }
+            for item in result.stop_flows
         ],
     }

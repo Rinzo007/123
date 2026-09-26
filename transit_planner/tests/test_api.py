@@ -5,3 +5,5 @@ def test_api_has_core_routes():
     assert "/health" in paths
     assert "/api/v1/network/validate" in paths
     assert "/api/v1/assignment" in paths
+    assert "/api/v1/data/osm/stops" in paths
+    assert "/api/v1/data/osm/roads" in paths

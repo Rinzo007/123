@@ -14,3 +14,46 @@ export async function validateNetwork(
   }
   return response.json() as Promise<ValidationResult>;
 }
+
+async function loadGeoJson(path: string, params: URLSearchParams): Promise<GeoJSON.FeatureCollection> {
+  const response = await fetch(path + "?" + params.toString());
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || "Не удалось загрузить городские данные");
+  }
+  return response.json() as Promise<GeoJSON.FeatureCollection>;
+}
+
+export function loadOsmStops(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<GeoJSON.FeatureCollection> {
+  return loadGeoJson(
+    "/api/v1/data/osm/stops",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  );
+}
+
+export function loadOsmRoads(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<GeoJSON.FeatureCollection> {
+  return loadGeoJson(
+    "/api/v1/data/osm/roads",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  );
+}

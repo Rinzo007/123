@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
-import type { Feature, FeatureCollection, Point as GeoJSONPoint, LineString } from "geojson";
-import { validateNetwork } from "./api";
+import { loadOsmRoads, loadOsmStops, validateNetwork } from "./api";
+import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
 
 const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
@@ -50,30 +50,21 @@ function buildNetworkPayload(
     lat: DEFAULT_CENTER[1],
   };
 
-  const metricStops = stops.map((stop) => {
-    const location = toLocalMeters(
-      stop.lon,
-      stop.lat,
-      origin.lon,
-      origin.lat,
-    );
-    return {
-      id: stop.id,
-      name: stop.name,
-      location,
-      is_station: false,
-    };
-  });
+  const metricStops = stops.map((stop) => ({
+    id: stop.id,
+    name: stop.name,
+    location: toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat),
+    is_station: false,
+  }));
 
-  const geometryPoints = metricStops.map((stop) => stop.location);
   const route = {
     id: "draft-route",
     name: routeName,
     mode,
     stop_ids: stops.map((stop) => stop.id),
     geometry:
-      geometryPoints.length >= 2
-        ? { points: geometryPoints }
+      metricStops.length >= 2
+        ? { points: metricStops.map((stop) => stop.location) }
         : null,
   };
 
@@ -104,13 +95,16 @@ function buildNetworkPayload(
   };
 }
 
-function stopsGeoJSON(stops: StopDraft[]): FeatureCollection<
-  GeoJSONPoint,
-  { id: string; name: string }
-> {
+function emptyPointCollection(): FeatureCollection<GeoJSONPoint, { id: string; name?: string }> {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function stopsGeoJSON(
+  stops: StopDraft[],
+): FeatureCollection<GeoJSONPoint, { id: string; name: string }> {
   return {
     type: "FeatureCollection",
-    features: stops.map((stop): Feature<GeoJSONPoint, { id: string; name: string }> => ({
+    features: stops.map((stop) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [stop.lon, stop.lat] },
       properties: { id: stop.id, name: stop.name },
@@ -118,7 +112,9 @@ function stopsGeoJSON(stops: StopDraft[]): FeatureCollection<
   };
 }
 
-function routeGeoJSON(stops: StopDraft[]): FeatureCollection<LineString, object> {
+function routeGeoJSON(
+  stops: StopDraft[],
+): FeatureCollection<LineString, object> {
   return {
     type: "FeatureCollection",
     features:
@@ -143,6 +139,8 @@ export function App() {
   const drawModeRef = useRef(false);
   const [drawMode, setDrawMode] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([]);
+  const [cityRoads, setCityRoads] = useState<FeatureCollection | null>(null);
+  const [cityStops, setCityStops] = useState<FeatureCollection | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
   const [headway, setHeadway] = useState(10);
@@ -170,7 +168,7 @@ export function App() {
     const handleMapClick = (event: maplibregl.MapMouseEvent) => {
       if (!drawModeRef.current) return;
 
-      const id = `stop-${Date.now()}`;
+      const id = `stop-${Date.now()}-${Math.round(event.lngLat.lng * 1000)}`;
       setStops((current) => [
         ...current,
         {
@@ -183,6 +181,38 @@ export function App() {
     };
 
     const handleLoad = () => {
+      map.addSource("city-roads", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "city-road-lines",
+        type: "line",
+        source: "city-roads",
+        paint: {
+          "line-color": "#9ca3af",
+          "line-width": 1.2,
+          "line-opacity": 0.65,
+        },
+      });
+
+      map.addSource("city-stops", {
+        type: "geojson",
+        data: emptyPointCollection(),
+      });
+      map.addLayer({
+        id: "city-stop-circles",
+        type: "circle",
+        source: "city-stops",
+        paint: {
+          "circle-radius": 3.5,
+          "circle-color": "#6b7280",
+          "circle-opacity": 0.65,
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       map.addSource("draft-route", {
         type: "geojson",
         data: routeGeoJSON([]),
@@ -194,6 +224,7 @@ export function App() {
         paint: {
           "line-width": 5,
           "line-opacity": 0.9,
+          "line-color": "#2563eb",
         },
       });
 
@@ -207,7 +238,9 @@ export function App() {
         source: "draft-stops",
         paint: {
           "circle-radius": 6,
+          "circle-color": "#2563eb",
           "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
         },
       });
     };
@@ -226,11 +259,15 @@ export function App() {
     if (!map?.isStyleLoaded()) return;
 
     const routeSource = map.getSource("draft-route") as GeoJSONSource | undefined;
-    const stopSource = map.getSource("draft-stops") as GeoJSONSource | undefined;
+    const draftStopsSource = map.getSource("draft-stops") as GeoJSONSource | undefined;
+    const cityRoadSource = map.getSource("city-roads") as GeoJSONSource | undefined;
+    const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
 
     routeSource?.setData(routeGeoJSON(stops));
-    stopSource?.setData(stopsGeoJSON(stops));
-  }, [stops]);
+    draftStopsSource?.setData(stopsGeoJSON(stops));
+    if (cityRoads) cityRoadSource?.setData(cityRoads);
+    if (cityStops) cityStopSource?.setData(cityStops);
+  }, [stops, cityRoads, cityStops]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headway),
@@ -244,6 +281,39 @@ export function App() {
   function clearRoute() {
     setStops([]);
     setMessage("Маршрут очищен");
+  }
+
+  async function loadCityData() {
+    const map = mapRef.current;
+    if (!map) return;
+    setBusy(true);
+    setMessage("Загрузка OSM для текущей области…");
+    try {
+      const bounds = map.getBounds();
+      const [roads, stopsData] = await Promise.all([
+        loadOsmRoads(
+          bounds.getSouth(),
+          bounds.getWest(),
+          bounds.getNorth(),
+          bounds.getEast(),
+        ),
+        loadOsmStops(
+          bounds.getSouth(),
+          bounds.getWest(),
+          bounds.getNorth(),
+          bounds.getEast(),
+        ),
+      ]);
+      setCityRoads(roads);
+      setCityStops(stopsData);
+      setMessage(
+        `OSM загружен: ${roads.features.length} участков, ${stopsData.features.length} остановок`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка загрузки OSM");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function validate() {
@@ -284,6 +354,9 @@ export function App() {
           <div className="subtitle">Проектирование транспортной сети</div>
         </div>
         <div className="actions">
+          <button onClick={loadCityData} disabled={busy}>
+            Загрузить OSM
+          </button>
           <button
             className={drawMode ? "primary active" : "primary"}
             onClick={() => setDrawMode((value) => !value)}
@@ -338,7 +411,9 @@ export function App() {
               Остановки <span>{stops.length}</span>
             </div>
             {stops.length === 0 ? (
-              <div className="empty">Включите «Добавить остановки» и кликайте по карте.</div>
+              <div className="empty">
+                Включите «Добавить остановки» и кликайте по карте.
+              </div>
             ) : (
               <div className="stop-list">
                 {stops.map((stop, index) => (
@@ -376,6 +451,10 @@ export function App() {
             <div className="metric">
               <span>Вместимость</span>
               <b>{MODE_CAPACITY[mode]} мест</b>
+            </div>
+            <div className="metric">
+              <span>OSM-дороги</span>
+              <b>{cityRoads?.features.length ?? 0}</b>
             </div>
           </section>
 
