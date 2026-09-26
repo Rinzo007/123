@@ -77,6 +77,11 @@ class TemporalAssignmentResult:
             period.result.metrics.average_transfers * period.result.metrics.transit_trips
             for period in self.periods
         )
+        weighted_wait = sum(
+            period.result.metrics.average_wait_time_min
+            * period.result.metrics.transit_trips
+            for period in self.periods
+        )
 
         route_acc: dict[str, list[float]] = {}
         for period in self.periods:
@@ -118,6 +123,9 @@ class TemporalAssignmentResult:
                 average_transit_time_min=0.0 if transit <= 0 else weighted_time / transit,
                 average_transfers=0.0 if transit <= 0 else weighted_transfers / transit,
                 bike_trips=bike,
+                average_wait_time_min=(
+                    0.0 if transit <= 0 else weighted_wait / transit
+                ),
             ),
             route_flows=tuple(RouteFlow(route_id, values[0], values[1]) for route_id, values in sorted(route_acc.items())),
             section_loads=tuple(SectionLoad(route_id, from_id, to_id, values[0], values[1]) for (route_id, from_id, to_id), values in sorted(section_acc.items())),
