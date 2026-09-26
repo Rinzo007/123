@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
-from .demand import DemandMatrix, ODPairDemand
+from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson
 from .projection import project_local_point_wgs84
 from .overture import (
@@ -262,6 +262,33 @@ def overture_stops(
         ) from exc
     return stops_to_geojson(stops)
 
+
+@app.post("/api/v1/demand/temporal")
+def temporal_demand(payload: dict) -> dict:
+    pairs = tuple(
+        ODPairDemand(
+            str(item["origin_zone_id"]),
+            str(item["destination_zone_id"]),
+            float(item["trips_per_day"]),
+            str(item.get("purpose", "all")),
+        )
+        for item in payload.get("demand", [])
+    )
+    temporal = expand_daily_demand(DemandMatrix(pairs))
+    return {
+        "total_trips": temporal.total_trips,
+        "period_totals": temporal.period_totals(),
+        "pairs": [
+            {
+                "origin_zone_id": pair.origin_zone_id,
+                "destination_zone_id": pair.destination_zone_id,
+                "period_id": pair.period_id,
+                "trips": pair.trips,
+                "purpose": pair.purpose,
+            }
+            for pair in temporal.pairs
+        ],
+    }
 
 @app.post("/api/v1/assignment")
 def calculate_assignment(payload: dict) -> dict:
