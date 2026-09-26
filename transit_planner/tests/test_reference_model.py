@@ -139,3 +139,12 @@ def test_headway_unevenness_factor_matches_zero_demand_baseline():
     expected = 1.0 + (90.0 / 600.0) ** 2
     assert headway_unevenness_factor("bus", 10.0, 3.0) == expected
     assert headway_unevenness_factor("metro", 10.0, 3.0, (10000.0,)) >= 1.0
+
+
+def test_reference_crowding_time_multiplier():
+    from transit_planner.reference_model import crowding_time_multiplier
+
+    assert crowding_time_multiplier(0.85) == 1.0
+    assert crowding_time_multiplier(1.0) == 1.33
+    assert crowding_time_multiplier(1.5) == 2.43
+    assert crowding_time_multiplier(4.0) == 2.43
