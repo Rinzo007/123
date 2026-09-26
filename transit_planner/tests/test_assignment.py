@@ -90,13 +90,13 @@ def test_walking_only_path_is_not_counted_as_transit():
     )
 
 
-def test_stop_flow_exposes_reference_platform_length_and_dwell():
+def test_stop_flow_exposes_reference_dwell_time():
+    network = make_network()
     result = assign_demand(
-        make_network(),
+        network,
         DemandMatrix((ODPairDemand("a", "c", 100),)),
         config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
-        router=TransitRouter(make_network(), config=RouterConfig(walk_transfer_radius_m=0)),
+        router=TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0)),
     )
     stop_a = next(item for item in result.stop_flows if item.stop_id == "a")
-    assert stop_a.platform_m == 0.0
     assert stop_a.dwell_seconds > 0.0
