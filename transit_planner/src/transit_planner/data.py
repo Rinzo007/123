@@ -9,12 +9,36 @@ from .geo import LineString, Point
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorRef:
+    connector_id: str
+    at: float
+
+    def __post_init__(self) -> None:
+        if not self.connector_id.strip():
+            raise ValueError("connector_id cannot be empty")
+        if not 0.0 <= self.at <= 1.0:
+            raise ValueError("connector position must be in [0, 1]")
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorRecord:
+    id: str
+    location: Point
+
+
+@dataclass(frozen=True, slots=True)
 class RoadRecord:
     id: str
     geometry: LineString
     speed_kph: float
     road_type: str = "unknown"
     oneway: bool = False
+    connectors: tuple[ConnectorRef, ...] = ()
+
+    def __post_init__(self) -> None:
+        connector_ids = [ref.connector_id for ref in self.connectors]
+        if len(connector_ids) != len(set(connector_ids)):
+            raise ValueError(f"Duplicate connector reference in road {self.id}")
 
 
 class RoadDataProvider(Protocol):
@@ -22,11 +46,7 @@ class RoadDataProvider(Protocol):
 
 
 class GeoJSONRoadProvider:
-    """Load LineString road features from a GeoJSON object or file.
-
-    The coordinates are kept in the input coordinate system. Graph construction
-    uses a supplied coordinate-to-metre conversion factor.
-    """
+    """Load LineString road features from a GeoJSON object or file."""
 
     def __init__(self, source: str | Path | dict[str, Any]) -> None:
         self.source = source
