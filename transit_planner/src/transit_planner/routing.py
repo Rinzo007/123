@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from math import inf, sqrt
+from math import inf, isfinite, sqrt
+
+from .road import RoadGraph
 
 from .network import Network, Stop, TransitMode
 
@@ -65,9 +67,14 @@ class TransitRouter:
         network: Network,
         *,
         config: RouterConfig = RouterConfig(),
+        road_graph: RoadGraph | None = None,
+        stop_road_nodes: dict[str, int | None] | None = None,
     ) -> None:
         self.network = network
         self.config = config
+        self.road_graph = road_graph
+        self.stop_road_nodes = dict(stop_road_nodes or {})
+        self._road_run_time_cache: dict[tuple[str, str, TransitMode], float | None] = {}
         self._walking_neighbors_cache = self._build_walking_neighbors()
         self._transit_options_by_period = self._build_transit_options()
 
@@ -215,11 +222,35 @@ class TransitRouter:
         }
 
     def _run_time_between(self, from_id: str, to_id: str, mode: TransitMode) -> float:
+        cache_key = (from_id, to_id, mode)
+        if cache_key in self._road_run_time_cache:
+            cached = self._road_run_time_cache[cache_key]
+            if cached is not None:
+                return cached
+
+        if self.road_graph is not None:
+            origin_node = self.stop_road_nodes.get(from_id)
+            destination_node = self.stop_road_nodes.get(to_id)
+            if origin_node is not None and destination_node is not None:
+                _, path = self.road_graph.shortest_path(origin_node, destination_node)
+                if path:
+                    mode_speed = self._SPEEDS.get(mode, self.config.default_transit_speed_kph)
+                    road_time = 0.0
+                    for edge_id in path:
+                        edge = self.road_graph.edges[edge_id]
+                        effective_speed = min(mode_speed, edge.speed_kph)
+                        road_time += edge.length_m / 1000.0 / effective_speed * 60.0
+                    if isfinite(road_time) and road_time >= 0.0:
+                        self._road_run_time_cache[cache_key] = road_time
+                        return road_time
+
         a = self.network.stops[from_id]
         b = self.network.stops[to_id]
         distance_km = self._point_distance(a, b) / 1000.0
         speed = self._SPEEDS.get(mode, self.config.default_transit_speed_kph)
-        return distance_km / speed * 60.0
+        direct_time = distance_km / speed * 60.0
+        self._road_run_time_cache[cache_key] = direct_time
+        return direct_time
 
     @staticmethod
     def _point_distance(a: Stop, b: Stop) -> float:
