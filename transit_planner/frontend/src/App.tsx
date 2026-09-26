@@ -20,10 +20,9 @@ const MAP_STYLE =
 
 const MODE_LABELS: Record<TransitMode, string> = {
   bus: "Автобус",
-  trolleybus: "Троллейбус",
   tram: "Трамвай",
   metro: "Метро",
-  regional_rail: "Железная дорога",
+  rail: "Железная дорога",
 };
 
 const MODE_CAPACITY: Record<TransitMode, number> = {
