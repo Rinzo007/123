@@ -19,6 +19,9 @@ test = [
   "pytest>=8,<10",
   "duckdb>=1.4,<2",
 ]
+quality = [
+  "vulture>=2,<3",
+]
 gis = [
   "rasterio>=1.4,<2",
 ]
@@ -31,3 +34,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+
+[tool.vulture]
+ignore_decorators = ["@app.get", "@app.post"]
