@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .geo import LineString, Point
-from .reference_model import REFERENCE_PERIODS
+from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_PERIODS
 
 
 class TransitMode(StrEnum):
@@ -149,4 +149,21 @@ def default_service_periods() -> tuple[ServicePeriod, ...]:
     return tuple(
         ServicePeriod(period.key, period.start_minute, period.end_minute)
         for period in REFERENCE_PERIODS
+    )
+
+
+def default_vehicle_type(mode: TransitMode) -> VehicleType:
+    profile = REFERENCE_MODE_PROFILES[mode.value]
+    names = {
+        TransitMode.BUS: "Bus",
+        TransitMode.TRAM: "Tram",
+        TransitMode.METRO: "Metro",
+        TransitMode.RAIL: "Rail",
+    }
+    return VehicleType(
+        id=mode.value,
+        name=names[mode],
+        mode=mode,
+        capacity=profile.capacity,
+        operating_cost_per_km=profile.opex_per_vehicle_km,
     )
