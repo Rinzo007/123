@@ -9,6 +9,20 @@ from .od import GravityParameters, gravity_od
 from .reference_model import REFERENCE_PERIODS, REFERENCE_PURPOSE_LAYERS, ReferencePurposeLayer
 
 
+_REFERENCE_ATTRACTION_ALIASES: dict[str, tuple[str, ...]] = {
+    "edu": ("edu", "education"),
+    "health": ("health",),
+    "shop": ("shop", "shopping"),
+    "air": ("air", "airport"),
+    "night": ("night", "leisure"),
+}
+
+
+def _purpose_attraction(zone: DemandZone, purpose: ReferencePurposeLayer) -> float:
+    keys = _REFERENCE_ATTRACTION_ALIASES.get(purpose.key, (purpose.key,))
+    return sum(zone.attractions.get(key, 0.0) for key in keys)
+
+
 @dataclass(frozen=True, slots=True)
 class ReferenceDemandLayerResult:
     purpose: str
@@ -62,7 +76,7 @@ def generate_purpose_layer(
         for destination in zones:
             if destination.id == origin.id:
                 continue
-            attraction = destination.attractions.get(purpose.key, 0.0)
+            attraction = _purpose_attraction(destination, purpose)
             if attraction <= 0:
                 continue
             distance = hypot(
