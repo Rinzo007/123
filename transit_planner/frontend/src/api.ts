@@ -15,16 +15,23 @@ export async function validateNetwork(
   return response.json() as Promise<ValidationResult>;
 }
 
-async function loadGeoJson(
+async function loadJson<T>(
   path: string,
   params: URLSearchParams,
-): Promise<GeoJSON.FeatureCollection> {
+): Promise<T> {
   const response = await fetch(path + "?" + params.toString());
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || "Не удалось загрузить городские данные");
   }
-  return response.json() as Promise<GeoJSON.FeatureCollection>;
+  return response.json() as Promise<T>;
+}
+
+async function loadGeoJson(
+  path: string,
+  params: URLSearchParams,
+): Promise<GeoJSON.FeatureCollection> {
+  return loadJson<GeoJSON.FeatureCollection>(path, params);
 }
 
 export function loadOvertureStops(
@@ -96,7 +103,7 @@ export function loadOvertureNetwork(
   north: number,
   east: number,
 ): Promise<OvertureNetworkResponse> {
-  return loadGeoJson(
+  return loadJson<OvertureNetworkResponse>(
     "/api/v1/data/overture/network",
     new URLSearchParams({
       south: String(south),
@@ -104,5 +111,5 @@ export function loadOvertureNetwork(
       north: String(north),
       east: String(east),
     }),
-  ) as Promise<OvertureNetworkResponse>;
+  );
 }
