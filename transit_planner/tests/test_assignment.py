@@ -125,3 +125,40 @@ def test_mode_access_limit_overrides_global_access_radius():
 
     assert result.metrics.transit_trips == 0.0
     assert result.unserved_transit_demand == 0.0
+
+
+def test_assignment_routes_transit_demand_across_alternatives():
+    network = Network()
+    for stop_id, x, y in (
+        ("a", 0, 0),
+        ("b", 1000, 0),
+        ("c", 1000, 1000),
+        ("d", 2000, 0),
+    ):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, y)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(Route("direct", "Direct", TransitMode.BUS, ("a", "b", "d")))
+    network.add_route(Route("detour", "Detour", TransitMode.BUS, ("a", "c", "d")))
+    network.add_service(Service("direct-service", "direct", "bus", {"peak": 10}))
+    network.add_service(Service("detour-service", "detour", "bus", {"peak": 10}))
+
+    result = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "d", 100.0),)),
+        config=AssignmentConfig(
+            period_id="peak",
+            max_access_distance_m=0,
+            max_transit_alternatives=2,
+        ),
+    )
+
+    direct = next(flow for flow in result.route_flows if flow.route_id == "direct")
+    detour = next(flow for flow in result.route_flows if flow.route_id == "detour")
+    assert direct.passenger_section_traversals > 0.0
+    assert detour.passenger_section_traversals > 0.0
+    assert abs(
+        direct.passenger_section_traversals
+        + detour.passenger_section_traversals
+        - result.metrics.transit_trips * 2
+    ) < 1e-8
