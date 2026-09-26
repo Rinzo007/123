@@ -243,8 +243,17 @@ def _assign_once(
             if candidate is not None and any(leg.kind == "transit" for leg in candidate.legs):
                 journey = candidate
 
+        journey_wait = (
+            0.0
+            if journey is None
+            else sum(
+                leg.wait_min for leg in journey.legs if leg.kind == "transit"
+            )
+        )
         transit_time = None if journey is None else (
-            journey.duration_min + journey.transfers * config.transfer_penalty_min
+            journey.duration_min
+            + journey_wait
+            + journey.transfers * config.transfer_penalty_min
         )
         probs = probabilities(
             utilities(
@@ -281,7 +290,7 @@ def _assign_once(
                 car_time=car_time,
                 bike_time=bike_time,
                 transfers=journey.transfers,
-                wait_min=sum(leg.wait_min for leg in journey.legs if leg.kind == "transit"),
+                wait_min=journey_wait,
                 transit_fare=config.transit_fare,
                 fare_weight=config.choice.transit_fare_weight,
                 route_penalized=any(
@@ -294,7 +303,6 @@ def _assign_once(
 
         weighted_transit_time += transit_trips * transit_time if transit_time is not None else 0.0
         weighted_transfers += transit_trips * journey.transfers
-        journey_wait = sum(leg.wait_min for leg in journey.legs if leg.kind == "transit")
         weighted_wait += transit_trips * journey_wait
 
         for index, leg in enumerate(journey.legs):
