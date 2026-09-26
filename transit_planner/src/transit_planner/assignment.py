@@ -344,7 +344,10 @@ def _assign_once(
                 transit_fare=config.transit_fare,
                 fare_weight=config.choice.transit_fare_weight,
                 route_penalized=any(
-                    route_penalties.get(leg.route_id or "", 0.0) > 0.0
+                    segment_crowding_penalties.get(
+                        (leg.route_id or "", leg.from_id, leg.to_id),
+                        0.0,
+                    ) > 0.0
                     for leg in journey.legs
                     if leg.kind == "transit"
                 ),
