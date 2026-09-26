@@ -165,6 +165,37 @@ REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
 
+def minimum_station_headway_min(
+    mode: str,
+    *,
+    route_closed: bool,
+    boardings_per_hour: float = 0.0,
+) -> tuple[float, str]:
+    """Return the reference minimum station headway and limiting mechanism."""
+    profile = REFERENCE_MODE_PROFILES[mode]
+    available_dwell_s = 60.0 - profile.dwell_per_passenger_s * max(
+        0.0,
+        boardings_per_hour,
+    ) / 60.0
+    dwell_headway = (
+        (profile.dwell_s + 25.0) / available_dwell_s
+        if available_dwell_s > 6.0
+        else 999.0
+    )
+    turnback_headway = 0.0 if route_closed else profile.turnback_s / 120.0
+    if turnback_headway > dwell_headway:
+        return turnback_headway, "turnback"
+    return dwell_headway, "dwell"
+
+
+def minimum_track_headway_min(
+    capacity_departures_per_hour: float | None,
+) -> float:
+    """Return the minimum interval imposed by a track's tph capacity."""
+    if capacity_departures_per_hour is None or capacity_departures_per_hour <= 0:
+        return float("inf")
+    return 60.0 / capacity_departures_per_hour
+
 
 REFERENCE_MODE_PROFILES = {
     "bus": ReferenceModeProfile(
