@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -111,6 +113,53 @@ def overture_connectors(
             detail=f"Overture недоступен: {exc}",
         ) from exc
     return connectors_to_geojson(connectors)
+
+
+@app.get("/api/v1/data/overture/network")
+def overture_network(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+    release: str | None = Query(None),
+) -> dict:
+    source = _overture_source(release)
+    bounds = _bbox(south, west, north, east)
+
+    def roads_task():
+        return OvertureTransportationProvider(source=source, bbox=bounds).load_roads()
+
+    def connectors_task():
+        return OvertureConnectorProvider(source=source, bbox=bounds).load_connectors()
+
+    def stops_task():
+        return OvertureTransitProvider(source=source, bbox=bounds).load_stops()
+
+    try:
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="overture") as pool:
+            roads_future = pool.submit(roads_task)
+            connectors_future = pool.submit(connectors_task)
+            stops_future = pool.submit(stops_task)
+            roads = roads_future.result()
+            connectors = connectors_future.result()
+            stops = stops_future.result()
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Overture недоступен: {exc}",
+        ) from exc
+
+    return {
+        "roads": roads_to_geojson(roads),
+        "connectors": connectors_to_geojson(connectors),
+        "stops": stops_to_geojson(stops),
+        "release": source.release,
+        "counts": {
+            "roads": len(roads),
+            "connectors": len(connectors),
+            "stops": len(stops),
+        },
+    }
 
 
 @app.get("/api/v1/data/overture/stops")
