@@ -162,9 +162,6 @@ def build_topological_road_graph(
                     record.speed_kph,
                     record.road_type,
                     record.id,
-                    right_ref.connector_id,
-                    left_ref.connector_id,
-                    "backward",
                     left_ref.connector_id,
                     right_ref.connector_id,
                     "forward",
@@ -172,14 +169,20 @@ def build_topological_road_graph(
             )
             if not record.oneway:
                 graph.add_edge(
-                    f"{edge_id}:reverse",
-                    right_node,
-                    left_node,
-                    length_m,
-                    record.speed_kph,
-                    record.road_type,
-                    record.id,
+                    RoadEdge(
+                        f"{edge_id}:reverse",
+                        right_node,
+                        left_node,
+                        length_m,
+                        record.speed_kph,
+                        record.road_type,
+                        record.id,
+                        right_ref.connector_id,
+                        left_ref.connector_id,
+                        "backward",
+                    )
                 )
+
 
     return RoadGraphBuildResult(
         graph,
