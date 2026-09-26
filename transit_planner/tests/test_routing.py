@@ -265,5 +265,4 @@ def test_router_uses_route_geometry_curve_runtime():
     )
 
     assert journey is not None
-    expected_straight = network.stops["a"].location.x
     assert journey.duration_min > network.route_length_km(network.routes["curve"]) / 18.0 * 60.0
