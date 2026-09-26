@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from math import asin, cos, radians, sin, sqrt
 
 from .data import ConnectorRecord, ConnectorRef, RoadRecord
 from .geo import LineString, Point
@@ -103,6 +104,7 @@ class OvertureTransportationProvider:
                     road_type=road_type,
                     oneway=bool(oneway),
                     connectors=refs,
+                    length_m=_haversine_linestring_m(points),
                 )
             )
 
@@ -319,6 +321,22 @@ def _parse_connector_refs(raw) -> tuple[ConnectorRef, ...]:
 
     refs.sort(key=lambda ref: ref.at)
     return tuple(refs)
+
+
+def _haversine_linestring_m(points: tuple[Point, ...]) -> float:
+    if len(points) < 2:
+        return 0.0
+
+    earth_radius_m = 6_378_137.0
+    total = 0.0
+    for left, right in zip(points, points[1:]):
+        lat1 = radians(left.y)
+        lat2 = radians(right.y)
+        dlat = lat2 - lat1
+        dlon = radians(right.x - left.x)
+        h = sin(dlat / 2.0) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2.0) ** 2
+        total += 2.0 * earth_radius_m * asin(sqrt(min(1.0, h)))
+    return total
 
 
 def _class_speed(road_class: str) -> float:
