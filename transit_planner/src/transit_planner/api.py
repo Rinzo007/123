@@ -561,7 +561,12 @@ def calculate_assignment(payload: dict) -> dict:
         config=config,
     )
     service_analytics = tuple(
-        _service_analytics(network, service_id, config.period_id)
+        _service_analytics(
+            network,
+            service_id,
+            config.period_id,
+            assignment=result,
+        )
         for service_id in network.services
         if config.period_id in network.services[service_id].headway_by_period
     )
@@ -576,6 +581,10 @@ def calculate_assignment(payload: dict) -> dict:
                 "daily_vehicle_km": item.daily_vehicle_km,
                 "daily_opex": item.daily_opex,
                 "capacity_per_direction": item.capacity_per_direction,
+                "effective_headway_min": item.effective_headway_min,
+                "minimum_station_headway_min": item.minimum_station_headway_min,
+                "minimum_headway_min": item.minimum_headway_min,
+                "minimum_headway_why": item.minimum_headway_why,
             }
             for item in service_analytics
         ],
