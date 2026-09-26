@@ -27,6 +27,7 @@ from .overture_network import OvertureNetworkProvider
 from .places import CityPlace
 from .timetable import generate_service_timetable
 from .zones import generate_zones_from_population_raster
+from .reference_model import REFERENCE_MOBILITY
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -357,7 +358,9 @@ def city_demand(payload: dict) -> dict:
             centroid_y=float(item["centroid_y"]),
             population=float(item.get("population", 0.0)),
             jobs=float(item.get("jobs", 0.0)),
-            no_car_share=float(item.get("no_car_share", 0.35)),
+            no_car_share=float(
+                item.get("no_car_share", REFERENCE_MOBILITY.no_car_share)
+            ),
         )
         for item in payload.get("zones", [])
     )
@@ -551,6 +554,9 @@ def calculate_assignment(payload: dict) -> dict:
             centroid_y=float(item["centroid_y"]),
             population=float(item.get("population", 0.0)),
             jobs=float(item.get("jobs", 0.0)),
+            no_car_share=float(
+                item.get("no_car_share", REFERENCE_MOBILITY.no_car_share)
+            ),
         )
         for item in payload.get("zones", [])
     }
