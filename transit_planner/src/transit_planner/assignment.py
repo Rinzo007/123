@@ -91,7 +91,7 @@ class AssignmentConfig:
     choice: ChoiceConfig = ChoiceConfig()
     transfer_penalty_min: float = 5.0
     crowding_penalty_min: float = 20.0
-    crowding_start_ratio: float = 0.85
+    crowding_start_ratio: float = 1.0
     iterations: int = 6
     damping: float = 0.5
     transit_fare: float = 0.0
@@ -257,7 +257,7 @@ def _assign_once(
         if journey is None:
             unserved += transit_trips
             if transit_trips > 0:
-                loss_reasons["no_service"] = loss_reasons.get("no_service", 0.0) + transit_trips
+                loss_reasons["noroute"] = loss_reasons.get("noroute", 0.0) + transit_trips
             continue
 
         lost_trips = max(0.0, trips - transit_trips)
@@ -372,15 +372,15 @@ def _classify_demand_loss(
     route_penalized: bool,
 ) -> str:
     if route_penalized:
-        return "crowding"
+        return "crowd"
     best_alternative = min(walk_time, car_time, bike_time)
     if transit_fare > 0.0 and fare_weight * transit_fare >= 0.5 * transit_time:
-        return "fare"
+        return "price"
     if transfers > 0 and transit_time > best_alternative:
         return "transfer"
     if transit_time > best_alternative:
-        return "travel_time"
-    return "mode_competition"
+        return "ride"
+    return "ride"
 
 def _section_capacities(
     network: Network,
