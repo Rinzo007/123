@@ -269,7 +269,7 @@ def _service_analytics(
             else 60.0 / available_tph
         )
     track_headway = min(track_headways, default=float("inf"))
-    if track_headway > station_headway:
+    if route.track_section_ids and track_headway > station_headway:
         minimum_headway = track_headway
         headway_why = "track"
     else:
