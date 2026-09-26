@@ -162,3 +162,18 @@ def test_assignment_routes_transit_demand_across_alternatives():
         + detour.passenger_section_traversals
         - result.metrics.transit_trips * 2
     ) < 1e-8
+
+
+def test_zone_no_car_share_reduces_car_trips():
+    network = make_network()
+    zones = {
+        "o": DemandZone("o", 0, 0, population=1000, no_car_share=1.0),
+        "d": DemandZone("d", 2000, 0, population=1000, no_car_share=1.0),
+    }
+    result = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("o", "d", 100),)),
+        zones=zones,
+        config=AssignmentConfig(period_id="peak"),
+    )
+    assert result.metrics.car_trips == 0.0
