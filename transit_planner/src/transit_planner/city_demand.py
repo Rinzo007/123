@@ -6,6 +6,8 @@ from .city import DemandZone
 from .demand import DemandMatrix
 from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfile
 from .od import purpose_gravity_od
+from .geo import Point
+from .projection import project_wgs84_point
 from .places import CityPlace, aggregate_place_attractions
 
 
@@ -28,9 +30,31 @@ def build_city_demand(
     zones: tuple[DemandZone, ...],
     places: tuple[CityPlace, ...],
     *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
     config: CityDemandConfig = CityDemandConfig(),
     profile: TemporalDemandProfile = DEFAULT_TEMPORAL_DEMAND_PROFILE,
 ) -> DemandMatrix:
+    if (origin_lon is None) != (origin_lat is None):
+        raise ValueError("origin_lon and origin_lat must be provided together")
+
+    if origin_lon is not None and origin_lat is not None:
+        places = tuple(
+            CityPlace(
+                id=place.id,
+                name=place.name,
+                location=project_wgs84_point(
+                    place.location,
+                    origin_lon=origin_lon,
+                    origin_lat=origin_lat,
+                ),
+                basic_category=place.basic_category,
+                taxonomy_primary=place.taxonomy_primary,
+                importance=place.importance,
+            )
+            for place in places
+        )
+
     enriched_zones = aggregate_place_attractions(zones, places)
     return purpose_gravity_od(
         enriched_zones,
