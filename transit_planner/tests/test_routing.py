@@ -202,3 +202,33 @@ def test_router_can_return_route_diverse_alternatives():
         for journey in alternatives
     ]
     assert sequences[0] != sequences[1]
+
+
+def test_router_applies_service_headway_feedback_factor():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    router = TransitRouter(
+        network,
+        config=RouterConfig(walk_transfer_radius_m=0),
+    )
+    base = router.shortest(
+        network.stops["a"],
+        network.stops["b"],
+        period_id="peak",
+    )
+    slowed = router.shortest(
+        network.stops["a"],
+        network.stops["b"],
+        period_id="peak",
+        service_headway_factors={"svc": 2.0},
+    )
+
+    assert base is not None and slowed is not None
+    assert slowed.legs[0].wait_min == 10.0
+    assert base.legs[0].wait_min == 5.0
