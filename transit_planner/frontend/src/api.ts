@@ -199,8 +199,8 @@ export interface AssignmentResponse {
   unserved_transit_demand: number;
   loss_reasons: Array<{ reason: string; trips: number }>;
   route_flows: Array<{ route_id: string; boardings: number; passenger_section_traversals: number }>;
-  section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number }>;
-  stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number }>;
+  section_loads: Array<{ route_id: string; from_stop_id: string; to_stop_id: string; passengers: number; capacity: number; load_ratio: number; crowding_level: string }>;
+  stop_flows: Array<{ stop_id: string; boardings: number; alightings: number; transfers: number; dwell_seconds: number; platform_m: number }>;
 }
 
 export function calculateAssignment(
