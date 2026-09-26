@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .data import ConnectorRef, RoadRecord
+from .geo import Point
 from .road import RoadEdge, RoadGraph, RoadNode
 
 
