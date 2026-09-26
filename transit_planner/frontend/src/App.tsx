@@ -1284,6 +1284,26 @@ export function App() {
                   </div>
                 </div>
               )}
+              {assignmentResult?.track_capacity.some((item) => item.route_ids.length > 1) && (
+                <div className="analytics-panel">
+                  <div className="section-title">Совместные пути</div>
+                  <div className="period-result-list">
+                    {assignmentResult.track_capacity
+                      .filter((item) => item.route_ids.length > 1)
+                      .map((item) => (
+                        <div className="period-result-row" key={item.shared_group + ":" + item.period_id}>
+                          <strong>{item.shared_group}</strong>
+                          <span>{item.period_id}</span>
+                          <span>{item.route_ids.join(", ")}</span>
+                          <span>{item.tph.toFixed(1)} отправл./ч</span>
+                          <span>лимит {item.limit_tph.toFixed(1)}</span>
+                          <span>{(item.utilization * 100).toFixed(0)}%</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
               {assignmentResult && (
                 <div className="analytics-panel">
                   <div className="section-title">Результат расчёта</div>
