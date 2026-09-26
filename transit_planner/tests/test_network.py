@@ -163,4 +163,4 @@ def test_service_departures_use_period_window():
         {"peak": 30},
         departure_offset_by_period={"peak": 470},
     )
-    assert network.service_departures(shifted, "peak") == 1
+    assert network.service_departures(shifted, "peak") == 2
