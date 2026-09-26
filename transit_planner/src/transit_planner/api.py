@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
+from .economics import EconomicsConfig, calculate_economics
+from .infrastructure import TrackType
 from .analytics import _service_analytics
 from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
@@ -27,7 +29,8 @@ from .overture_network import OvertureNetworkProvider
 from .places import CityPlace
 from .timetable import generate_service_timetable
 from .zones import generate_zones_from_population_raster
-from .reference_model import REFERENCE_MOBILITY
+from .network import TransitMode
+from .reference_model import REFERENCE_MOBILITY, TrackRow
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 
@@ -274,6 +277,58 @@ def overture_stops(
     return stops_to_geojson(stops)
 
 
+def _economics_config_from_payload(
+    payload: dict,
+    *,
+    default_period_id: str,
+) -> EconomicsConfig:
+    raw = payload.get("economics_config", {})
+    if not isinstance(raw, dict):
+        raise TypeError("economics_config must be an object")
+
+    mode_costs = raw.get("infrastructure_cost_per_km")
+    track_costs = raw.get("infrastructure_cost_per_track_km")
+    row_multipliers = raw.get("reference_row_cost_multipliers")
+
+    return EconomicsConfig(
+        period_id=str(raw.get("period_id", default_period_id)),
+        fare_per_transit_trip=float(raw.get("fare_per_transit_trip", 0.0)),
+        annual_days=int(raw.get("annual_days", 365)),
+        infrastructure_cost_per_km=(
+            None
+            if mode_costs is None
+            else {TransitMode(str(key)): float(value) for key, value in mode_costs.items()}
+        ),
+        infrastructure_cost_per_track_km=(
+            None
+            if track_costs is None
+            else {TrackType(str(key)): float(value) for key, value in track_costs.items()}
+        ),
+        station_cost=float(raw.get("station_cost", 0.0)),
+        reference_cost_multiplier=float(raw.get("reference_cost_multiplier", 1.0)),
+        reference_row_cost_multipliers=(
+            None
+            if row_multipliers is None
+            else {TrackRow(str(key)): float(value) for key, value in row_multipliers.items()}
+        ),
+    )
+
+
+def _economics_result_to_dict(result) -> dict:
+    return {
+        "daily_vehicle_km": result.daily_vehicle_km,
+        "daily_fleet_cost": result.daily_fleet_cost,
+        "daily_operating_cost": result.daily_operating_cost,
+        "daily_fare_revenue": result.daily_fare_revenue,
+        "annual_fleet_cost": result.annual_fleet_cost,
+        "annual_operating_cost": result.annual_operating_cost,
+        "annual_fare_revenue": result.annual_fare_revenue,
+        "capital_cost": result.capital_cost,
+        "operating_cost_per_transit_trip": result.operating_cost_per_transit_trip,
+        "revenue_per_transit_trip": result.revenue_per_transit_trip,
+    }
+
+
 def _scenario_definition_from_payload(payload: dict, *, default_id: str) -> ScenarioDefinition:
     raw_demand = payload.get("demand", [])
     pairs = tuple(
@@ -316,17 +371,27 @@ def _scenario_definition_from_payload(payload: dict, *, default_id: str) -> Scen
 @app.post("/api/v1/scenario/compare")
 def compare_scenario_payload(payload: dict) -> dict:
     try:
+        base_definition = _scenario_definition_from_payload(
+            payload["base"],
+            default_id="base",
+        )
+        alternative_definition = _scenario_definition_from_payload(
+            payload["alternative"],
+            default_id="alternative",
+        )
         base = run_scenario(
-            _scenario_definition_from_payload(
+            base_definition,
+            economics_config=_economics_config_from_payload(
                 payload["base"],
-                default_id="base",
-            )
+                default_period_id=base_definition.assignment_config.period_id,
+            ),
         )
         alternative = run_scenario(
-            _scenario_definition_from_payload(
+            alternative_definition,
+            economics_config=_economics_config_from_payload(
                 payload["alternative"],
-                default_id="alternative",
-            )
+                default_period_id=alternative_definition.assignment_config.period_id,
+            ),
         )
         comparison = compare_scenarios(base, alternative)
     except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
@@ -349,6 +414,11 @@ def compare_scenario_payload(payload: dict) -> dict:
             "max_load_ratio": run.assignment.max_load_ratio,
             "passenger_km": run.analytics.passenger_km,
             "reserved_capital": run.reserved_capital,
+            "economics": (
+                None
+                if run.economics is None
+                else _economics_result_to_dict(run.economics)
+            ),
         }
 
     return {
@@ -387,6 +457,34 @@ def compare_scenario_payload(payload: dict) -> dict:
                 for item in comparison.sections
             ],
         },
+    }
+
+
+@app.post("/api/v1/economics")
+def calculate_economics_payload(payload: dict) -> dict:
+    try:
+        definition = _scenario_definition_from_payload(
+            payload,
+            default_id="economics",
+        )
+        economics_config = _economics_config_from_payload(
+            payload,
+            default_period_id=definition.assignment_config.period_id,
+        )
+        run = run_scenario(
+            definition,
+            economics_config=economics_config,
+        )
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Некорректные параметры экономики: {exc}",
+        ) from exc
+
+    return {
+        "scenario_id": run.scenario_id,
+        "name": run.name,
+        "economics": _economics_result_to_dict(run.economics),
     }
 
 
