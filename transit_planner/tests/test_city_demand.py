@@ -10,13 +10,15 @@ def test_build_city_demand_uses_places_and_population():
         DemandZone("b", 1000, 0, population=500, jobs=800),
     )
     places = (
-        CityPlace("school", "School", Point(1000, 0), basic_category="school", importance=10),
-        CityPlace("mall", "Mall", Point(0, 0), basic_category="shopping_mall", importance=20),
+        CityPlace("school", "School", Point(39.211, 51.67), basic_category="school", importance=10),
+        CityPlace("mall", "Mall", Point(39.2, 51.67), basic_category="shopping_mall", importance=20),
     )
 
     demand = build_city_demand(
         zones,
         places,
+        origin_lon=39.2,
+        origin_lat=51.67,
         config=CityDemandConfig(trip_rate=0.1, decay=0.01),
     )
 
