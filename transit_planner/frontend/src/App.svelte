@@ -118,6 +118,7 @@
   let message = "Готово к редактированию";
   let initialized = false;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let projectRevision = 0;
 
   function toLocalMeters(lon: number, lat: number, originLon: number, originLat: number) {
     const earthRadius = 6378137;
@@ -266,15 +267,20 @@
   function scheduleProjectSave() {
     if (!initialized) return;
     if (autosaveTimer) clearTimeout(autosaveTimer);
+    const revision = projectRevision;
     autosaveTimer = setTimeout(() => {
       autosaveTimer = null;
-      void saveProject("current", projectData()).then(() => markProjectClean()).catch(() => {
-        message = "Изменения остаются только в текущем сеансе";
+      const snapshot = projectData();
+      void saveProject("current", snapshot).then(() => {
+        if (revision === projectRevision) markProjectClean();
+      }).catch(() => {
+        if (revision === projectRevision) message = "Изменения остаются только в текущем сеансе";
       });
     }, 350);
   }
 
   function handleProjectChange() {
+    projectRevision += 1;
     markProjectDirty();
     syncProjectStore(true);
     scheduleProjectSave();
@@ -592,6 +598,7 @@
     anchor.click();
     URL.revokeObjectURL(url);
     void saveProject("current", projectData());
+    projectRevision += 1;
     markProjectClean();
     syncProjectStore(false);
     message = "JSON сети экспортирован";
@@ -614,6 +621,7 @@
     economicsResult = null;
     scenarioComparison = null;
     timetable = null;
+    projectRevision += 1;
     markProjectClean();
     syncProjectStore(false);
     message = "Проект загружен";
