@@ -49,7 +49,7 @@ def build_road_graph(
         end = record.geometry.points[-1]
         from_node = node_for(start.x, start.y)
         to_node = node_for(end.x, end.y)
-        _length_m(record, coordinate_to_metre)
+        length_m = _length_m(record, coordinate_to_metre)
         graph.add_edge(
             RoadEdge(
                 record.id,
@@ -148,7 +148,7 @@ def build_topological_road_graph(
                     f"Connector references on segment {record.id} are not strictly increasing"
                 )
 
-            length_m = record.geometry.length * at_delta * coordinate_to_metre
+            length_m = _length_m(record, coordinate_to_metre) * at_delta
             edge_id = f"{record.id}:{left_ref.connector_id}:{right_ref.connector_id}"
             graph.add_edge(
                 RoadEdge(
@@ -200,7 +200,7 @@ def _add_fallback_segment(
     end = record.geometry.points[-1]
     from_node = endpoint_node(start.x, start.y)
     to_node = endpoint_node(end.x, end.y)
-    _length_m(record, coordinate_to_metre)
+    length_m = _length_m(record, coordinate_to_metre)
     graph.add_edge(
         RoadEdge(
             record.id,
