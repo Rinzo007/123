@@ -1,7 +1,7 @@
 <script lang="ts">
   import type {StopDraft,TransitMode} from "../types";
   export let routeName="Новый маршрут"; export let mode:TransitMode="bus";
-  export let modeLabels:Record<TransitMode,string>; export let previewTrips=1000;
+  export let modeLabels:Record<TransitMode,string>={bus:"Автобус",tram:"Трамвай",metro:"Метро",rail:"Железная дорога"}; export let previewTrips=1000;
   export let farePerTransitTrip=0; export let annualDays=365;
   export let periods:Array<{id:string;start_minute:number;end_minute:number}>=[];
   export let headways:Record<string,number>={}; export let stops:StopDraft[]=[];
