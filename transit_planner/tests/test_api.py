@@ -158,4 +158,6 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
     assert result["economics"]["daily_vehicle_km"] == 72.0
     assert len(result["periods"]) == 2
     assert all("economics" in period for period in result["periods"])
+    assert all("services" in period for period in result["periods"])
+    assert all("riders" in service for period in result["periods"] for service in period["services"])
     assert result["periods"][0]["economics"]["daily_fare_revenue"] > 0
