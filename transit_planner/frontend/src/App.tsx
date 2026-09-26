@@ -163,7 +163,6 @@ export function App() {
       style: MAP_STYLE,
       center: DEFAULT_CENTER,
       zoom: 11,
-      attributionControl: true,
     });
 
     mapRef.current = map;
