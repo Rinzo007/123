@@ -114,6 +114,7 @@ class TransitRouter:
         *,
         period_id: str,
         route_penalties: dict[str, float] | None = None,
+        service_headway_factors: dict[str, float] | None = None,
     ) -> Journey | None:
         if origin.id not in self.network.stops or destination.id not in self.network.stops:
             raise KeyError("Origin or destination stop is not in the network")
@@ -124,6 +125,7 @@ class TransitRouter:
 
         options_by_stop = self._transit_options_by_period.get(period_id, {})
         penalties = route_penalties or {}
+        headway_factors = service_headway_factors or {}
         State = tuple[str, str | None]
         start: State = (origin.id, None)
         queue: list[tuple[float, int, State]] = [(0.0, 0, start)]
@@ -166,7 +168,8 @@ class TransitRouter:
                     wait = _scheduled_wait_minutes(
                         period_start=period.start_minute,
                         period_end=period.end_minute,
-                        headway=option.headway,
+                        headway=option.headway
+                        * headway_factors.get(option.service_id, 1.0),
                         departure_offset=option.departure_offset,
                     )
                     if wait is None:
@@ -271,6 +274,7 @@ class TransitRouter:
                 destination,
                 period_id=period_id,
                 route_penalties=penalties,
+                service_headway_factors=service_headway_factors,
             )
             if journey is None:
                 break
