@@ -42,9 +42,9 @@ class RouterConfig:
 
 
 class TransitRouter:
-    """Multimodal stop router with walking links and timetable-aware waiting.
+    """Time-dependent stop router with walking links and route-level penalties.
 
-    Stop coordinates are expected in metres for walking calculations.
+    Stop coordinates are expected in a metric coordinate system.
     """
 
     _SPEEDS = {
@@ -79,6 +79,7 @@ class TransitRouter:
         destination: Stop,
         *,
         period_id: str,
+        route_penalties: dict[str, float] | None = None,
     ) -> Journey | None:
         if origin.id not in self.network.stops or destination.id not in self.network.stops:
             raise KeyError("Origin or destination stop is not in the network")
@@ -87,6 +88,7 @@ class TransitRouter:
         if origin.id == destination.id:
             return Journey(origin.id, destination.id, 0.0, 0, ())
 
+        penalties = route_penalties or {}
         State = tuple[str, str | None]
         start: State = (origin.id, None)
         queue: list[tuple[float, int, State]] = [(0.0, 0, start)]
@@ -120,17 +122,19 @@ class TransitRouter:
                 headway = service.headway_by_period.get(period_id)
                 if headway is None:
                     continue
-                neighbors = self._route_neighbors_by_route[service.route_id].get(stop_id, ())
                 route = self.network.routes[service.route_id]
+                neighbors = self._route_neighbors_by_route[route.id].get(stop_id, ())
                 for neighbor_id in neighbors:
+                    board = current_route != route.id
                     wait = (
-                        0.0
-                        if current_route == route.id
-                        else headway / 2.0 * self.config.wait_weight
+                        headway / 2.0 * self.config.wait_weight
+                        if board
+                        else 0.0
                     )
+                    penalty = penalties.get(route.id, 0.0) if board else 0.0
                     run = self._run_time_between(stop_id, neighbor_id, route.mode)
                     next_state = (neighbor_id, route.id)
-                    candidate = cost + wait + run
+                    candidate = cost + wait + run + penalty
                     if candidate < best.get(next_state, inf):
                         best[next_state] = candidate
                         previous[next_state] = (
@@ -139,7 +143,7 @@ class TransitRouter:
                                 "transit",
                                 stop_id,
                                 neighbor_id,
-                                wait + run,
+                                wait + run + penalty,
                                 route.id,
                             ),
                         )
