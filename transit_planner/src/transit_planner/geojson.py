@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .data import ConnectorRecord, RoadRecord
 from .network import Stop
+from .places import CityPlace
 
 
 def roads_to_geojson(roads: tuple[RoadRecord, ...]) -> dict:
@@ -78,5 +79,29 @@ def stops_to_geojson(stops: tuple[Stop, ...]) -> dict:
                 },
             }
             for stop in stops
+        ],
+    }
+
+
+def places_to_geojson(places: tuple[CityPlace, ...]) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": place.id,
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [place.location.x, place.location.y],
+                },
+                "properties": {
+                    "id": place.id,
+                    "name": place.name,
+                    "basic_category": place.basic_category,
+                    "taxonomy_primary": place.taxonomy_primary,
+                    "importance": place.importance,
+                },
+            }
+            for place in places
         ],
     }
