@@ -30,6 +30,8 @@ def network_to_dict(network: Network) -> dict:
                     "points": [{"x": p.x, "y": p.y} for p in route.geometry.points]
                 },
                 "track_section_ids": list(route.track_section_ids),
+                "both_ways": route.both_ways,
+                "closed": route.closed,
             }
             for route in network.routes.values()
         ],
@@ -93,6 +95,8 @@ def network_from_dict(data: dict) -> Network:
                 tuple(raw["stop_ids"]),
                 line,
                 tuple(raw.get("track_section_ids", ())),
+                bool(raw.get("both_ways", True)),
+                bool(raw.get("closed", False)),
             )
         )
     for raw in data.get("services", []):
