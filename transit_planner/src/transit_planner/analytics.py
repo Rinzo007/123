@@ -15,6 +15,8 @@ class StopAnalytics:
     boardings: float
     alightings: float
     transfers: float
+    dwell_seconds: float = 0.0
+    platform_m: float = 0.0
 
     @property
     def total_activity(self) -> float:
@@ -30,6 +32,16 @@ class SectionAnalytics:
     passengers: float
     capacity: float
     load_ratio: float
+
+    @property
+    def crowding_level(self) -> str:
+        if self.load_ratio >= 4.0:
+            return "extreme"
+        if self.load_ratio >= 2.0:
+            return "severe"
+        if self.load_ratio >= 1.0:
+            return "crowded"
+        return "normal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +68,8 @@ class NetworkAnalytics:
     average_transfers: float
     max_load_ratio: float
     overloaded_sections: int
+    severe_sections: int
+    extreme_sections: int
     passenger_km: float
     stops: tuple[StopAnalytics, ...]
     sections: tuple[SectionAnalytics, ...]
@@ -76,6 +90,8 @@ def analyze_network(
             boardings=item.boardings,
             alightings=item.alightings,
             transfers=item.transfers,
+            dwell_seconds=item.dwell_seconds,
+            platform_m=item.platform_m,
         )
         for item in assignment.stop_flows
     )
@@ -109,7 +125,9 @@ def analyze_network(
         average_transit_time_min=assignment.metrics.average_transit_time_min,
         average_transfers=assignment.metrics.average_transfers,
         max_load_ratio=assignment.max_load_ratio,
-        overloaded_sections=sum(item.load_ratio > 1.0 for item in sections),
+        overloaded_sections=sum(item.load_ratio >= 1.0 for item in sections),
+        severe_sections=sum(item.load_ratio >= 2.0 for item in sections),
+        extreme_sections=sum(item.load_ratio >= 4.0 for item in sections),
         passenger_km=passenger_km,
         stops=stops,
         sections=tuple(sections),
