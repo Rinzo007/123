@@ -63,6 +63,7 @@ def test_one_way_service_analytics_uses_one_direction_of_vehicle_km():
 
     service = result.services[0]
     assert service.departures == 6
+    assert service.effective_headway_min > 10.0
     assert service.daily_vehicle_km == 6.0
     assert service.daily_opex == 12.0
     assert service.minimum_station_headway_min == 0.75
