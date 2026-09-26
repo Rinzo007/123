@@ -51,6 +51,13 @@ class TemporalAssignmentResult:
             for period in self.periods
         )
 
+    @property
+    def total_rest_trips(self) -> float:
+        return sum(
+            period.result.metrics.rest_trips
+            for period in self.periods
+        )
+
     def aggregate(self) -> AssignmentResult:
         if not self.periods:
             return AssignmentResult(
@@ -69,6 +76,7 @@ class TemporalAssignmentResult:
         car = self.total_car_trips
         walk = self.total_walk_trips
         bike = self.total_bike_trips
+        rest = self.total_rest_trips
         weighted_time = sum(
             period.result.metrics.average_transit_time_min * period.result.metrics.transit_trips
             for period in self.periods
