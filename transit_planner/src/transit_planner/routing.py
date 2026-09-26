@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from math import inf, isfinite, sqrt
+from math import ceil, inf, isfinite, sqrt
 
 from .road import RoadGraph
 
@@ -48,6 +48,7 @@ class _TransitOption:
     route_id: str
     neighbor_stop_id: str
     headway: float
+    departure_offset: float
     mode: TransitMode
 
 
@@ -145,7 +146,19 @@ class TransitRouter:
 
             for option in options_by_stop.get(stop_id, ()):
                 board = current_route != option.route_id
-                wait = option.headway / 2.0 * self.config.wait_weight if board else 0.0
+                wait = 0.0
+                if board:
+                    period = self.network.periods[period_id]
+                    wait = _scheduled_wait_minutes(
+                        arrival_minute=period.start_minute + cost,
+                        period_start=period.start_minute,
+                        period_end=period.end_minute,
+                        headway=option.headway,
+                        departure_offset=option.departure_offset,
+                    )
+                    if wait is None:
+                        continue
+                    wait *= self.config.wait_weight
                 penalty = penalties.get(option.route_id, 0.0) if board else 0.0
                 run = self._run_time_between(
                     stop_id,
@@ -227,7 +240,7 @@ class TransitRouter:
                 stop_map = result.setdefault(period_id, {})
                 for from_id, to_id in zip(route.stop_ids, route.stop_ids[1:]):
                     stop_map.setdefault(from_id, []).append(
-                        _TransitOption(route.id, to_id, headway, route.mode)
+                        _TransitOption(route.id, to_id, headway, service.departure_offset_by_period.get(period_id, 0.0), route.mode)
                     )
                     stop_map.setdefault(to_id, []).append(
                         _TransitOption(route.id, from_id, headway, route.mode)
@@ -239,6 +252,27 @@ class TransitRouter:
             }
             for period_id, stop_map in result.items()
         }
+
+
+def _scheduled_wait_minutes(
+    *,
+    arrival_minute: float,
+    period_start: int,
+    period_end: int,
+    headway: float,
+    departure_offset: float,
+) -> float | None:
+    if headway <= 0:
+        return None
+
+    first_departure = period_start + ((departure_offset - period_start) % headway)
+    if arrival_minute > first_departure:
+        steps = ceil((arrival_minute - first_departure) / headway)
+        first_departure += steps * headway
+
+    if first_departure >= period_end:
+        return None
+    return max(0.0, first_departure - arrival_minute)
 
     def _run_time_between(self, from_id: str, to_id: str, mode: TransitMode) -> float:
         cache_key = (from_id, to_id, mode)
