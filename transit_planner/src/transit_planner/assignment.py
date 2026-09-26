@@ -5,7 +5,7 @@ from math import ceil, sqrt
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
-from .choice import ChoiceConfig, probabilities, utilities
+from .choice import ChoiceConfig, alternative_probabilities, probabilities, utilities
 from .network import Network
 from .routing import Journey, TransitRouter
 from .reference_model import (
@@ -104,6 +104,8 @@ class AssignmentConfig:
     transit_fare: float = 0.0
     convergence_tolerance: float = 1e-4
     max_access_distance_m: float = 1500.0
+    max_transit_alternatives: int = 3
+    alternative_diversity_penalty_min: float = 15.0
 
     def __post_init__(self) -> None:
         if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0 or self.bike_speed_kph <= 0:
@@ -124,6 +126,10 @@ class AssignmentConfig:
             raise ValueError("convergence_tolerance must be positive")
         if self.max_access_distance_m < 0:
             raise ValueError("max_access_distance_m cannot be negative")
+        if self.max_transit_alternatives <= 0:
+            raise ValueError("max_transit_alternatives must be positive")
+        if self.alternative_diversity_penalty_min < 0:
+            raise ValueError("alternative_diversity_penalty_min cannot be negative")
 
 
 def assign_demand(
@@ -233,28 +239,32 @@ def _assign_once(
         origin_stop_id = zone_stops.get(pair.origin_zone_id) or _resolve_stop(network, pair.origin_zone_id)
         destination_stop_id = zone_stops.get(pair.destination_zone_id) or _resolve_stop(network, pair.destination_zone_id)
 
-        journey: Journey | None = None
+        journeys: tuple[Journey, ...] = ()
         if origin_stop_id and destination_stop_id:
-            candidate = router.shortest(
+            candidates = router.shortest_alternatives(
                 network.stops[origin_stop_id],
                 network.stops[destination_stop_id],
                 period_id=config.period_id,
+                max_alternatives=config.max_transit_alternatives,
                 route_penalties=route_penalties,
+                diversity_penalty_min=config.alternative_diversity_penalty_min,
             )
-            if candidate is not None and any(leg.kind == "transit" for leg in candidate.legs):
-                journey = candidate
+            journeys = tuple(
+                candidate
+                for candidate in candidates
+                if any(leg.kind == "transit" for leg in candidate.legs)
+            )
 
-        journey_wait = (
-            0.0
-            if journey is None
-            else sum(
-                leg.wait_min for leg in journey.legs if leg.kind == "transit"
+        journey = journeys[0] if journeys else None
+        journey_stats = tuple(
+            (
+                candidate.duration_min + candidate.transfers * config.transfer_penalty_min,
+                sum(leg.wait_min for leg in candidate.legs if leg.kind == "transit"),
             )
+            for candidate in journeys
         )
-        transit_time = None if journey is None else (
-            journey.duration_min
-            + journey.transfers * config.transfer_penalty_min
-        )
+        journey_wait = 0.0 if journey is None else journey_stats[0][1]
+        transit_time = None if journey is None else journey_stats[0][0]
         probs = probabilities(
             utilities(
                 walk_time_min=walk_time,
@@ -270,6 +280,10 @@ def _assign_once(
         )
 
         transit_trips = trips * probs["transit"]
+        alternative_shares = (
+            alternative_probabilities(journey_stats, config=config.choice)
+            if journeys else ()
+        )
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
         bike_trips = trips * probs["bike"]
@@ -303,9 +317,17 @@ def _assign_once(
             )
             loss_reasons[reason] = loss_reasons.get(reason, 0.0) + lost_trips
 
-        weighted_transit_time += transit_trips * transit_time if transit_time is not None else 0.0
-        weighted_transfers += transit_trips * journey.transfers
-        weighted_wait += transit_trips * journey_wait
+        if journeys:
+            for alternative_share, candidate in zip(alternative_shares, journeys):
+                candidate_trips = transit_trips * alternative_share
+                candidate_time, candidate_wait = journey_stats[len(
+                    [
+                        item for item in journeys[:journeys.index(candidate)]
+                    ]
+                )]
+                weighted_transit_time += candidate_trips * candidate_time
+                weighted_transfers += candidate_trips * candidate.transfers
+                weighted_wait += candidate_trips * candidate_wait
 
         for index, leg in enumerate(journey.legs):
             if leg.kind != "transit" or leg.route_id is None:
