@@ -223,3 +223,18 @@ export function calculateAssignment(
     return response.json() as Promise<AssignmentResponse>;
   });
 }
+export function loadDemandStreets(
+  demand: Array<{ origin_zone_id: string; destination_zone_id: string; trips_per_day: number; purpose?: string }>,
+  zones: Array<{ id: string; centroid_x: number; centroid_y: number }>,
+  originLon: number,
+  originLat: number,
+): Promise<GeoJSON.FeatureCollection> {
+  return fetch("/api/v1/demand/streets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ demand, zones, origin_lon: originLon, origin_lat: originLat }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось построить demand streets");
+    return response.json() as Promise<GeoJSON.FeatureCollection>;
+  });
+}
