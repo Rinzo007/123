@@ -136,3 +136,13 @@ class Network:
             raise ValueError(f"{kind.title()} id cannot be empty")
         if item_id in collection:
             raise ValueError(f"Duplicate {kind} id: {item_id}")
+
+
+def default_service_periods() -> tuple[ServicePeriod, ...]:
+    return (
+        ServicePeriod("night", 0, 360),
+        ServicePeriod("morning_peak", 360, 600),
+        ServicePeriod("daytime", 600, 960),
+        ServicePeriod("evening_peak", 960, 1200),
+        ServicePeriod("late_evening", 1200, 1440),
+    )
