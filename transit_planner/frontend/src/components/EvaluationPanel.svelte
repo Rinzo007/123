@@ -1,0 +1,9 @@
+<script lang="ts">
+  export let economics:any=null; export let assignment:any=null; export let scenario:any=null; export let timetable:any=null;
+  const pct=(v:number)=> (v*100).toFixed(1)+"%";
+</script>
+{#if assignment}<section class="panel"><h3>Пассажиропоток</h3><div class="grid"><div>Transit <b>{assignment.metrics.transit_trips.toFixed(1)}</b></div><div>Car <b>{assignment.metrics.car_trips.toFixed(1)}</b></div><div>Walk <b>{assignment.metrics.walk_trips.toFixed(1)}</b></div><div>Bike <b>{assignment.metrics.bike_trips.toFixed(1)}</b></div></div></section>{/if}
+{#if economics}<section class="panel"><h3>Экономика</h3><div class="grid"><div>Транспортная работа <b>{economics.economics.daily_vehicle_km.toFixed(1)} км/сутки</b></div><div>Эксплуатация <b>{economics.economics.daily_operating_cost.toFixed(2)}</b></div><div>Парк <b>{economics.economics.daily_fleet_cost.toFixed(2)}</b></div><div>Выручка <b>{economics.economics.daily_fare_revenue.toFixed(2)}</b></div></div></section>{/if}
+{#if scenario}<section class="panel"><h3>Сравнение сценариев</h3><p>Участков: {scenario.comparison.sections.length} · линий-периодов: {scenario.comparison.services.length}</p></section>{/if}
+{#if timetable}<section class="panel"><h3>Расписание {timetable.service_id}</h3>{#each timetable.periods as period}<div class="row"><strong>{period.period_id}</strong><span>{period.departures_minute.length} отправлений</span></div>{/each}</section>{/if}
+<style>.panel{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.grid>div{padding:10px;background:#f9fafb;border-radius:7px}.grid b{display:block;margin-top:4px}.row{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #eee}</style>
