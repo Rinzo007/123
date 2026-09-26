@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
-from .geojson import connectors_to_geojson, roads_to_geojson, stops_to_geojson
+from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson
 from .projection import project_local_point_wgs84
 from .overture import (
     OvertureConnectorProvider,
+    OverturePlacesProvider,
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
@@ -213,6 +214,26 @@ def overture_route(payload: dict) -> dict:
             "snap_distances_m": list(route.snap_distances_m),
         },
     }
+
+@app.get("/api/v1/data/overture/places")
+def overture_places(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+    release: str | None = Query(None),
+) -> dict:
+    try:
+        places = OverturePlacesProvider(
+            source=_overture_source(release),
+            bbox=_bbox(south, west, north, east),
+        ).load_places()
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Overture недоступен: {exc}",
+        ) from exc
+    return places_to_geojson(places)
 
 @app.get("/api/v1/data/overture/stops")
 def overture_stops(
