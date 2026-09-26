@@ -50,7 +50,7 @@ def gravity_od(
                 else distance_m / 1000.0 / parameters.reference_speed_kph * 60.0
             )
             friction = exp(-parameters.decay * impedance_minutes)
-            weight = attraction_base[destination] * friction
+            weight = attraction_base[destination.id] * friction
             raw.append((origin.id, destination.id, weight))
 
     pairs: list[ODPairDemand] = []
