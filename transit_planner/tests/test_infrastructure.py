@@ -72,3 +72,12 @@ def test_year_plan_tracks_reserved_capital_and_removals():
 
     assert total_reserved_capital(plan, rates=rates) == 6.0
     assert plan.removals == ["old-line"]
+
+
+def test_track_speed_limit_must_be_positive() -> None:
+    try:
+        TrackSection("slow", 1.0, speed_limit_kph=0.0)
+    except ValueError as exc:
+        assert "speed limit" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
