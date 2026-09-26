@@ -277,6 +277,21 @@ export interface CityAssignmentResponse {
     average_transit_time_min: number;
     average_transfers: number;
     max_load_ratio: number;
+    services: Array<{
+      service_id: string;
+      route_id: string;
+      period_id: string;
+      departures: number;
+      fleet: number;
+      riders: number;
+      peak_load_factor: number;
+      effective_headway_min: number;
+      minimum_station_headway_min: number;
+      minimum_headway_min: number;
+      minimum_headway_why: string;
+      daily_vehicle_km: number;
+      daily_opex: number;
+    }>;
     economics: EconomicsResult;
   }>;
 }
