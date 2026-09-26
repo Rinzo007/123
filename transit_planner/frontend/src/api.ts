@@ -279,7 +279,7 @@ export function calculateCityAssignment(
   east: number,
   originLon: number,
   originLat: number,
-  periodId = "morning_peak",
+  periodId = "am",
 ): Promise<CityAssignmentResponse> {
   return fetch("/api/v1/assignment/city", {
     method: "POST",
