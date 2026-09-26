@@ -197,6 +197,14 @@ class Network:
             for index in range(len(route.segment_pairs()))
         )
 
+    def route_cycle_time_min(self, route: Route) -> float:
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        direction_factor = 1.0 if not route.both_ways else 2.0
+        run_min = direction_factor * self.route_run_time_min(route)
+        dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
+        turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
+        return run_min + dwell_min + turnback_min
+
     @staticmethod
     def _add_unique(collection: dict[str, object], item_id: str, kind: str) -> None:
         if not item_id.strip():
