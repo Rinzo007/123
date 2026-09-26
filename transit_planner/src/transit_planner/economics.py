@@ -5,8 +5,8 @@ from math import ceil
 
 from .assignment import AssignmentResult
 from .infrastructure import TrackType
+from .reference_model import TrackRow, REFERENCE_MODE_PROFILES
 from .network import Network, TransitMode
-from .reference_model import REFERENCE_MODE_PROFILES
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +17,8 @@ class EconomicsConfig:
     infrastructure_cost_per_km: dict[TransitMode, float] | None = None
     infrastructure_cost_per_track_km: dict[TrackType, float] | None = None
     station_cost: float = 0.0
+    reference_cost_multiplier: float = 1.0
+    reference_row_cost_multipliers: dict[TrackRow, float] | None = None
 
     def __post_init__(self) -> None:
         if self.fare_per_transit_trip < 0:
@@ -25,6 +27,12 @@ class EconomicsConfig:
             raise ValueError("annual_days must be positive")
         if self.station_cost < 0:
             raise ValueError("station_cost cannot be negative")
+        if self.reference_cost_multiplier < 0:
+            raise ValueError("reference_cost_multiplier cannot be negative")
+        if self.reference_row_cost_multipliers is not None and any(
+            value < 0 for value in self.reference_row_cost_multipliers.values()
+        ):
+            raise ValueError("Reference row cost multipliers cannot be negative")
         if self.infrastructure_cost_per_km is not None and any(
             value < 0 for value in self.infrastructure_cost_per_km.values()
         ):
@@ -92,6 +100,8 @@ def calculate_economics(
             length_km=length_km,
             mode_costs=infrastructure_costs,
             track_costs=track_infrastructure_costs,
+            reference_cost_multiplier=config.reference_cost_multiplier,
+            reference_row_cost_multipliers=config.reference_row_cost_multipliers,
         )
         physical_station_ids = {
             station_id
@@ -134,6 +144,8 @@ def _route_capital_cost(
     length_km: float,
     mode_costs: dict[TransitMode, float],
     track_costs: dict[TrackType, float],
+    reference_cost_multiplier: float = 1.0,
+    reference_row_cost_multipliers: dict[TrackRow, float] | None = None,
 ) -> float:
     if route.track_section_ids and track_costs:
         return sum(
@@ -144,8 +156,11 @@ def _route_capital_cost(
     if route.mode in mode_costs:
         return length_km * mode_costs[route.mode]
 
+    row_multipliers = reference_row_cost_multipliers or {}
     return sum(
         network.route_segment_length_km(route, index)
         * network.route_segment_cost_per_km(route, index)
+        * reference_cost_multiplier
+        * row_multipliers.get(network.route_segment_row(route, index), 1.0)
         for index in range(len(route.segment_pairs()))
     )
