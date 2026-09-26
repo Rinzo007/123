@@ -5,6 +5,7 @@ from math import cos, radians, sqrt
 from typing import Iterable
 
 from .city import DemandZone
+from .geo import Point
 
 
 @dataclass(frozen=True, slots=True)
