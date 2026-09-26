@@ -399,6 +399,7 @@ class TransitRouter:
                                 headway,
                                 offset,
                                 route.mode,
+                                service.id,
                                 physical_run_time_min,
                             )
                         )
