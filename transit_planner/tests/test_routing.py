@@ -93,3 +93,36 @@ def test_router_closes_circular_route() -> None:
     assert [(leg.from_id, leg.to_id) for leg in journey.legs if leg.kind == "transit"] == [
         ("c", "a")
     ]
+
+
+def test_router_uses_physical_track_speed_limit() -> None:
+    from transit_planner.infrastructure import TrackSection
+
+    network = make_network()
+    network.add_track_section(
+        TrackSection(
+            "slow",
+            1.0,
+            speed_limit_kph=10.0,
+        )
+    )
+    network.routes.clear()
+    network.add_route(
+        Route(
+            "slow-route",
+            "Slow",
+            TransitMode.BUS,
+            ("a", "b"),
+            track_section_ids=("slow",),
+        )
+    )
+    network.services.clear()
+    network.add_service(Service("slow-service", "slow-route", "bus", {"am": 10}))
+
+    journey = TransitRouter(network).shortest(
+        network.stops["a"],
+        network.stops["b"],
+        period_id="am",
+    )
+    assert journey is not None
+    assert abs(journey.duration_min - 6.0) < 1e-9
