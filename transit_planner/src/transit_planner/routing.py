@@ -464,6 +464,9 @@ def _adjust_connection_waits(
                 upstream_h = upstream_service.headway_by_period.get(period_id)
                 downstream_h = downstream_service.headway_by_period.get(period_id)
                 if upstream_h is not None and downstream_h is not None:
+                    upstream_profile = REFERENCE_MODE_PROFILES[
+                        network.routes[upstream_service.route_id].mode.value
+                    ]
                     wait = average_connection_wait_minutes(
                         upstream_h,
                         downstream_h,
@@ -472,6 +475,7 @@ def _adjust_connection_waits(
                         downstream_offset=downstream_service.departure_offset_by_period.get(period_id, 0.0)
                         + downstream_service.phase_by_period.get(period_id, 0.0),
                         upstream_run_time=upstream_run,
+                        mode_jitter_s=upstream_profile.jitter_s,
                     ) or wait
         updated = JourneyLeg(
             leg.kind,
