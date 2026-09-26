@@ -33,6 +33,7 @@ def test_assignment_produces_transit_flow():
     assert result.metrics.transit_trips > 0
     assert result.metrics.average_wait_time_min >= 0.0
     assert result.route_flows[0].passenger_section_traversals > 0
+    assert dict(result.service_headway_factors)["svc"] > 1.0
     section = next(
         item for item in result.section_loads
         if item.from_stop_id == "a" and item.to_stop_id == "b"
