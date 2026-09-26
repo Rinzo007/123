@@ -11,6 +11,7 @@
     calculateCityAssignment,
     calculateEconomics,
     loadDemandStreets,
+    loadReferenceDemand,
     loadPopulationZones,
     compareScenarios,
     type ScenarioPayload,
@@ -425,7 +426,14 @@
       const clientPreview = await runClientPreview(network);
       evaluationSummary = clientPreview.evaluation;
       if (!referenceEvaluationClient) referenceEvaluationClient = createReferenceEvaluationClient();
-      const referencePreview = await runReferencePreview(referenceEvaluationClient, network, previewTrips);
+      const bounds = mapRef?.getBounds();
+      const referenceDemand = bounds
+        ? await loadReferenceDemand(
+            bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+            network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
+          )
+        : undefined;
+      const referencePreview = await runReferencePreview(referenceEvaluationClient, network, referenceDemand);
       const referenceResult = referencePreview.result as { lines?: unknown[]; stops?: number; };
       if (Array.isArray(referenceResult.lines)) {
         evaluationSummary = {
