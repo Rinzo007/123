@@ -6,6 +6,7 @@ import {
   loadOvertureRoute,
   validateNetwork,
   calculateAssignment,
+  calculateCityAssignment,
   loadDemandStreets,
   loadPopulationZones,
 } from "./api";
@@ -217,6 +218,7 @@ export function App() {
   const [showStationLoads, setShowStationLoads] = useState(true);
   const [previewTrips, setPreviewTrips] = useState(1000);
   const [assignmentResult, setAssignmentResult] = useState<Awaited<ReturnType<typeof calculateAssignment>> | null>(null);
+  const [cityAssignmentMeta, setCityAssignmentMeta] = useState<Awaited<ReturnType<typeof calculateCityAssignment>>["data"] | null>(null);
   const [demandStreets, setDemandStreets] = useState<FeatureCollection | null>(null);
   const [showDemandStreets, setShowDemandStreets] = useState(true);
   const [populationZones, setPopulationZones] = useState<FeatureCollection | null>(null);
@@ -633,6 +635,30 @@ export function App() {
 
 
 
+
+  async function runCityAssignment() {
+    const map = mapRef.current;
+    if (!map || stops.length < 2) return;
+    setBusy(true);
+    setMessage("Расчёт городской сети по WorldPop + Overture…");
+    try {
+      const bounds = map.getBounds();
+      const result = await calculateCityAssignment(
+        network,
+        bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+        network.origin_lon ?? bounds.getCenter().lng,
+        network.origin_lat ?? bounds.getCenter().lat,
+        "morning_peak",
+      );
+      setAssignmentResult(result.assignment);
+      setCityAssignmentMeta(result.data);
+      setMessage(`Citywide: ${result.data.zones} зон, ${result.data.places} Places, ${result.data.od_pairs} OD-пар`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Городской расчёт недоступен");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function runPreviewAssignment() {
     if (stops.length < 2) return;
     setBusy(true);
@@ -792,6 +818,9 @@ export function App() {
               <button className="primary" onClick={runPreviewAssignment} disabled={busy || stops.length < 2}>
                 Рассчитать пассажиропоток
               </button>
+              <button onClick={runCityAssignment} disabled={busy || stops.length < 2}>
+                Рассчитать городскую сеть
+              </button>
             </div>
 
             <div className="period-headways">
@@ -920,6 +949,13 @@ export function App() {
                   <span>Transit share</span>
                   <b>{(assignmentResult.metrics.transit_share * 100).toFixed(1)}%</b>
                 </div>
+                {cityAssignmentMeta && (
+                  <>
+                    <div className="metric"><span>Зоны</span><b>{cityAssignmentMeta.zones}</b></div>
+                    <div className="metric"><span>Places</span><b>{cityAssignmentMeta.places}</b></div>
+                    <div className="metric"><span>OD-пары</span><b>{cityAssignmentMeta.od_pairs}</b></div>
+                  </>
+                )}
                 <div className="metric">
                   <span>Макс. загрузка</span>
                   <b>{(assignmentResult.max_load_ratio * 100).toFixed(0)}%</b>
