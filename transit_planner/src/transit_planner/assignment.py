@@ -188,12 +188,26 @@ def assign_demand(
             )
             for segment, target in segment_target_penalties.items()
         }
-        service_headway_factors = _service_headway_feedback(
+        service_target_factors = _service_headway_feedback(
             network,
             snapshot,
             config.period_id,
         )
-        if iteration > 1 and max_delta <= config.convergence_tolerance:
+        service_delta = _max_penalty_delta(
+            service_headway_factors,
+            service_target_factors,
+        )
+        service_headway_factors = {
+            service_id: (
+                service_headway_factors.get(service_id, 1.0) * config.damping
+                + target * (1.0 - config.damping)
+            )
+            for service_id, target in service_target_factors.items()
+        }
+        if (
+            iteration > 1
+            and max(max_delta, service_delta) <= config.convergence_tolerance
+        ):
             converged_after = iteration
             break
 
