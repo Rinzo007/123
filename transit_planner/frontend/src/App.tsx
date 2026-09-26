@@ -54,6 +54,7 @@ function buildNetworkPayload(
   mode: TransitMode,
   routeName: string,
   headways: Record<string, number>,
+  roadRoute: FeatureCollection<LineString, object> | null = null,
 ): NetworkPayload {
   const origin = stops[0] ?? {
     lon: DEFAULT_CENTER[0],
@@ -67,15 +68,28 @@ function buildNetworkPayload(
     is_station: false,
   }));
 
+  const roadCoordinates =
+    roadRoute?.features[0]?.geometry.type === "LineString"
+      ? roadRoute.features[0].geometry.coordinates
+      : [];
+  const roadGeometry =
+    roadCoordinates.length >= 2
+      ? {
+          points: roadCoordinates.map(([lon, lat]) =>
+            toLocalMeters(lon, lat, origin.lon, origin.lat),
+          ),
+        }
+      : null;
   const route = {
     id: "draft-route",
     name: routeName,
     mode,
     stop_ids: stops.map((stop) => stop.id),
     geometry:
-      metricStops.length >= 2
+      roadGeometry ??
+      (metricStops.length >= 2
         ? { points: metricStops.map((stop) => stop.location) }
-        : null,
+        : null),
   };
 
   const vehicleType = {
@@ -478,7 +492,7 @@ export function App() {
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headways),
-    [stops, mode, routeName, headways],
+    [stops, mode, routeName, headways, roadRoute],
   );
 
   const routeRows = useMemo(
@@ -863,12 +877,13 @@ export function App() {
   function exportJson() {
     const project = {
       format: "transit-planner-project",
-      version: 2,
+      version: 3,
       routeName,
       mode,
       headways,
       stops,
       network,
+      roadRoute,
       economics: {
         farePerTransitTrip,
         annualDays,
@@ -915,6 +930,16 @@ export function App() {
             ? project.scenarioBase
             : null,
         );
+        const savedRoadRoute = project.roadRoute;
+        if (
+          version >= 3 &&
+          savedRoadRoute?.type === "FeatureCollection" &&
+          Array.isArray(savedRoadRoute.features)
+        ) {
+          setRoadRoute(savedRoadRoute);
+        } else {
+          setRoadRoute(null);
+        }
         setScenarioComparison(null);
         setEconomicsResult(null);
         commitStops(Array.isArray(project.stops) ? project.stops : []);
