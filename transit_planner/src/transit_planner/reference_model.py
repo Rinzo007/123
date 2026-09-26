@@ -176,7 +176,6 @@ class ReferenceMobilityProfile:
 
 
 REFERENCE_VOT_S_PER_EUR = 360.0
-REFERENCE_NO_CAR_EFFECTIVENESS = 0.78
 REFERENCE_TRANSFER = ReferenceTransferProfile()
 REFERENCE_CAR = ReferenceCarProfile()
 REFERENCE_MOBILITY = ReferenceMobilityProfile()
