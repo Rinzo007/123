@@ -237,12 +237,25 @@ export function toReferenceGeometries(network: NetworkPayload): Array<{
   });
 }
 
+export type ReferenceCityDemand = {
+  pts: Array<[number, number, number, number]>;
+  od: Array<[number, number, number, number]>;
+  baselineT?: number[][];
+};
+
 export async function runReferencePreview(
   client: ReferenceEvaluationClient,
   network: NetworkPayload,
-  trips = 1000,
+  demandInput?: ReferenceCityDemand,
 ): Promise<ReferenceEvaluationResult> {
-  const demand = toReferenceDemand(network, trips);
-  client.init(Date.now(), demand, undefined, [], network.origin_lat ?? 51.67);
+  const demand = demandInput ?? toReferenceDemand(network);
+  const baselineT = demandInput?.baselineT;
+  client.init(
+    Date.now(),
+    demand,
+    baselineT,
+    [],
+    network.origin_lat ?? 51.67,
+  );
   return client.run(toReferenceLines(network), toReferenceGeometries(network), false, 0);
 }
