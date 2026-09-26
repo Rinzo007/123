@@ -229,3 +229,36 @@ def test_segment_reference_row_overrides_default_mode_row_for_capital_cost():
     )
 
     assert result.capital_cost == 18.0 + 85.0
+
+
+def test_reference_capital_cost_multipliers_apply_to_rows():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.TRAM,
+            ("a", "b"),
+            row_by_segment=(TrackRow.RESERVED,),
+        )
+    )
+    network.add_service(Service("svc", "r1", "tram", {"peak": 10}))
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 1),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = calculate_economics(
+        network,
+        assignment,
+        config=EconomicsConfig(
+            period_id="peak",
+            reference_cost_multiplier=2.0,
+            reference_row_cost_multipliers={TrackRow.RESERVED: 1.5},
+        ),
+    )
+    assert result.capital_cost == 18.0 * 2.0 * 1.5
