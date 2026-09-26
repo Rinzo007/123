@@ -133,6 +133,7 @@ def zones_to_geojson(zones, *, origin_lon: float = 0.0, origin_lat: float = 0.0)
                     "id": zone.id,
                     "population": zone.population,
                     "jobs": zone.jobs,
+                    "no_car_share": zone.no_car_share,
                     "purpose_attractions": dict(zone.purpose_attractions),
                 },
             }
