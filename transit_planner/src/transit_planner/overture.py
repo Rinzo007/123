@@ -424,18 +424,6 @@ def _field(value, name: str):
     return getattr(value, name, None)
 
 
-def _when_has_only_heading(when, heading: str) -> bool:
-    if when is None:
-        return False
-    if _field(when, "heading") != heading:
-        return False
-    for name in ("during", "mode", "using", "recognized", "vehicle"):
-        value = _field(when, name)
-        if value not in (None, (), [], ""):
-            return False
-    return True
-
-
 def _access_directions(access_restrictions) -> tuple[bool, bool]:
     if not access_restrictions:
         return True, True
