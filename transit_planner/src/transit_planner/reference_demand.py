@@ -164,7 +164,7 @@ def build_daily_demand(
     commuter = gravity_od(
         zones,
         parameters=GravityParameters(
-            reference_speed_kph=reference_speed_kph,
+            speed_kph=reference_speed_kph,
             decay=decay,
         ),
         trip_rate=trip_rate,
