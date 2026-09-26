@@ -78,3 +78,38 @@ def test_build_overture_network_preserves_turn_restrictions():
 
     assert time == float("inf")
     assert path == ()
+
+
+def test_overture_route_points_returns_graph_geometry_and_metrics():
+    roads = (
+        RoadRecord(
+            "overture:r1",
+            LineString((
+                Point(39.2000, 51.6700),
+                Point(39.2010, 51.6700),
+                Point(39.2020, 51.6700),
+            )),
+            30.0,
+            oneway=True,
+            connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 0.5), ConnectorRef("c2", 1.0)),
+            length_m=2000.0,
+        ),
+    )
+    result = build_overture_network(
+        roads,
+        (),
+        (),
+        origin_lon=39.2010,
+        origin_lat=51.6700,
+        snap_max_distance_m=500.0,
+    )
+
+    route = result.route_points((
+        Point(39.20002, 51.6700),
+        Point(39.20198, 51.6700),
+    ))
+
+    assert route.edge_ids == ("overture:r1:c0:c1", "overture:r1:c1:c2")
+    assert abs(route.length_m - 2000.0) < 1e-6
+    assert abs(route.travel_time_min - 4.0) < 1e-6
+    assert len(route.geometry) >= 3
