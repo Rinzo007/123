@@ -137,6 +137,135 @@ def calculate_economics(
     )
 
 
+def calculate_temporal_economics(
+    network: Network,
+    temporal_assignment,
+    *,
+    config: EconomicsConfig,
+) -> tuple[EconomicsResult, ...]:
+    """Рассчитывает экономику каждого периода поверх временного назначения."""
+    results: list[EconomicsResult] = []
+    for period in temporal_assignment.periods:
+        period_config = EconomicsConfig(
+            period_id=period.period_id,
+            fare_per_transit_trip=config.fare_per_transit_trip,
+            annual_days=config.annual_days,
+            infrastructure_cost_per_km=config.infrastructure_cost_per_km,
+            infrastructure_cost_per_track_km=config.infrastructure_cost_per_track_km,
+            station_cost=config.station_cost,
+            reference_cost_multiplier=config.reference_cost_multiplier,
+            reference_row_cost_multipliers=config.reference_row_cost_multipliers,
+        )
+        results.append(
+            calculate_economics(
+                network,
+                period.result,
+                config=period_config,
+            )
+        )
+    return tuple(results)
+
+
+def aggregate_temporal_economics(
+    network: Network,
+    temporal_assignment,
+    *,
+    config: EconomicsConfig,
+) -> EconomicsResult:
+    """Сводит периодическую экономику в один дневной отчёт."""
+    period_results = calculate_temporal_economics(
+        network,
+        temporal_assignment,
+        config=config,
+    )
+    if not period_results:
+        return EconomicsResult(
+            daily_vehicle_km=0.0,
+            daily_fleet_cost=0.0,
+            daily_operating_cost=0.0,
+            daily_fare_revenue=0.0,
+            annual_fleet_cost=0.0,
+            annual_operating_cost=0.0,
+            annual_fare_revenue=0.0,
+            capital_cost=0.0,
+            operating_cost_per_transit_trip=0.0,
+            revenue_per_transit_trip=0.0,
+        )
+
+    daily_vehicle_km = sum(item.daily_vehicle_km for item in period_results)
+    daily_operating_cost = sum(item.daily_operating_cost for item in period_results)
+    daily_fare_revenue = sum(item.daily_fare_revenue for item in period_results)
+    daily_fleet_cost = max(item.daily_fleet_cost for item in period_results)
+    capital_cost = _network_capital_cost(
+        network,
+        infrastructure_costs=config.infrastructure_cost_per_km or {},
+        track_infrastructure_costs=config.infrastructure_cost_per_track_km or {},
+        station_cost=config.station_cost,
+        reference_cost_multiplier=config.reference_cost_multiplier,
+        reference_row_cost_multipliers=config.reference_row_cost_multipliers,
+    )
+    transit_trips = temporal_assignment.total_transit_trips
+    return EconomicsResult(
+        daily_vehicle_km=daily_vehicle_km,
+        daily_fleet_cost=daily_fleet_cost,
+        daily_operating_cost=daily_operating_cost,
+        daily_fare_revenue=daily_fare_revenue,
+        annual_fleet_cost=daily_fleet_cost * config.annual_days,
+        annual_operating_cost=daily_operating_cost * config.annual_days,
+        annual_fare_revenue=daily_fare_revenue * config.annual_days,
+        capital_cost=capital_cost,
+        operating_cost_per_transit_trip=(
+            0.0 if transit_trips <= 0 else daily_operating_cost / transit_trips
+        ),
+        revenue_per_transit_trip=(
+            0.0 if transit_trips <= 0 else daily_fare_revenue / transit_trips
+        ),
+    )
+
+
+def _network_capital_cost(
+    network: Network,
+    *,
+    infrastructure_costs: dict[TransitMode, float],
+    track_infrastructure_costs: dict[TrackType, float],
+    station_cost: float,
+    reference_cost_multiplier: float,
+    reference_row_cost_multipliers: dict[TrackRow, float] | None,
+) -> float:
+    active_routes = {
+        service.route_id
+        for service in network.services.values()
+        if service.headway_by_period
+    }
+    total = 0.0
+    for route_id in active_routes:
+        route = network.routes[route_id]
+        length_km = network.route_length_km(route)
+        total += _route_capital_cost(
+            network,
+            route,
+            length_km=length_km,
+            mode_costs=infrastructure_costs,
+            track_costs=track_infrastructure_costs,
+            reference_cost_multiplier=reference_cost_multiplier,
+            reference_row_cost_multipliers=reference_row_cost_multipliers,
+        )
+        physical_station_ids = {
+            station_id
+            for section_id in route.track_section_ids
+            for station_id in network.track_sections[section_id].station_ids
+        }
+        if physical_station_ids:
+            total += len(physical_station_ids) * station_cost
+        else:
+            total += sum(
+                station_cost
+                for stop_id in route.stop_ids
+                if network.stops[stop_id].is_station
+            )
+    return total
+
+
 def _route_capital_cost(
     network: Network,
     route,
