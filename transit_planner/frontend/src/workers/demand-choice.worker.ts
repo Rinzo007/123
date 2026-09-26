@@ -1,3 +1,4 @@
+export {};
 type Request={kind:"choice";trips:number;utilities:{transit:number;car:number;walk:number;bike:number}};
 type Response={kind:"choice";shares:{transit:number;car:number;walk:number;bike:number};trips:{transit:number;car:number;walk:number;bike:number}};
 self.onmessage=(event:MessageEvent<Request>)=>{
