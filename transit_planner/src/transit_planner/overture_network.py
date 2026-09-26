@@ -136,14 +136,12 @@ class OvertureNetworkProvider:
         if len(points_wgs84) < 2:
             raise ValueError("A road route needs at least two points")
 
-        origin_lon = fmean(point.x for point in points_wgs84)
-        origin_lat = fmean(point.y for point in points_wgs84)
         from .projection import project_wgs84_point
         metric_points = tuple(
             project_wgs84_point(
                 point,
-                origin_lon=origin_lon,
-                origin_lat=origin_lat,
+                origin_lon=self.origin_lon,
+                origin_lat=self.origin_lat,
             )
             for point in points_wgs84
         )
