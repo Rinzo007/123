@@ -5,6 +5,9 @@ export type ProjectState = {
   id: string;
   network: NetworkPayload | null;
   scenarioBase: unknown;
+  previewTrips: number;
+  farePerTransitTrip: number;
+  annualDays: number;
   initialized: boolean;
   dirty: boolean;
 };
@@ -13,6 +16,9 @@ export const project = writable<ProjectState>({
   id: "current",
   network: null,
   scenarioBase: null,
+  previewTrips: 1000,
+  farePerTransitTrip: 0,
+  annualDays: 365,
   initialized: false,
   dirty: false,
 });
