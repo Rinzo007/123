@@ -45,6 +45,11 @@ def test_scenario_compare_endpoint_runs_two_networks():
                 {"id": "d", "centroid_x": 1000.0, "centroid_y": 0.0},
             ],
             "config": {"period_id": "peak", "max_access_distance_m": 0},
+            "economics_config": {
+                "period_id": "peak",
+                "fare_per_transit_trip": 2.0,
+                "annual_days": 365,
+            },
         }
 
     result = compare_scenario_payload({
