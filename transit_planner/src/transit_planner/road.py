@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from heapq import heappop, heappush
 from math import inf
 
+from .data import ProhibitedTransition
+
 
 @dataclass(frozen=True, slots=True)
 class RoadNode:
@@ -40,8 +42,8 @@ class RoadGraph:
     edges: dict[str, RoadEdge] = field(default_factory=dict)
     outgoing: dict[int, list[str]] = field(default_factory=dict)
     connector_nodes: dict[str, int] = field(default_factory=dict)
-    prohibited_transitions: tuple[object, ...] = ()
-    _restriction_index: dict[str, tuple[object, ...]] = field(default_factory=dict, init=False, repr=False)
+    prohibited_transitions: tuple[ProhibitedTransition, ...] = ()
+    _restriction_index: dict[str, tuple[ProhibitedTransition, ...]] = field(default_factory=dict, init=False, repr=False)
 
     def add_node(self, node: RoadNode) -> None:
         if node.id in self.nodes:
@@ -74,7 +76,7 @@ class RoadGraph:
         self.edges[edge.id] = edge
         self.outgoing.setdefault(edge.from_node, []).append(edge.id)
 
-    def add_prohibited_transition(self, rule: object) -> None:
+    def add_prohibited_transition(self, rule: ProhibitedTransition) -> None:
         self.prohibited_transitions = (*self.prohibited_transitions, rule)
         source_segment_id = getattr(rule, "source_segment_id", None)
         if source_segment_id:
@@ -115,9 +117,10 @@ class RoadGraph:
                     continue
 
                 candidate = distance + edge.travel_time_minutes
-                next_history = history + (edge_id,)
                 if max_sequence > 0:
-                    next_history = next_history[-(max_sequence + 1):]
+                    next_history = (history + (edge_id,))[-(max_sequence + 1):]
+                else:
+                    next_history = ()
                 next_state = (edge.to_node, next_history)
 
                 if candidate < distances.get(next_state, inf):
