@@ -84,3 +84,17 @@ def test_alternative_probabilities_favor_lower_generalized_cost():
     shares = alternative_probabilities(((10.0, 5.0), (14.0, 8.0)))
     assert abs(sum(shares) - 1.0) < 1e-12
     assert shares[0] > shares[1] > 0.0
+
+
+def test_no_car_availability_reduces_car_probability():
+    from transit_planner.choice import probabilities
+
+    utilities_value = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=None,
+    )
+    with_car = probabilities(utilities_value, car_availability=1.0)
+    without_car = probabilities(utilities_value, car_availability=0.0)
+    assert without_car["car"] == 0.0
+    assert without_car["walk"] > with_car["walk"]
