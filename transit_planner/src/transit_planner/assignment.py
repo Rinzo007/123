@@ -214,7 +214,7 @@ def _assign_once(
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
     total_transit = total_car = total_walk = total_bike = 0.0
-    weighted_transit_time = weighted_transfers = 0.0
+    weighted_transit_time = weighted_transfers = weighted_wait = 0.0
     unserved = 0.0
     loss_reasons: dict[str, float] = {}
 
@@ -280,6 +280,7 @@ def _assign_once(
                 car_time=car_time,
                 bike_time=bike_time,
                 transfers=journey.transfers,
+                wait_min=sum(leg.wait_min for leg in journey.legs if leg.kind == "transit"),
                 transit_fare=config.transit_fare,
                 fare_weight=config.choice.transit_fare_weight,
                 route_penalized=any(
@@ -292,6 +293,8 @@ def _assign_once(
 
         weighted_transit_time += transit_trips * transit_time if transit_time is not None else 0.0
         weighted_transfers += transit_trips * journey.transfers
+        journey_wait = sum(leg.wait_min for leg in journey.legs if leg.kind == "transit")
+        weighted_wait += transit_trips * journey_wait
 
         for index, leg in enumerate(journey.legs):
             if leg.kind != "transit" or leg.route_id is None:
@@ -384,12 +387,15 @@ def _classify_demand_loss(
     car_time: float,
     bike_time: float,
     transfers: int,
+    wait_min: float,
     transit_fare: float,
     fare_weight: float,
     route_penalized: bool,
 ) -> str:
     if route_penalized:
         return "crowd"
+    if wait_min > 0.5 * transit_time:
+        return "wait"
     best_alternative = min(walk_time, car_time, bike_time)
     if transit_fare > 0.0 and fare_weight * transit_fare >= 0.5 * transit_time:
         return "price"
