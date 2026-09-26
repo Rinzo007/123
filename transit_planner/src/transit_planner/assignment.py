@@ -135,7 +135,12 @@ def assign_demand(
     router = router or TransitRouter(network)
     zones = zones or {}
     zone_stops = {
-        zone_id: _nearest_stop_id(network, zones[zone_id], config.max_access_distance_m)
+        zone_id: _nearest_stop_id(
+            network,
+            zones[zone_id],
+            config.max_access_distance_m,
+            config.period_id,
+        )
         for zone_id in zones
     }
 
@@ -479,15 +484,33 @@ def _nearest_stop_id(
     network: Network,
     zone: DemandZone,
     max_distance_m: float,
+    period_id: str,
 ) -> str | None:
     best_id: str | None = None
     best_distance = max_distance_m
+
+    stop_access_limits: dict[str, float] = {}
+    for service in network.services.values():
+        if service.headway_by_period.get(period_id) is None:
+            continue
+        route = network.routes[service.route_id]
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        for stop_id in route.stop_ids:
+            stop_access_limits[stop_id] = max(
+                stop_access_limits.get(stop_id, 0.0),
+                profile.access_m,
+            )
+
     for stop in network.stops.values():
+        mode_access = stop_access_limits.get(stop.id, 0.0)
+        allowed_distance = min(max_distance_m, mode_access)
+        if allowed_distance <= 0.0:
+            continue
         distance = sqrt(
             (stop.location.x - zone.centroid_x) ** 2
             + (stop.location.y - zone.centroid_y) ** 2
         )
-        if distance <= best_distance:
+        if distance <= allowed_distance and distance <= best_distance:
             best_distance = distance
             best_id = stop.id
     return best_id
