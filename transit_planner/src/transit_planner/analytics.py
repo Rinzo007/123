@@ -110,11 +110,12 @@ def analyze_network(
 
     sections: list[SectionAnalytics] = []
     passenger_km = 0.0
+    segment_index_by_route: dict[tuple[str, str, str], int] = {}
     for item in assignment.section_loads:
-        distance_km = _stop_distance_km(
-            network.stops[item.from_stop_id],
-            network.stops[item.to_stop_id],
-        )
+        key = (item.route_id, item.from_stop_id, item.to_stop_id)
+        route = network.routes[item.route_id]
+        segment_index = _segment_index(route, segment_index_by_route, item.from_stop_id, item.to_stop_id)
+        distance_km = network.route_segment_length_km(route, segment_index)
         passenger_km += item.passengers * distance_km
         sections.append(
             SectionAnalytics(
@@ -148,6 +149,24 @@ def analyze_network(
         sections=tuple(sections),
         accessibility=accessibility,
         services=services,
+    )
+
+
+def _segment_index(
+    route,
+    cache: dict[tuple[str, str, str], int],
+    from_stop_id: str,
+    to_stop_id: str,
+) -> int:
+    key = (route.id, from_stop_id, to_stop_id)
+    if key in cache:
+        return cache[key]
+    for index, pair in enumerate(route.segment_pairs()):
+        if pair == (from_stop_id, to_stop_id):
+            cache[key] = index
+            return index
+    raise ValueError(
+        f"Section {from_stop_id}->{to_stop_id} is not present on route {route.id}"
     )
 
 
@@ -218,13 +237,6 @@ def calculate_accessibility(
         jobs_total=jobs_total,
         jobs_covered=jobs_covered,
     )
-
-
-def _stop_distance_km(left, right) -> float:
-    return sqrt(
-        (left.location.x - right.location.x) ** 2
-        + (left.location.y - right.location.y) ** 2
-    ) / 1000.0
 
 
 def _share(numerator: float, denominator: float) -> float:
