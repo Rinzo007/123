@@ -1,8 +1,8 @@
 from transit_planner.city import DemandZone
 from transit_planner.reference_demand import (
-    build_reference_daily_demand,
-    build_reference_demand_layers,
-    generate_reference_purpose_layer,
+    build_daily_demand,
+    build_demand_layers,
+    generate_purpose_layer,
 )
 from transit_planner.reference_model import (
     CROWDED_LOAD_RATIO,
@@ -52,7 +52,7 @@ def test_reference_demand_layer_creates_both_directions_and_periods():
         DemandZone("d", 1000, 0, purpose_attractions=(("shop", 100),)),
     )
     rule = next(rule for rule in REFERENCE_PURPOSE_LAYERS if rule.key == "shop")
-    result = generate_reference_purpose_layer(zones, purpose=rule)
+    result = generate_purpose_layer(zones, purpose=rule)
 
     assert result.purpose == "shop"
     assert result.demand.by_period("am")
@@ -65,8 +65,8 @@ def test_reference_layers_and_daily_adapter_are_composable():
         DemandZone("o", 0, 0, population=1000),
         DemandZone("d", 1000, 0, purpose_attractions=(("night", 100),)),
     )
-    layers = build_reference_demand_layers(zones)
-    daily = build_reference_daily_demand(zones)
+    layers = build_demand_layers(zones)
+    daily = build_daily_demand(zones)
 
     assert len(layers.layers) == 5
     assert daily.total_trips_per_day > 0
