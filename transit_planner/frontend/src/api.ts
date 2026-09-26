@@ -238,3 +238,19 @@ export function loadDemandStreets(
     return response.json() as Promise<GeoJSON.FeatureCollection>;
   });
 }
+export function loadPopulationZones(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<GeoJSON.FeatureCollection> {
+  return loadGeoJson(
+    "/api/v1/demand/population-zones",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  );
+}
