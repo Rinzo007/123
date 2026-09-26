@@ -40,7 +40,7 @@ def gravity_od(
     if not zones or total_attraction <= 0:
         return DemandMatrix(())
 
-    raw: list[tuple[str, str, float]] = []
+    raw: list[tuple[str, str, float, float]] = []
     for origin in zones:
         for destination in zones:
             distance_m = _distance_m(origin, destination)
@@ -51,14 +51,21 @@ def gravity_od(
             )
             friction = exp(-parameters.decay * impedance_minutes)
             weight = attraction_base[destination.id] * friction
-            raw.append((origin.id, destination.id, weight))
+            raw.append(
+            (
+                origin.id,
+                destination.id,
+                weight,
+                impedance_minutes,
+            )
+        )
 
     pairs: list[ODPairDemand] = []
     by_origin: dict[str, float] = {}
-    for origin_id, _, weight in raw:
+    for origin_id, _, weight, _base_time_min in raw:
         by_origin[origin_id] = by_origin.get(origin_id, 0.0) + weight
 
-    for origin_id, destination_id, weight in raw:
+    for origin_id, destination_id, weight, base_time_min in raw:
         total = by_origin[origin_id]
         trips = (
             0.0
@@ -70,7 +77,7 @@ def gravity_od(
                 origin_id,
                 destination_id,
                 trips,
-                base_time_min=impedance_minutes,
+                base_time_min=base_time_min,
             )
         )
 
