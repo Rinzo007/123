@@ -447,13 +447,17 @@ def _adjust_connection_waits(
     active_route_id: str | None = None
     active_service_id: str | None = None
     upstream_run = 0.0
+    transfer_walk = 0.0
+
     for leg in legs:
+        if leg.kind == "walk":
+            result.append(leg)
+            if active_route_id is not None:
+                transfer_walk += leg.duration_min
+            continue
+
         if leg.kind != "transit" or leg.route_id is None:
             result.append(leg)
-            if leg.kind == "walk":
-                active_route_id = None
-                active_service_id = None
-                upstream_run = 0.0
             continue
 
         wait = leg.wait_min
@@ -470,27 +474,50 @@ def _adjust_connection_waits(
                     wait = average_connection_wait_minutes(
                         upstream_h,
                         downstream_h,
-                        upstream_offset=upstream_service.departure_offset_by_period.get(period_id, 0.0)
-                        + upstream_service.phase_by_period.get(period_id, 0.0),
-                        downstream_offset=downstream_service.departure_offset_by_period.get(period_id, 0.0)
-                        + downstream_service.phase_by_period.get(period_id, 0.0),
+                        upstream_offset=(
+                            upstream_service.departure_offset_by_period.get(
+                                period_id,
+                                0.0,
+                            )
+                            + upstream_service.phase_by_period.get(
+                                period_id,
+                                0.0,
+                            )
+                        ),
+                        downstream_offset=(
+                            downstream_service.departure_offset_by_period.get(
+                                period_id,
+                                0.0,
+                            )
+                            + downstream_service.phase_by_period.get(
+                                period_id,
+                                0.0,
+                            )
+                        ),
                         upstream_run_time=upstream_run,
                         mode_jitter_s=upstream_profile.jitter_s,
+                        walk_time_min=transfer_walk,
                     ) or wait
-        updated = JourneyLeg(
-            leg.kind,
-            leg.from_id,
-            leg.to_id,
-            leg.duration_min,
-            leg.route_id,
-            wait,
-            leg.service_id,
+
+        result.append(
+            JourneyLeg(
+                leg.kind,
+                leg.from_id,
+                leg.to_id,
+                leg.duration_min,
+                leg.route_id,
+                wait,
+                leg.service_id,
+            )
         )
-        result.append(updated)
+
         if active_route_id != leg.route_id:
             active_route_id = leg.route_id
             active_service_id = leg.service_id
             upstream_run = leg.duration_min
         else:
             upstream_run += leg.duration_min
+        transfer_walk = 0.0
+
     return tuple(result)
+
