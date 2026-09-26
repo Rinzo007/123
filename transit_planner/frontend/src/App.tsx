@@ -153,6 +153,7 @@ function routeGeoJSON(
 export function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const loadInputRef = useRef<HTMLInputElement | null>(null);
   const drawModeRef = useRef(false);
   const [drawMode, setDrawMode] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([]);
@@ -172,6 +173,8 @@ export function App() {
   const [showPlaces, setShowPlaces] = useState(true);
   const [showConnectors, setShowConnectors] = useState(false);
   const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
+  const [stopHistory, setStopHistory] = useState<StopDraft[][]>([]);
+  const [stopFuture, setStopFuture] = useState<StopDraft[][]>([]);
 
   useEffect(() => {
     drawModeRef.current = drawMode;
@@ -195,15 +198,7 @@ export function App() {
 
       const id = `stop-${Date.now()}-${Math.round(event.lngLat.lng * 1000)}`;
       setRoadRoute(null);
-      setStops((current) => [
-        ...current,
-        {
-          id,
-          name: `Остановка ${current.length + 1}`,
-          lon: event.lngLat.lng,
-          lat: event.lngLat.lat,
-        },
-      ]);
+      commitStops((current) => [...current, { id, name: `Остановка ${current.length + 1}`, lon: event.lngLat.lng, lat: event.lngLat.lat }]);
     };
 
     const handleLoad = () => {
@@ -369,14 +364,49 @@ export function App() {
     [network],
   );
 
+  function commitStops(update: StopDraft[] | ((current: StopDraft[]) => StopDraft[])) {
+    setStops((current) => {
+      const next = typeof update === "function" ? update(current) : update;
+      if (JSON.stringify(current) === JSON.stringify(next)) return current;
+      setStopHistory((history) => [...history, current].slice(-30));
+      setStopFuture([]);
+      return next;
+    });
+  }
+
+  function undoStops() {
+    setStopHistory((history) => {
+      if (history.length === 0) return history;
+      const previous = history[history.length - 1];
+      setStops((current) => {
+        setStopFuture((future) => [...future, current].slice(-30));
+        return previous;
+      });
+      return history.slice(0, -1);
+    });
+    setRoadRoute(null);
+  }
+
+  function redoStops() {
+    setStopFuture((future) => {
+      if (future.length === 0) return future;
+      const next = future[future.length - 1];
+      setStops((current) => {
+        setStopHistory((history) => [...history, current].slice(-30));
+        return next;
+      });
+      return future.slice(0, -1);
+    });
+    setRoadRoute(null);
+  }
   function removeStop(stopId: string) {
     setRoadRoute(null);
-    setStops((current) => current.filter((stop) => stop.id !== stopId));
+    commitStops((current) => current.filter((stop) => stop.id !== stopId));
   }
 
   function clearRoute() {
     setRoadRoute(null);
-    setStops([]);
+    commitStops([]);
     setMessage("Маршрут очищен");
   }
 
@@ -476,7 +506,16 @@ export function App() {
     }
   }
   function exportJson() {
-    const blob = new Blob([JSON.stringify(network, null, 2)], {
+    const project = {
+      format: "transit-planner-project",
+      version: 1,
+      routeName,
+      mode,
+      headways,
+      stops,
+      network,
+    };
+    const blob = new Blob([JSON.stringify(project, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -488,6 +527,26 @@ export function App() {
     setMessage("JSON сети экспортирован");
   }
 
+
+  function loadJsonFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const project = JSON.parse(String(reader.result));
+        if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
+        setRouteName(String(project.routeName ?? "Новый маршрут"));
+        setMode((project.mode ?? "bus") as TransitMode);
+        setHeadways({ ...headways, ...(project.headways ?? {}) });
+        commitStops(Array.isArray(project.stops) ? project.stops : []);
+        setRoadRoute(null);
+        setTimetable(null);
+        setMessage("Проект загружен");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Не удалось загрузить проект");
+      }
+    };
+    reader.readAsText(file);
+  }
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -517,7 +576,7 @@ export function App() {
           <button onClick={validate} disabled={busy || stops.length < 2}>
             Проверить сеть
           </button>
-          <button onClick={exportJson}>Экспорт JSON</button>
+          <button onClick={exportJson}>Сохранить</button><button onClick={() => loadInputRef.current?.click()}>Открыть</button><button onClick={undoStops} disabled={stopHistory.length === 0}>↶</button><button onClick={redoStops} disabled={stopFuture.length === 0}>↷</button><input ref={loadInputRef} type="file" accept="application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) loadJsonFile(file); event.currentTarget.value = ""; }} />
         </div>
       </header>
 
