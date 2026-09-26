@@ -52,6 +52,7 @@ def test_mode_profiles_expose_capacity_dwell_and_row_cost():
 
 def test_reference_generalized_cost_defaults():
     assert REFERENCE_TRANSFER.base_s == 405.0
+    assert REFERENCE_TRANSFER.per_m_s == 0.25
     assert REFERENCE_CAR.cost_per_km_eur == 0.25
     assert REFERENCE_CAR.parking_s == 240.0
     assert REFERENCE_MOBILITY.two_wheel_speed_kph == 15.12
