@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .data import ConnectorRecord, RoadRecord
 from .network import Stop
-from .places import CityPlace
+from .places import CityPlace, PlacePurposeMapper
 from .geo import Point
 from .projection import project_local_point_wgs84
 
@@ -102,6 +102,11 @@ def places_to_geojson(places: tuple[CityPlace, ...]) -> dict:
                     "basic_category": place.basic_category,
                     "taxonomy_primary": place.taxonomy_primary,
                     "importance": place.importance,
+                    "purpose": (
+                        purpose.value
+                        if (purpose := PlacePurposeMapper().purpose_for(place)) is not None
+                        else None
+                    ),
                 },
             }
             for place in places
@@ -118,18 +123,11 @@ def zones_to_geojson(zones, *, origin_lon: float = 0.0, origin_lat: float = 0.0)
                 "id": zone.id,
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [
-                        project_local_point_wgs84(
-                            Point(zone.centroid_x, zone.centroid_y),
-                            origin_lon=origin_lon,
-                            origin_lat=origin_lat,
-                        ).x,
-                        project_local_point_wgs84(
-                            Point(zone.centroid_x, zone.centroid_y),
-                            origin_lon=origin_lon,
-                            origin_lat=origin_lat,
-                        ).y,
-                    ],
+                    "coordinates": _zone_wgs84_coordinates(
+                        zone,
+                        origin_lon=origin_lon,
+                        origin_lat=origin_lat,
+                    ),
                 },
                 "properties": {
                     "id": zone.id,
@@ -141,3 +139,12 @@ def zones_to_geojson(zones, *, origin_lon: float = 0.0, origin_lat: float = 0.0)
             for zone in zones
         ],
     }
+
+
+def _zone_wgs84_coordinates(zone, *, origin_lon: float, origin_lat: float) -> list[float]:
+    point = project_local_point_wgs84(
+        Point(zone.centroid_x, zone.centroid_y),
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    return [point.x, point.y]
