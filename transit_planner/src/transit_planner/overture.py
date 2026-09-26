@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .data import RoadRecord
+from .data import ConnectorRecord, ConnectorRef, RoadRecord
 from .geo import LineString, Point
 from .network import Stop
 
@@ -16,6 +16,7 @@ class OvertureSource:
     release: str = DEFAULT_RELEASE
     storage_root: str = DEFAULT_S3_ROOT
     transportation_glob: str | None = None
+    connector_glob: str | None = None
     infrastructure_glob: str | None = None
 
     def transportation_segments(self) -> str:
@@ -23,7 +24,15 @@ class OvertureSource:
             return self.transportation_glob
         return (
             f"{self.storage_root}/{self.release}/"
-            "theme=transportation/type=segment/*.parquet"
+            "theme=transportation/type=segment/*"
+        )
+
+    def transportation_connectors(self) -> str:
+        if self.connector_glob:
+            return self.connector_glob
+        return (
+            f"{self.storage_root}/{self.release}/"
+            "theme=transportation/type=connector/*"
         )
 
     def infrastructure(self) -> str:
@@ -31,12 +40,12 @@ class OvertureSource:
             return self.infrastructure_glob
         return (
             f"{self.storage_root}/{self.release}/"
-            "theme=base/type=infrastructure/*.parquet"
+            "theme=base/type=infrastructure/*"
         )
 
 
 class OvertureTransportationProvider:
-    """Read Overture transportation road segments through DuckDB."""
+    """Read Overture transportation segments including native connector refs."""
 
     def __init__(
         self,
@@ -63,9 +72,17 @@ class OvertureTransportationProvider:
         rows = _query_duckdb(self._sql())
         roads: list[RoadRecord] = []
 
-        for road_id, geojson, segment_class, subclass, oneway in rows:
+        for (
+            road_id,
+            geojson,
+            segment_class,
+            subclass,
+            oneway,
+            connector_refs,
+        ) in rows:
             if not geojson:
                 continue
+
             geometry = json.loads(geojson)
             coordinates = geometry.get("coordinates") or []
             if len(coordinates) < 2:
@@ -75,7 +92,9 @@ class OvertureTransportationProvider:
                 Point(float(x), float(y))
                 for x, y, *_ in coordinates
             )
+            refs = _parse_connector_refs(connector_refs)
             road_type = str(segment_class or subclass or "unknown")
+
             roads.append(
                 RoadRecord(
                     id=f"overture:{road_id}",
@@ -83,6 +102,7 @@ class OvertureTransportationProvider:
                     speed_kph=_class_speed(road_type),
                     road_type=road_type,
                     oneway=bool(oneway),
+                    connectors=refs,
                 )
             )
 
@@ -101,7 +121,8 @@ class OvertureTransportationProvider:
                 ST_AsGeoJSON(geometry) AS geojson,
                 class,
                 subclass,
-                FALSE AS oneway
+                FALSE AS oneway,
+                connectors
             FROM read_parquet('{_sql_quote(self.source.transportation_segments())}')
             WHERE subtype = 'road'
               AND (
@@ -112,12 +133,55 @@ class OvertureTransportationProvider:
         """
 
 
-class OvertureTransitProvider:
-    """Read Overture base-theme transit infrastructure.
+class OvertureConnectorProvider:
+    """Read Overture transportation connector points."""
 
-    Overture deliberately puts bus stops, platforms, stations and similar
-    intermediate waypoints in base/infrastructure with subtype='transit'.
-    """
+    def __init__(
+        self,
+        *,
+        source: OvertureSource = OvertureSource(),
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> None:
+        self.source = source
+        self.bbox = bbox
+
+    def load_connectors(self) -> tuple[ConnectorRecord, ...]:
+        rows = _query_duckdb(self._sql())
+        connectors: list[ConnectorRecord] = []
+
+        for connector_id, geojson in rows:
+            if not geojson:
+                continue
+            geometry = json.loads(geojson)
+            coordinates = geometry.get("coordinates") or []
+            if len(coordinates) < 2:
+                continue
+            connectors.append(
+                ConnectorRecord(
+                    id=str(connector_id),
+                    location=Point(
+                        float(coordinates[0]),
+                        float(coordinates[1]),
+                    ),
+                )
+            )
+
+        return tuple(connectors)
+
+    def _sql(self) -> str:
+        bbox_filter = _bbox_sql(self.bbox)
+        return f"""
+            SELECT
+                id,
+                ST_AsGeoJSON(geometry) AS geojson
+            FROM read_parquet('{_sql_quote(self.source.transportation_connectors())}')
+            WHERE TRUE
+              {bbox_filter}
+        """
+
+
+class OvertureTransitProvider:
+    """Read Overture base-theme transit infrastructure."""
 
     TRANSIT_CLASSES = (
         "bus_stop",
@@ -221,6 +285,40 @@ def _bbox_sql(
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _parse_connector_refs(raw) -> tuple[ConnectorRef, ...]:
+    if raw is None:
+        return ()
+
+    refs: list[ConnectorRef] = []
+    for item in raw:
+        connector_id = None
+        at = None
+
+        if isinstance(item, dict):
+            connector_id = item.get("connector_id")
+            at = item.get("at")
+        elif hasattr(item, "keys"):
+            connector_id = item["connector_id"]
+            at = item["at"]
+        elif hasattr(item, "connector_id"):
+            connector_id = item.connector_id
+            at = item.at
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            connector_id, at = item[0], item[1]
+
+        if connector_id is None:
+            continue
+        refs.append(
+            ConnectorRef(
+                connector_id=str(connector_id),
+                at=0.0 if at is None else float(at),
+            )
+        )
+
+    refs.sort(key=lambda ref: ref.at)
+    return tuple(refs)
 
 
 def _class_speed(road_class: str) -> float:
