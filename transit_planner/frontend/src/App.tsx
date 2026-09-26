@@ -146,6 +146,7 @@ export function App() {
   const [cityRoads, setCityRoads] = useState<FeatureCollection | null>(null);
   const [cityConnectors, setCityConnectors] = useState<FeatureCollection | null>(null);
   const [cityStops, setCityStops] = useState<FeatureCollection | null>(null);
+  const [cityPlaces, setCityPlaces] = useState<FeatureCollection | null>(null);
   const [roadRoute, setRoadRoute] = useState<FeatureCollection<LineString, object> | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
@@ -217,6 +218,21 @@ export function App() {
         },
       });
 
+      map.addSource("city-places", {
+        type: "geojson",
+        data: emptyPointCollection(),
+      });
+      map.addLayer({
+        id: "city-place-circles",
+        type: "circle",
+        source: "city-places",
+        paint: {
+          "circle-radius": 3,
+          "circle-color": "#8b5cf6",
+          "circle-opacity": 0.5,
+        },
+      });
+
       map.addSource("city-stops", {
         type: "geojson",
         data: emptyPointCollection(),
@@ -284,13 +300,15 @@ export function App() {
     const cityRoadSource = map.getSource("city-roads") as GeoJSONSource | undefined;
     const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
+    const cityPlaceSource = map.getSource("city-places") as GeoJSONSource | undefined;
 
     routeSource?.setData(roadRoute ?? routeGeoJSON(stops));
     draftStopsSource?.setData(stopsGeoJSON(stops));
     if (cityRoads) cityRoadSource?.setData(cityRoads);
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
-  }, [stops, cityRoads, cityConnectors, cityStops, roadRoute]);
+    if (cityPlaces) cityPlaceSource?.setData(cityPlaces);
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headway),
@@ -359,6 +377,7 @@ export function App() {
       setCityRoads(data.roads);
       setCityConnectors(data.connectors);
       setCityStops(data.stops);
+      setCityPlaces(data.places);
       setMessage(
         `Overture ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`,
       );
@@ -515,6 +534,10 @@ export function App() {
             <div className="metric">
               <span>Коннекторы</span>
               <b>{cityConnectors?.features.length ?? 0}</b>
+            </div>
+            <div className="metric">
+              <span>Места</span>
+              <b>{cityPlaces?.features.length ?? 0}</b>
             </div>
           </section>
 
