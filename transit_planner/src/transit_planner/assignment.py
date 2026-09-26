@@ -239,7 +239,23 @@ def _assign_once(
 
         if journey is None:
             unserved += transit_trips
+            if transit_trips > 0:
+                loss_reasons["no_service"] = loss_reasons.get("no_service", 0.0) + transit_trips
             continue
+
+        lost_trips = max(0.0, trips - transit_trips)
+        if lost_trips > 0:
+            reason = _classify_demand_loss(
+                transit_time=transit_time or 0.0,
+                walk_time=walk_time,
+                car_time=car_time,
+                bike_time=bike_time,
+                transfers=journey.transfers,
+                transit_fare=config.transit_fare,
+                fare_weight=config.mode_choice.transit_fare_weight,
+                route_penalties=route_penalties,
+            )
+            loss_reasons[reason] = loss_reasons.get(reason, 0.0) + lost_trips
 
         weighted_transit_time += transit_trips * transit_time if transit_time is not None else 0.0
         weighted_transfers += transit_trips * journey.transfers
@@ -314,8 +330,34 @@ def _assign_once(
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
         bike_trips=total_bike,
     )
-    return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved)
+    losses = tuple(
+        DemandLoss(reason, trips)
+        for reason, trips in sorted(loss_reasons.items())
+    )
+    return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved, losses)
 
+
+def _classify_demand_loss(
+    *,
+    transit_time: float,
+    walk_time: float,
+    car_time: float,
+    bike_time: float,
+    transfers: int,
+    transit_fare: float,
+    fare_weight: float,
+    route_penalties: dict[str, float],
+) -> str:
+    if any(value > 0.0 for value in route_penalties.values()):
+        return "crowding"
+    best_alternative = min(walk_time, car_time, bike_time)
+    if transit_fare > 0.0 and fare_weight * transit_fare >= 0.5 * transit_time:
+        return "fare"
+    if transfers > 0 and transit_time > best_alternative:
+        return "transfer"
+    if transit_time > best_alternative:
+        return "travel_time"
+    return "mode_competition"
 
 def _section_capacities(
     network: Network,
