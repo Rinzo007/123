@@ -28,6 +28,7 @@ from .places import CityPlace
 from .timetable import generate_service_timetable
 from .zones import generate_zones_from_population_raster
 from .reference_model import REFERENCE_MOBILITY
+from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -271,6 +272,122 @@ def overture_stops(
             detail=f"Overture недоступен: {exc}",
         ) from exc
     return stops_to_geojson(stops)
+
+
+def _scenario_definition_from_payload(payload: dict, *, default_id: str) -> ScenarioDefinition:
+    raw_demand = payload.get("demand", [])
+    pairs = tuple(
+        ODPairDemand(
+            origin_zone_id=str(item["origin_zone_id"]),
+            destination_zone_id=str(item["destination_zone_id"]),
+            trips_per_day=float(item["trips_per_day"]),
+            purpose=str(item.get("purpose", "all")),
+            base_time_min=(
+                None
+                if item.get("base_time_min") is None
+                else float(item["base_time_min"])
+            ),
+        )
+        for item in raw_demand
+    )
+    zones = tuple(
+        DemandZone(
+            id=str(item["id"]),
+            centroid_x=float(item["centroid_x"]),
+            centroid_y=float(item["centroid_y"]),
+            population=float(item.get("population", 0.0)),
+            jobs=float(item.get("jobs", 0.0)),
+            no_car_share=float(
+                item.get("no_car_share", REFERENCE_MOBILITY.no_car_share)
+            ),
+        )
+        for item in payload.get("zones", [])
+    )
+    return ScenarioDefinition(
+        id=str(payload.get("id", default_id)),
+        name=str(payload.get("name", payload.get("id", default_id))),
+        network=network_from_dict(payload["network"]),
+        demand=DemandMatrix(pairs),
+        assignment_config=AssignmentConfig(**payload.get("config", {"period_id": "am"})),
+        zones=zones,
+    )
+
+
+@app.post("/api/v1/scenario/compare")
+def compare_scenario_payload(payload: dict) -> dict:
+    try:
+        base = run_scenario(
+            _scenario_definition_from_payload(
+                payload["base"],
+                default_id="base",
+            )
+        )
+        alternative = run_scenario(
+            _scenario_definition_from_payload(
+                payload["alternative"],
+                default_id="alternative",
+            )
+        )
+        comparison = compare_scenarios(base, alternative)
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Некорректный сценарий: {exc}",
+        ) from exc
+
+    def metrics(run) -> dict:
+        return {
+            "total_trips": run.assignment.metrics.total_trips,
+            "transit_trips": run.assignment.metrics.transit_trips,
+            "car_trips": run.assignment.metrics.car_trips,
+            "walk_trips": run.assignment.metrics.walk_trips,
+            "bike_trips": run.assignment.metrics.bike_trips,
+            "rest_trips": run.assignment.metrics.rest_trips,
+            "transit_share": run.assignment.metrics.transit_share,
+            "average_transit_time_min": run.assignment.metrics.average_transit_time_min,
+            "average_transfers": run.assignment.metrics.average_transfers,
+            "max_load_ratio": run.assignment.max_load_ratio,
+            "passenger_km": run.analytics.passenger_km,
+            "reserved_capital": run.reserved_capital,
+        }
+
+    return {
+        "base": {
+            "scenario_id": base.scenario_id,
+            "name": base.name,
+            "metrics": metrics(base),
+        },
+        "alternative": {
+            "scenario_id": alternative.scenario_id,
+            "name": alternative.name,
+            "metrics": metrics(alternative),
+        },
+        "comparison": {
+            "base_scenario_id": comparison.base_scenario_id,
+            "alternative_scenario_id": comparison.alternative_scenario_id,
+            "metrics": [
+                {
+                    "metric": item.metric,
+                    "base": item.base,
+                    "alternative": item.alternative,
+                    "delta": item.delta,
+                    "relative_delta": item.relative_delta,
+                }
+                for item in comparison.metrics
+            ],
+            "sections": [
+                {
+                    "route_id": item.route_id,
+                    "from_stop_id": item.from_stop_id,
+                    "to_stop_id": item.to_stop_id,
+                    "base_passengers": item.base_passengers,
+                    "alternative_passengers": item.alternative_passengers,
+                    "delta": item.delta,
+                }
+                for item in comparison.sections
+            ],
+        },
+    }
 
 
 @app.post("/api/v1/calibration/route-ridership")
