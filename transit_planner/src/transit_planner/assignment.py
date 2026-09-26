@@ -252,7 +252,6 @@ def _assign_once(
         )
         transit_time = None if journey is None else (
             journey.duration_min
-            + journey_wait
             + journey.transfers * config.transfer_penalty_min
         )
         probs = probabilities(
@@ -439,8 +438,8 @@ def _section_capacity_and_platforms(
         vehicle_capacity = network.vehicle_types[service.vehicle_type_id].capacity or profile.capacity
         scheduled_departures = (period.end_minute - period.start_minute) / headway
 
-        for index, (from_id, to_id) in enumerate(zip(route.stop_ids, route.stop_ids[1:])):
-            track_id = route.track_section_ids[index] if route.track_section_ids else None
+        for index, (from_id, to_id) in enumerate(route.segment_pairs()):
+            track_id = route.track_section_for_segment(index)
             track = network.track_sections.get(track_id) if track_id else None
             if track is None:
                 key = ("route", f"{route.id}:{from_id}:{to_id}")
@@ -489,9 +488,10 @@ def _section_capacity_and_platforms(
             )
             capacity = effective_departures * vehicle_capacity
             forward_key = (route_id, from_id, to_id)
-            reverse_key = (route_id, to_id, from_id)
             capacities[forward_key] = capacities.get(forward_key, 0.0) + capacity
-            capacities[reverse_key] = capacities.get(reverse_key, 0.0) + capacity
+            if network.routes[route_id].both_ways:
+                reverse_key = (route_id, to_id, from_id)
+                capacities[reverse_key] = capacities.get(reverse_key, 0.0) + capacity
 
     return (
         tuple(
