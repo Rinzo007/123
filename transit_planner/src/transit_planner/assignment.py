@@ -520,8 +520,6 @@ def _stop_dwell_seconds(
     period_id: str,
     boardings: float,
 ) -> float:
-    period = network.periods[period_id]
-    duration = period.end_minute - period.start_minute
     total = 0.0
     for service in network.services.values():
         headway = service.headway_by_period.get(period_id)
@@ -531,7 +529,7 @@ def _stop_dwell_seconds(
         if stop_id not in route.stop_ids:
             continue
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
-        departures = ceil(duration / headway)
+        departures = network.service_departures(service, period_id)
         total += departures * profile.dwell_s
         total += boardings * profile.dwell_per_passenger_s
     return total
