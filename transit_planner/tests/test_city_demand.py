@@ -1,7 +1,7 @@
 from transit_planner.city import DemandZone
 from transit_planner.city_demand import CityDemandConfig, build_city_demand
 from transit_planner.geo import Point
-from transit_planner.places import CityPlace, PlacePurpose
+from transit_planner.places import CityPlace
 
 
 def test_build_city_demand_uses_places_and_population():
@@ -23,8 +23,8 @@ def test_build_city_demand_uses_places_and_population():
     )
 
     assert demand.total_trips_per_day > 0
-    assert any(pair.purpose == PlacePurpose.EDUCATION.value for pair in demand.pairs)
-    assert any(pair.purpose == "shopping" for pair in demand.pairs)
+    assert any(pair.purpose == "edu" for pair in demand.pairs)
+    assert any(pair.purpose == "shop" for pair in demand.pairs)
 
 
 def test_city_demand_is_zero_for_empty_population():
