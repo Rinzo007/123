@@ -8,6 +8,7 @@ from .city import DemandZone
 from .network import Network
 from .reference_model import (
     REFERENCE_MODE_PROFILES,
+    headway_unevenness_factor,
     minimum_station_headway_min,
     minimum_track_headway_min,
 )
@@ -76,6 +77,7 @@ class ServiceAnalytics:
     daily_vehicle_km: float
     daily_opex: float
     capacity_per_direction: float
+    effective_headway_min: float = 0.0
     minimum_station_headway_min: float = 0.0
     minimum_headway_min: float = 0.0
     minimum_headway_why: str = "dwell"
@@ -141,7 +143,12 @@ def analyze_network(
         )
 
     services = tuple(
-        _service_analytics(network, service_id, period_id)
+        _service_analytics(
+            network,
+            service_id,
+            period_id,
+            assignment=assignment,
+        )
         for service_id, service in network.services.items()
         for period_id in service.headway_by_period
     )
@@ -190,6 +197,8 @@ def _service_analytics(
     network: Network,
     service_id: str,
     period_id: str,
+    *,
+    assignment: AssignmentResult,
 ) -> ServiceAnalytics:
     service = network.services[service_id]
     route = network.routes[service.route_id]
@@ -197,6 +206,31 @@ def _service_analytics(
     profile = REFERENCE_MODE_PROFILES[route.mode.value]
     headway = service.headway_by_period[period_id]
     departures = network.service_departures(service, period_id)
+    active_route_services = sum(
+        1
+        for candidate in network.services.values()
+        if candidate.route_id == route.id
+        and period_id in candidate.headway_by_period
+    )
+    stop_boardings = ()
+    if active_route_services == 1:
+        boardings_by_stop = {
+            item.stop_id: item.boardings
+            for item in assignment.stop_flows
+        }
+        stop_boardings = tuple(
+            boardings_by_stop.get(stop_id, 0.0)
+            for stop_id in route.stop_ids
+        )
+    period_hours = (period.end_minute - period.start_minute) / 60.0
+    unevenness = headway_unevenness_factor(
+        route.mode.value,
+        headway,
+        period_hours,
+        stop_boardings,
+        route_closed=route.closed,
+        both_ways=route.both_ways,
+    )
     length_km = network.route_length_km(route)
     fleet = max(1, ceil(network.route_cycle_time_min(route) / headway))
     direction_factor = 1.0 if not route.both_ways else 2.0
@@ -232,6 +266,7 @@ def _service_analytics(
         daily_vehicle_km=vehicle_km,
         daily_opex=opex,
         capacity_per_direction=departures * (vehicle.capacity or profile.capacity),
+        effective_headway_min=headway * unevenness,
         minimum_station_headway_min=station_headway,
         minimum_headway_min=minimum_headway,
         minimum_headway_why=headway_why,
