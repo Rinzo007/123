@@ -298,12 +298,49 @@ export function App() {
   );
 
   function removeStop(stopId: string) {
+    setRoadRoute(null);
     setStops((current) => current.filter((stop) => stop.id !== stopId));
   }
 
   function clearRoute() {
+    setRoadRoute(null);
     setStops([]);
     setMessage("Маршрут очищен");
+  }
+
+  async function buildRoadRoute() {
+    const map = mapRef.current;
+    if (!map || stops.length < 2) return;
+    setBusy(true);
+    setMessage("Построение маршрута по Overture…");
+    try {
+      const bounds = map.getBounds();
+      const data = await loadOvertureRoute(
+        stops.map((stop) => ({ lon: stop.lon, lat: stop.lat })),
+        bounds.getSouth(),
+        bounds.getWest(),
+        bounds.getNorth(),
+        bounds.getEast(),
+      );
+      setRoadRoute({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: data.geometry,
+            properties: data.properties,
+          },
+        ],
+      });
+      setMessage(
+        `Маршрут Overture: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`,
+      );
+    } catch (error) {
+      setRoadRoute(null);
+      setMessage(error instanceof Error ? error.message : "Ошибка построения маршрута");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadCityData() {
