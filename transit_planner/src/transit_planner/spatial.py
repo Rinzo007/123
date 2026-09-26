@@ -65,16 +65,8 @@ class GridPointIndex:
 
         if max_radius is not None:
             radius_cells = int(max_radius // self.cell_size) + 1
-            ranges = range(-radius_cells, radius_cells + 1)
-            for dx in ranges:
-                for dy in ranges:
-                    self._scan_cell(
-                        center_x + dx,
-                        center_y + dy,
-                        x,
-                        y,
-                        best_distance,
-                    )
+            for dx in range(-radius_cells, radius_cells + 1):
+                for dy in range(-radius_cells, radius_cells + 1):
                     candidate = self._nearest_in_cell(
                         center_x + dx,
                         center_y + dy,
@@ -145,16 +137,6 @@ class GridPointIndex:
                 best = point
                 best_distance = distance
         return None if best is None else (best, best_distance)
-
-    def _scan_cell(
-        self,
-        cell_x: int,
-        cell_y: int,
-        x: float,
-        y: float,
-        limit: float,
-    ) -> None:
-        return None
 
     def _ring_lower_bound(
         self,
