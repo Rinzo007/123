@@ -129,6 +129,53 @@ class ReferenceModeProfile:
     default_row: TrackRow
 
 
+@dataclass(frozen=True, slots=True)
+class ReferenceTransferProfile:
+    base_s: float = 405.0
+    wait_multiplier: float = 1.0
+    walk_multiplier: float = 1.0
+    rider_bias_s: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.base_s < 0:
+            raise ValueError("base_s cannot be negative")
+        if self.wait_multiplier < 0 or self.walk_multiplier < 0:
+            raise ValueError("transfer multipliers cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceCarProfile:
+    cost_per_km_eur: float = 0.25
+    parking_eur: float = 1.5
+    parking_s: float = 240.0
+    circuity: float = 1.3
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceRestProfile:
+    base_speed_kph: float = 3.6
+    continuous_speed_kph: float = 5.0
+    access_s: float = 420.0
+    wait_s: float = 240.0
+    circuity: float = 1.3
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceMobilityProfile:
+    no_car_share: float = 0.35
+    two_wheel_share: float = 0.30
+    two_wheel_speed_kph: float = 15.12
+    two_wheel_reach_m: float = 7000.0
+    two_wheel_per_km_eur: float = 0.03
+
+
+REFERENCE_VOT_S_PER_EUR = 360.0
+REFERENCE_TRANSFER = ReferenceTransferProfile()
+REFERENCE_CAR = ReferenceCarProfile()
+REFERENCE_REST = ReferenceRestProfile()
+REFERENCE_MOBILITY = ReferenceMobilityProfile()
+
+
 REFERENCE_MODE_PROFILES = {
     "bus": ReferenceModeProfile(
         90, 5.0, 250.0, 20.0, 2.0, 90.0, 60.0, 90.0,
