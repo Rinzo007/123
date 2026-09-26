@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from math import ceil, inf, isfinite, sqrt
+from math import inf, isfinite, sqrt
 
 from .network import Network, Stop, TransitMode
 from .reference_model import REFERENCE_MODE_PROFILES
