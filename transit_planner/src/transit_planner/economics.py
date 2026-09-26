@@ -141,4 +141,11 @@ def _route_capital_cost(
             * track_costs.get(network.track_sections[section_id].track_type, 0.0)
             for section_id in route.track_section_ids
         )
-    return length_km * mode_costs.get(route.mode, 0.0)
+    if route.mode in mode_costs:
+        return length_km * mode_costs[route.mode]
+
+    return sum(
+        network.route_segment_length_km(route, index)
+        * network.route_segment_cost_per_km(route, index)
+        for index in range(len(route.segment_pairs()))
+    )
