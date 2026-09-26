@@ -68,12 +68,12 @@ class NetworkAnalytics:
     average_transfers: float
     max_load_ratio: float
     overloaded_sections: int
-    severe_sections: int
-    extreme_sections: int
     passenger_km: float
     stops: tuple[StopAnalytics, ...]
     sections: tuple[SectionAnalytics, ...]
     accessibility: tuple[AccessibilityResult, ...]
+    severe_sections: int = 0
+    extreme_sections: int = 0
 
 
 def analyze_network(
