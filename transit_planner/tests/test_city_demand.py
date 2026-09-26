@@ -63,3 +63,20 @@ def test_city_temporal_demand_uses_canonical_periods():
     assert {pair.period_id for pair in demand.pairs} <= {
         "early", "am", "mid", "pm", "eve"
     }
+
+
+def test_city_demand_preserves_pair_specific_base_time():
+    zones = (
+        DemandZone("a", 0, 0, population=1000, jobs=100),
+        DemandZone("b", 1000, 0, population=500, jobs=800),
+        DemandZone("c", 3000, 0, population=500, jobs=800),
+    )
+    demand = build_city_demand(zones, ())
+    work = {
+        (pair.origin_zone_id, pair.destination_zone_id): pair.base_time_min
+        for pair in demand.pairs
+        if pair.purpose == "work"
+    }
+    assert work[("a", "b")] is not None
+    assert work[("a", "c")] is not None
+    assert work[("a", "c")] > work[("a", "b")]
