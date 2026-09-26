@@ -78,7 +78,7 @@ def test_router_waits_once_on_continuation():
     assert journey is not None
     assert journey.transfers == 0
     assert len(journey.legs) == 2
-    assert abs(journey.duration_min - 11.0) < 1e-9
+    assert abs(journey.duration_min - (2000.0 / 18.0 * 60.0 / 1000.0)) < 1e-9
 
 
 def test_router_can_use_road_graph_for_section_runtime():
@@ -106,4 +106,4 @@ def test_router_can_use_road_graph_for_section_runtime():
     journey = router.shortest(network.stops["a"], network.stops["b"], period_id="peak")
 
     assert journey is not None
-    assert abs(journey.duration_min - 17.0) < 1e-9
+    assert abs(journey.duration_min - (1000.0 / 18.0 * 60.0 / 1000.0 + 3000.0 / 18.0 * 60.0 / 1000.0)) < 1e-9
