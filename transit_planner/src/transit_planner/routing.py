@@ -149,7 +149,6 @@ class TransitRouter:
                 if board:
                     period = self.network.periods[period_id]
                     wait = _scheduled_wait_minutes(
-                        arrival_minute=period.start_minute + cost,
                         period_start=period.start_minute,
                         period_end=period.end_minute,
                         headway=option.headway,
@@ -157,7 +156,6 @@ class TransitRouter:
                     )
                     if wait is None:
                         continue
-                    wait *= self.config.wait_weight
                 penalty = penalties.get(option.route_id, 0.0) if board else 0.0
                 run = self._run_time_between(
                     stop_id,
@@ -165,7 +163,8 @@ class TransitRouter:
                     option.mode,
                 )
                 next_state = (option.neighbor_stop_id, option.route_id)
-                candidate = cost + wait + run + penalty
+                weighted_wait = wait * self.config.wait_weight
+                candidate = cost + weighted_wait + run + penalty
                 if candidate < best.get(next_state, inf):
                     best[next_state] = candidate
                     previous[next_state] = (
@@ -298,22 +297,24 @@ class TransitRouter:
         }
 
 
+
 def _scheduled_wait_minutes(
     *,
-    arrival_minute: float,
     period_start: int,
     period_end: int,
     headway: float,
     departure_offset: float,
 ) -> float | None:
-    if headway <= 0:
+    """Среднее ожидание для статического назначения спроса.
+
+    Без заданного времени отправления пассажира точное ожидание не определено,
+    поэтому используется среднее ожидание равное половине интервала. Смещение
+    отправлений не меняет среднее значение при равномерном распределении
+    прибытий в течение периода.
+    """
+    if headway <= 0 or period_start >= period_end:
         return None
-
     first_departure = period_start + ((departure_offset - period_start) % headway)
-    if arrival_minute > first_departure:
-        steps = ceil((arrival_minute - first_departure) / headway)
-        first_departure += steps * headway
-
     if first_departure >= period_end:
         return None
-    return max(0.0, first_departure - arrival_minute)
+    return headway / 2.0
