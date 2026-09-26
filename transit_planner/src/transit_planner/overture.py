@@ -472,18 +472,8 @@ def _access_directions(access_restrictions) -> tuple[bool, bool]:
 
 
 def _is_oneway(access_restrictions) -> bool:
-    if not access_restrictions:
-        return False
-    backward_denied = False
-    backward_allowed = False
-    for rule in access_restrictions:
-        if _field(rule, "access_type") == "denied":
-            if _when_has_only_heading(_field(rule, "when"), "backward"):
-                backward_denied = True
-        elif _field(rule, "access_type") == "allowed":
-            if _when_has_only_heading(_field(rule, "when"), "backward"):
-                backward_allowed = True
-    return backward_denied and not backward_allowed
+    forward_allowed, backward_allowed = _access_directions(access_restrictions)
+    return forward_allowed and not backward_allowed
 
 
 def _effective_speed_kph(speed_limits, fallback: float) -> float:
