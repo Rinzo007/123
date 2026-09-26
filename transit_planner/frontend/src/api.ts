@@ -257,6 +257,7 @@ export function loadPopulationZones(
 export interface CityAssignmentResponse {
   data: { zones: number; places: number; od_pairs: number; total_demand_trips: number };
   assignment: AssignmentResponse;
+  economics: EconomicsResult;
   periods: Array<{
     period_id: string;
     demand_trips: number;
@@ -268,6 +269,7 @@ export interface CityAssignmentResponse {
     average_transit_time_min: number;
     average_transfers: number;
     max_load_ratio: number;
+    economics: EconomicsResult;
   }>;
 }
 
@@ -280,6 +282,8 @@ export function calculateCityAssignment(
   originLon: number,
   originLat: number,
   periodId = "am",
+  farePerTransitTrip = 0,
+  annualDays = 365,
 ): Promise<CityAssignmentResponse> {
   return fetch("/api/v1/assignment/city", {
     method: "POST",
@@ -289,6 +293,11 @@ export function calculateCityAssignment(
       origin_lon: originLon,
       origin_lat: originLat,
       config: { period_id: periodId },
+      economics_config: {
+        period_id: periodId,
+        fare_per_transit_trip: Math.max(0, farePerTransitTrip),
+        annual_days: Math.max(1, Math.min(366, Math.round(annualDays))),
+      },
     }),
   }).then(async (response) => {
     if (!response.ok) throw new Error(await response.text() || "Не удалось рассчитать городскую сеть");
