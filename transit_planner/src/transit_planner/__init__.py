@@ -16,6 +16,7 @@ from .assignment import (
     StopFlow,
     assign_demand,
 )
+from .calibration import CalibrationReport, ObservedRouteRidership, calibrate_route_ridership, route_boardings_from_assignment
 from .city import City, DemandZone
 from .data import (
     ConnectorRecord,
@@ -98,6 +99,10 @@ __all__ = [
     "SectionLoad",
     "StopFlow",
     "assign_demand",
+    "CalibrationReport",
+    "ObservedRouteRidership",
+    "calibrate_route_ridership",
+    "route_boardings_from_assignment",
     "City",
     "DemandZone",
     "CityPlace",
@@ -131,6 +136,12 @@ __all__ = [
     "aggregate_place_attractions",
     "TemporalDemandProfile",
     "TripPurpose",
+    "PeriodTimetable",
+    "ServiceTimetable",
+    "connection_wait",
+    "generate_service_timetable",
+    "next_departure",
+    "wait_minutes",
     "PeriodAssignment",
     "TemporalAssignmentResult",
     "assign_temporal_demand",
@@ -163,3 +174,5 @@ __all__ = [
     "SimulationResult",
     "simulate_capacity",
 ]
+
+from .timetable import PeriodTimetable, ServiceTimetable, connection_wait, generate_service_timetable, next_departure, wait_minutes
