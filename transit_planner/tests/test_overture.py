@@ -38,7 +38,7 @@ def test_overture_sql_uses_connectors():
     )
     sql = provider._sql()
     assert "connectors" in sql
-    assert "ST_AsGeoJSON(geometry)" in sql
+    assert "ST_AsGeoJSON(ST_GeomFromWKB(geometry))" in sql
     assert "bbox.xmin" in sql
 
 
@@ -48,7 +48,7 @@ def test_overture_connector_sql():
     )
     sql = provider._sql()
     assert "theme=transportation/type=connector" in sql
-    assert "ST_AsGeoJSON(geometry)" in sql
+    assert "ST_AsGeoJSON(ST_GeomFromWKB(geometry))" in sql
 
 
 def test_overture_transit_sql_filters_transit_classes():
