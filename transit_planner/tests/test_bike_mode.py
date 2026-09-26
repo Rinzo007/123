@@ -2,8 +2,43 @@ from transit_planner.assignment import AssignmentConfig, assign_demand
 from transit_planner.city import DemandZone
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.geo import Point
-from transit_planner.choice import ChoiceConfig
+from transit_planner.choice import ChoiceConfig, utilities
 from transit_planner.network import Network, ServicePeriod, Stop
+
+
+def test_reference_choice_penalizes_wait_and_long_bike_trips():
+    config = ChoiceConfig()
+    no_wait = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=8.0,
+        transit_wait_min=0.0,
+        bike_time_min=12.0,
+        car_distance_km=5.0,
+        bike_distance_km=5.0,
+        config=config,
+    )
+    long_bike = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=8.0,
+        bike_time_min=12.0,
+        car_distance_km=5.0,
+        bike_distance_km=8.0,
+        config=config,
+    )
+    with_wait = utilities(
+        walk_time_min=20.0,
+        car_time_min=10.0,
+        transit_time_min=8.0,
+        transit_wait_min=10.0,
+        bike_time_min=12.0,
+        car_distance_km=5.0,
+        bike_distance_km=5.0,
+        config=config,
+    )
+    assert with_wait.transit < no_wait.transit
+    assert long_bike.bike == float("-inf")
 
 
 def test_assignment_includes_bike_in_mode_split():
