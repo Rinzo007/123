@@ -19,6 +19,9 @@
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
+  import { disposeComputationWorkers, evaluateNetwork } from "./workers";
+  import MapView from "./components/MapView.svelte";
+  import ControlPanel from "./components/ControlPanel.svelte";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
   const MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
