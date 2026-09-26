@@ -9,6 +9,8 @@ import {
   calculateCityAssignment,
   loadDemandStreets,
   loadPopulationZones,
+  compareScenarios,
+  type ScenarioPayload,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
@@ -225,6 +227,13 @@ export function App() {
   const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
   const [stopHistory, setStopHistory] = useState<StopDraft[][]>([]);
   const [stopFuture, setStopFuture] = useState<StopDraft[][]>([]);
+  const [scenarioBase, setScenarioBase] = useState<{
+    network: NetworkPayload;
+    origin: { lon: number; lat: number };
+    destination: { lon: number; lat: number };
+    trips: number;
+  } | null>(null);
+  const [scenarioComparison, setScenarioComparison] = useState<Awaited<ReturnType<typeof compareScenarios>> | null>(null);
 
   useEffect(() => {
     drawModeRef.current = drawMode;
@@ -689,6 +698,86 @@ export function App() {
       setBusy(false);
     }
   }
+  function makeScenarioPayload(
+    id: string,
+    name: string,
+    scenarioNetwork: NetworkPayload,
+    origin: { lon: number; lat: number },
+    destination: { lon: number; lat: number },
+    trips: number,
+  ): ScenarioPayload {
+    const originLon = scenarioNetwork.origin_lon ?? origin.lon;
+    const originLat = scenarioNetwork.origin_lat ?? origin.lat;
+    const zonesGeo = [
+      { id: "scenario-origin", lon: origin.lon, lat: origin.lat },
+      { id: "scenario-destination", lon: destination.lon, lat: destination.lat },
+    ];
+    const zones = zonesGeo.map((zone) => {
+      const point = toLocalMeters(zone.lon, zone.lat, originLon, originLat);
+      return {
+        id: zone.id,
+        centroid_x: point.x,
+        centroid_y: point.y,
+      };
+    });
+    return {
+      id,
+      name,
+      network: scenarioNetwork,
+      demand: [{
+        origin_zone_id: "scenario-origin",
+        destination_zone_id: "scenario-destination",
+        trips_per_day: trips,
+        purpose: "all",
+      }],
+      zones,
+      config: { period_id: "am" },
+    };
+  }
+
+  function captureScenarioBase() {
+    if (stops.length < 2) return;
+    setScenarioBase({
+      network: structuredClone(network),
+      origin: { lon: stops[0].lon, lat: stops[0].lat },
+      destination: { lon: stops[stops.length - 1].lon, lat: stops[stops.length - 1].lat },
+      trips: previewTrips,
+    });
+    setScenarioComparison(null);
+    setMessage("Базовый сценарий зафиксирован");
+  }
+
+  async function compareWithScenarioBase() {
+    if (!scenarioBase || stops.length < 2) return;
+    setBusy(true);
+    setMessage("Сравнение базового и текущего сценариев…");
+    try {
+      const basePayload = makeScenarioPayload(
+        "base",
+        "Базовый сценарий",
+        scenarioBase.network,
+        scenarioBase.origin,
+        scenarioBase.destination,
+        scenarioBase.trips,
+      );
+      const alternativePayload = makeScenarioPayload(
+        "alternative",
+        "Текущий сценарий",
+        network,
+        scenarioBase.origin,
+        scenarioBase.destination,
+        scenarioBase.trips,
+      );
+      const result = await compareScenarios(basePayload, alternativePayload);
+      setScenarioComparison(result);
+      setMessage("Сравнение сценариев завершено");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка сравнения сценариев");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generateTimetable() {
     const service = network.services[0];
     if (!service) return;
@@ -774,6 +863,12 @@ export function App() {
           </button>
           <button onClick={validate} disabled={busy || stops.length < 2}>
             Проверить сеть
+          </button>
+          <button onClick={captureScenarioBase} disabled={busy || stops.length < 2}>
+            Зафиксировать базовый
+          </button>
+          <button onClick={compareWithScenarioBase} disabled={busy || !scenarioBase || stops.length < 2}>
+            Сравнить с базовым
           </button>
           <button onClick={exportJson}>Сохранить</button><button onClick={() => loadInputRef.current?.click()}>Открыть</button><button onClick={undoStops} disabled={stopHistory.length === 0}>↶</button><button onClick={redoStops} disabled={stopFuture.length === 0}>↷</button><input ref={loadInputRef} type="file" accept="application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) loadJsonFile(file); event.currentTarget.value = ""; }} />
         </div>
@@ -943,6 +1038,10 @@ export function App() {
               <span>Проверочный спрос</span>
               <b>{assignmentResult ? `${previewTrips}/сутки` : "—"}</b>
             </div>
+            <div className="metric">
+              <span>Базовый сценарий</span>
+              <b>{scenarioBase ? "зафиксирован" : "—"}</b>
+            </div>
             {assignmentResult && (
               <>
                 <div className="metric">
@@ -1064,6 +1163,40 @@ export function App() {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {scenarioComparison && (
+                <div className="analytics-panel scenario-comparison-panel">
+                  <div className="section-title">
+                    Сравнение сценариев
+                    <span>{scenarioComparison.base.name} → {scenarioComparison.alternative.name}</span>
+                  </div>
+                  <div className="scenario-table-wrap">
+                    <table className="scenario-table">
+                      <thead>
+                        <tr>
+                          <th>Метрика</th>
+                          <th>База</th>
+                          <th>Текущий</th>
+                          <th>Δ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scenarioComparison.comparison.metrics.map((item) => (
+                          <tr key={item.metric}>
+                            <td>{item.metric}</td>
+                            <td>{item.base.toFixed(2)}</td>
+                            <td>{item.alternative.toFixed(2)}</td>
+                            <td>{item.delta >= 0 ? "+" : ""}{item.delta.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="small-label scenario-section-count">
+                    Изменений по участкам: {scenarioComparison.comparison.sections.length}
+                  </div>
                 </div>
               )}
 
