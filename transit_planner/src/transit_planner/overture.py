@@ -126,6 +126,11 @@ class OvertureTransportationProvider:
 
         return tuple(roads)
 
+    def load_graph(self):
+        from .road_builder import build_topological_road_graph
+
+        return build_topological_road_graph(self.load_roads())
+
     def _sql(self) -> str:
         classes = ", ".join(
             "'" + value.replace("'", "''") + "'"
