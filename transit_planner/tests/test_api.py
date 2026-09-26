@@ -11,3 +11,4 @@ def test_api_has_core_routes():
     assert "/api/v1/data/overture/route" in paths
     assert "/api/v1/data/overture/roads" in paths
     assert "/api/v1/data/overture/connectors" in paths
+    assert "/api/v1/scenario/compare" in paths
