@@ -5,6 +5,7 @@ from transit_planner.overture import (
     OvertureConnectorProvider,
     OvertureSource,
     OvertureTransitProvider,
+    OverturePlacesProvider,
     OvertureTransportationProvider,
     _access_directions,
     _effective_speed_kph,
@@ -160,3 +161,29 @@ def test_access_direction_parser_handles_forward_backward_and_global_denials():
         {"access_type": "denied"},
         {"access_type": "allowed", "when": {"heading": "forward"}},
     ]) == (True, False)
+
+
+def test_overture_places_uses_current_taxonomy_fields():
+    provider = OverturePlacesProvider(
+        categories=("hospital", "school"),
+    )
+    sql = provider._sql()
+    assert "theme=places/type=place/*" in sql
+    assert "taxonomy.primary" in sql
+    assert "basic_category" in sql
+    assert "categories.primary" not in sql
+
+
+def test_place_purpose_mapper_matches_basic_and_taxonomy_categories():
+    from transit_planner.places import CityPlace, PlacePurpose, PlacePurposeMapper
+
+    mapper = PlacePurposeMapper()
+    assert mapper.purpose_for(
+        CityPlace("1", "School", Point(0, 0), basic_category="school")
+    ) == PlacePurpose.EDUCATION
+    assert mapper.purpose_for(
+        CityPlace("2", "Hospital", Point(0, 0), taxonomy_primary="hospital")
+    ) == PlacePurpose.HEALTH
+    assert mapper.purpose_for(
+        CityPlace("3", "Unknown", Point(0, 0), basic_category="unknown")
+    ) is None
