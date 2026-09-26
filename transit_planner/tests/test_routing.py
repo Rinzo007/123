@@ -51,3 +51,45 @@ def test_router_uses_metric_geometry_for_run_time():
     transit_legs = [leg for leg in journey.legs if leg.kind == "transit"]
     assert transit_legs
     assert 0.0 <= transit_legs[0].wait_min < 10.0
+
+
+def test_router_respects_one_way_route() -> None:
+    network = make_network()
+    route = Route("one-way", "OW", TransitMode.BUS, ("a", "b"), both_ways=False)
+    network.routes.clear()
+    network.add_route(route)
+    network.services.clear()
+    network.add_service(Service("ow", "one-way", "bus", {"am": 10}))
+
+    router = TransitRouter(network)
+    assert router.shortest(network.stops["a"], network.stops["b"], period_id="am") is not None
+    assert router.shortest(network.stops["b"], network.stops["a"], period_id="am") is None
+
+
+def test_router_closes_circular_route() -> None:
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 2000)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route(
+            "loop",
+            "Loop",
+            TransitMode.TRAM,
+            ("a", "b", "c"),
+            both_ways=False,
+            closed=True,
+        )
+    )
+    network.add_service(Service("loop-service", "loop", "tram", {"am": 10}))
+
+    journey = TransitRouter(network).shortest(
+        network.stops["c"],
+        network.stops["a"],
+        period_id="am",
+    )
+    assert journey is not None
+    assert [(leg.from_id, leg.to_id) for leg in journey.legs if leg.kind == "transit"] == [
+        ("c", "a")
+    ]
