@@ -6,7 +6,7 @@ from math import inf, isfinite, sqrt
 
 from .network import Network, Stop, TransitMode
 from .timetable import average_connection_wait_minutes
-from .reference_model import REFERENCE_MODE_PROFILES
+from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_TRANSFER
 from .road import RoadGraph
 
 
@@ -36,14 +36,18 @@ class RouterConfig:
     default_transit_speed_kph: float = 20.0
     walk_transfer_radius_m: float = 500.0
     wait_weight: float = 1.0
+    transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
+    transfer_walk_multiplier: float = REFERENCE_TRANSFER.walk_multiplier
 
     def __post_init__(self) -> None:
         if self.walking_speed_kph <= 0 or self.default_transit_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
         if self.walk_transfer_radius_m < 0:
             raise ValueError("walk_transfer_radius_m cannot be negative")
-        if self.wait_weight < 0:
-            raise ValueError("wait_weight cannot be negative")
+        if self.wait_weight < 0 or self.transfer_penalty_min < 0:
+            raise ValueError("Wait and transfer penalties cannot be negative")
+        if self.transfer_walk_multiplier < 0:
+            raise ValueError("transfer_walk_multiplier cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,13 +141,18 @@ class TransitRouter:
                 break
 
             for neighbor_id, walk_time in self._walking_neighbors_cache.get(stop_id, ()):
+                transfer_walk = current_route is not None
+                effective_walk_time = (
+                    walk_time * self.config.transfer_walk_multiplier
+                    if transfer_walk else walk_time
+                )
                 next_state: State = (neighbor_id, None)
-                candidate = cost + walk_time
+                candidate = cost + effective_walk_time
                 if candidate < best.get(next_state, inf):
                     best[next_state] = candidate
                     previous[next_state] = (
                         state,
-                        JourneyLeg("walk", stop_id, neighbor_id, walk_time),
+                        JourneyLeg("walk", stop_id, neighbor_id, effective_walk_time),
                     )
                     heappush(queue, (candidate, serial, next_state))
                     serial += 1
@@ -161,7 +170,12 @@ class TransitRouter:
                     )
                     if wait is None:
                         continue
-                penalty = penalties.get(option.route_id, 0.0) if board else 0.0
+                penalty = (
+                    self.config.transfer_penalty_min
+                    + penalties.get(option.route_id, 0.0)
+                    if board and current_route is not None
+                    else penalties.get(option.route_id, 0.0) if board else 0.0
+                )
                 run = self._run_time_between(
                     stop_id,
                     option.neighbor_stop_id,
