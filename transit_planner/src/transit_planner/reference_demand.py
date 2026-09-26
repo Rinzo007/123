@@ -77,7 +77,11 @@ def generate_reference_purpose_layer(
         if not candidates:
             continue
 
-        selected = _select_reference_candidates(candidates, purpose.max_destinations)
+        selected = _select_reference_candidates(
+            candidates,
+            purpose.max_destinations,
+            purpose.attraction_distance_m,
+        )
         total_weight = sum(item[1] for item in selected)
         if total_weight <= 0:
             continue
@@ -146,30 +150,34 @@ def build_reference_daily_demand(
 def _select_reference_candidates(
     candidates: list[tuple[DemandZone, float, float]],
     max_destinations: int,
+    distance_scale_m: float,
 ) -> list[tuple[DemandZone, float, float]]:
-    # The reference model works with four distance bands and keeps up to
-    # roughly K/4 strongest destinations per band.
-    bands = (1.0, 2.5, 6.0, float("inf"))
+    bands = (
+        (0.0, distance_scale_m),
+        (distance_scale_m, 2.5 * distance_scale_m),
+        (2.5 * distance_scale_m, 6.0 * distance_scale_m),
+        (6.0 * distance_scale_m, float("inf")),
+    )
     per_band = max(1, round(max_destinations / len(bands)))
     selected: list[tuple[DemandZone, float, float]] = []
-    lower = 0.0
 
-    for upper in bands:
+    for lower, upper in bands:
         band = [
             item
             for item in candidates
-            if lower * candidates[0][2] <= 0  # keeps mypy from inferring an empty closure
+            if lower <= item[2] < upper
         ]
-        # Rebuild using the purpose-independent distance thresholds from the
-        # candidate distances themselves: D0, 2.5*D0, 6*D0.
-        lower_distance = 0.0 if lower == 0 else lower * candidates[0][2] / candidates[0][2]
-        if upper == float("inf"):
-            band = candidates if lower == 6.0 else []
-        selected.extend(band[:0])
-        lower = upper
+        band.sort(key=lambda item: (-item[1], item[2], item[0].id))
+        selected.extend(band[:per_band])
 
-    # Simpler and deterministic K-best fallback after banding.
-    return sorted(
-        candidates,
-        key=lambda item: (-item[1], item[2], item[0].id),
-    )[:max_destinations]
+    if len(selected) < max_destinations:
+        existing = {item[0].id for item in selected}
+        remainder = [
+            item
+            for item in candidates
+            if item[0].id not in existing
+        ]
+        remainder.sort(key=lambda item: (-item[1], item[2], item[0].id))
+        selected.extend(remainder[: max_destinations - len(selected)])
+
+    return selected[:max_destinations]
