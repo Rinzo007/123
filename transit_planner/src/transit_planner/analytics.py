@@ -235,7 +235,6 @@ def _service_analytics(
         boardings_per_hour=service_boardings_per_hour,
     )
     track_headways: list[float] = []
-    own_tph = 60.0 / headway
     for section_id in route.track_section_ids:
         section = network.track_sections.get(section_id)
         if section is None:
