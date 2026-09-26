@@ -4,18 +4,39 @@
 
 Ни один модуль нового ядра не импортирует od/, passenger_flow/, routes.py, models.py или другие старые компоненты репозитория.
 
-## P2: дорожный граф
-GeoJSON / OSM / Overture adapter -> RoadRecord -> road_builder -> RoadGraph -> routing algorithms
+## Расчётный поток
 
-## P3: спрос и маршрутизация
-City -> Demand zones -> Gravity OD -> Zone-to-stop access -> TransitRouter -> Journey
+City -> zones -> OD -> mode choice -> route choice -> assignment -> crowding -> analytics
 
 ## P4: распределение спроса
-OD pair -> mode choice -> route choice -> section flows -> capacity -> crowding penalty -> repeated assignment
 
-Каждый цикл использует снимок входного спроса и пересчитывает маршрутные штрафы. Это детерминированный базовый контур, который позднее можно заменить на более производительный MSA/многопроцессный вариант без изменения доменных контрактов.
+OD pair
+-> mode choice
+-> route choice
+-> section flows
+-> capacity
+-> crowding penalty
+-> repeated assignment
+
+Route penalty используется как обратная связь от перегруженного участка к выбору маршрута. Сходимость проверяется по изменению штрафов.
+
+## P5: аналитика
+
+AssignmentResult
+-> stop analytics
+-> section analytics
+-> accessibility
+-> passenger-km
+-> economics
+
+Аналитический слой читает результат моделирования и не изменяет сеть или спрос.
+
+## Производительность
+
+Текущая реализация намеренно проста и детерминирована. Пространственный поиск и маршрутизация пока допускают замены на более быстрые индексы, кэширование и пакетные структуры без изменения внешних контрактов.
 
 ## Порядок разработки
+
 P0 — каркас и границы.
 P1 — доменная модель сети.
 P2 — дорожный граф и городские данные.

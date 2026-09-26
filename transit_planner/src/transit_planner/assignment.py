@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, sqrt
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
@@ -31,6 +31,14 @@ class RouteFlow:
 
 
 @dataclass(frozen=True, slots=True)
+class StopFlow:
+    stop_id: str
+    boardings: float
+    alightings: float
+    transfers: float
+
+
+@dataclass(frozen=True, slots=True)
 class AssignmentMetrics:
     total_trips: float
     transit_trips: float
@@ -46,6 +54,7 @@ class AssignmentResult:
     metrics: AssignmentMetrics
     route_flows: tuple[RouteFlow, ...]
     section_loads: tuple[SectionLoad, ...]
+    stop_flows: tuple[StopFlow, ...]
     unserved_transit_demand: float
     iterations: int
     max_load_ratio: float
@@ -69,7 +78,7 @@ class AssignmentConfig:
             raise ValueError("Speeds must be positive")
         if self.crowding_penalty_min < 0:
             raise ValueError("crowding_penalty_min cannot be negative")
-        if not 0 <= self.crowding_start_ratio:
+        if self.crowding_start_ratio < 0:
             raise ValueError("crowding_start_ratio cannot be negative")
         if self.iterations <= 0:
             raise ValueError("iterations must be positive")
@@ -110,10 +119,7 @@ def assign_demand(
             zone_stops,
             route_penalties,
         )
-        route_target_penalties = _route_crowding_penalties(
-            snapshot.section_loads,
-            config,
-        )
+        route_target_penalties = _route_crowding_penalties(snapshot.section_loads, config)
         max_delta = _max_penalty_delta(route_penalties, route_target_penalties)
         route_penalties = {
             route_id: (
@@ -131,6 +137,7 @@ def assign_demand(
         metrics=snapshot.metrics,
         route_flows=snapshot.route_flows,
         section_loads=snapshot.section_loads,
+        stop_flows=snapshot.stop_flows,
         unserved_transit_demand=snapshot.unserved,
         iterations=converged_after,
         max_load_ratio=max(
@@ -145,6 +152,7 @@ class _FlowSnapshot:
     metrics: AssignmentMetrics
     route_flows: tuple[RouteFlow, ...]
     section_loads: tuple[SectionLoad, ...]
+    stop_flows: tuple[StopFlow, ...]
     unserved: float
 
 
@@ -161,6 +169,9 @@ def _assign_once(
     section_capacity = _section_capacities(network, config.period_id)
     route_boardings: dict[str, float] = {}
     route_traversals: dict[str, float] = {}
+    stop_boardings: dict[str, float] = {}
+    stop_alightings: dict[str, float] = {}
+    stop_transfers: dict[str, float] = {}
     total_transit = total_car = total_walk = 0.0
     weighted_transit_time = weighted_transfers = 0.0
     unserved = 0.0
@@ -209,30 +220,44 @@ def _assign_once(
         total_walk += walk_trips
 
         if journey is None:
-            # "Unserved" here means transit-attracted demand with no available
-            # path. It can be non-zero only when a caller supplies its own
-            # unavailable-transit choice model in a future iteration.
             unserved += transit_trips
             continue
 
         weighted_transit_time += transit_trips * journey.duration_min
         weighted_transfers += transit_trips * journey.transfers
 
-        active_route: str | None = None
-        for leg in journey.legs:
+        for index, leg in enumerate(journey.legs):
             if leg.kind != "transit" or leg.route_id is None:
-                active_route = None
                 continue
+
             key = (leg.route_id, leg.from_id, leg.to_id)
             section_flow[key] = section_flow.get(key, 0.0) + transit_trips
-            route_traversals[leg.route_id] = (
-                route_traversals.get(leg.route_id, 0.0) + transit_trips
+            route_traversals[leg.route_id] = route_traversals.get(leg.route_id, 0.0) + transit_trips
+
+            previous_leg = journey.legs[index - 1] if index else None
+            next_leg = journey.legs[index + 1] if index + 1 < len(journey.legs) else None
+            previous_same_route = (
+                previous_leg is not None
+                and previous_leg.kind == "transit"
+                and previous_leg.route_id == leg.route_id
             )
-            if active_route != leg.route_id:
-                route_boardings[leg.route_id] = (
-                    route_boardings.get(leg.route_id, 0.0) + transit_trips
-                )
-            active_route = leg.route_id
+            next_same_route = (
+                next_leg is not None
+                and next_leg.kind == "transit"
+                and next_leg.route_id == leg.route_id
+            )
+
+            if not previous_same_route:
+                route_boardings[leg.route_id] = route_boardings.get(leg.route_id, 0.0) + transit_trips
+                stop_boardings[leg.from_id] = stop_boardings.get(leg.from_id, 0.0) + transit_trips
+
+                if previous_leg is not None and previous_leg.kind == "walk":
+                    stop_transfers[leg.from_id] = stop_transfers.get(leg.from_id, 0.0) + transit_trips
+
+            if not next_same_route:
+                stop_alightings[leg.to_id] = stop_alightings.get(leg.to_id, 0.0) + transit_trips
+                if next_leg is not None and next_leg.kind == "walk":
+                    stop_transfers[leg.to_id] = stop_transfers.get(leg.to_id, 0.0) + transit_trips
 
     section_loads = tuple(
         SectionLoad(
@@ -252,6 +277,15 @@ def _assign_once(
         )
         for route_id in network.routes
     )
+    stop_flows = tuple(
+        StopFlow(
+            stop_id=stop_id,
+            boardings=stop_boardings.get(stop_id, 0.0),
+            alightings=stop_alightings.get(stop_id, 0.0),
+            transfers=stop_transfers.get(stop_id, 0.0),
+        )
+        for stop_id in network.stops
+    )
 
     total = demand.total_trips_per_day
     metrics = AssignmentMetrics(
@@ -267,7 +301,7 @@ def _assign_once(
             0.0 if total_transit <= 0 else weighted_transfers / total_transit
         ),
     )
-    return _FlowSnapshot(metrics, route_flows, section_loads, unserved)
+    return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved)
 
 
 def _section_capacities(
@@ -292,7 +326,10 @@ def _section_capacities(
             capacities[key] = capacities.get(key, 0.0) + capacity
             capacities[reverse_key] = capacities.get(reverse_key, 0.0) + capacity
 
-    return tuple((route_id, from_id, to_id, cap) for (route_id, from_id, to_id), cap in capacities.items())
+    return tuple(
+        (route_id, from_stop_id, to_stop_id, capacity)
+        for (route_id, from_stop_id, to_stop_id), capacity in capacities.items()
+    )
 
 
 def _route_crowding_penalties(
@@ -329,14 +366,10 @@ def _resolve_stop(network: Network, identifier: str) -> str | None:
     return identifier if identifier in network.stops else None
 
 
-def _distance_between_zones(
-    pair: ODPairDemand,
-    zones: dict[str, DemandZone],
-) -> float:
+def _distance_between_zones(pair: ODPairDemand, zones: dict[str, DemandZone]) -> float:
     origin = zones.get(pair.origin_zone_id)
     destination = zones.get(pair.destination_zone_id)
     if origin is None or destination is None:
-        # Deterministic compatibility fallback for tiny synthetic fixtures.
         return 0.0 if pair.origin_zone_id == pair.destination_zone_id else 1000.0
     return sqrt(
         (origin.centroid_x - destination.centroid_x) ** 2
@@ -344,10 +377,7 @@ def _distance_between_zones(
     )
 
 
-def _max_penalty_delta(
-    left: dict[str, float],
-    right: dict[str, float],
-) -> float:
+def _max_penalty_delta(left: dict[str, float], right: dict[str, float]) -> float:
     keys = set(left) | set(right)
     return max(
         (abs(left.get(key, 0.0) - right.get(key, 0.0)) for key in keys),
