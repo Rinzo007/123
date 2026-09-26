@@ -27,6 +27,18 @@ from .demand import DemandMatrix, ODPairDemand
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
 from .network import Network
 from .od import GravityParameters, gravity_od
+from .demand_profile import (
+    DEFAULT_PERIOD_IDS,
+    DEFAULT_TEMPORAL_DEMAND_PROFILE,
+    PurposeProfile,
+    TemporalDemandProfile,
+    TripPurpose,
+)
+from .temporal_assignment import (
+    PeriodAssignment,
+    TemporalAssignmentResult,
+    assign_temporal_demand,
+)
 from .overture_network import (
     OvertureNetwork,
     OvertureNetworkProvider,
@@ -87,6 +99,14 @@ __all__ = [
     "Network",
     "GravityParameters",
     "gravity_od",
+    "DEFAULT_PERIOD_IDS",
+    "DEFAULT_TEMPORAL_DEMAND_PROFILE",
+    "PurposeProfile",
+    "TemporalDemandProfile",
+    "TripPurpose",
+    "PeriodAssignment",
+    "TemporalAssignmentResult",
+    "assign_temporal_demand",
     "OvertureNetwork",
     "OvertureNetworkProvider",
     "RoadRouteResult",
