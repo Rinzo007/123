@@ -149,6 +149,43 @@ def build_demand_layers(
     )
 
 
+def build_temporal_demand(
+    zones: tuple[DemandZone, ...],
+    *,
+    trip_rate: float = 0.12,
+    decay: float = 0.08,
+    speed_kph: float = 30.0,
+) -> TemporalDemandMatrix:
+    commuter = gravity_od(
+        zones,
+        parameters=GravityParameters(speed_kph=speed_kph, decay=decay),
+        trip_rate=trip_rate,
+    )
+    rows: list[PeriodODPairDemand] = []
+
+    # Gravity OD is the base home-to-destination commuter matrix.
+    # Preserve total daily commuter trips while distributing the matrix over
+    # the canonical five operating periods.
+    commuter_period_share = tuple(
+        (period.outbound_share + period.return_share) / 2.0
+        for period in REFERENCE_PERIODS
+    )
+    for pair in commuter.pairs:
+        for period, share in zip(REFERENCE_PERIODS, commuter_period_share):
+            trips = pair.trips_per_day * share
+            if trips > 0:
+                rows.append(
+                    PeriodODPairDemand(
+                        pair.origin_zone_id,
+                        pair.destination_zone_id,
+                        period.key,
+                        trips,
+                        "work",
+                    )
+                )
+
+    return TemporalDemandMatrix(tuple(rows) + build_demand_layers(zones).combined().pairs)
+
 def build_daily_demand(
     zones: tuple[DemandZone, ...],
     *,
