@@ -20,6 +20,15 @@ from .network import Stop
 
 
 @dataclass(frozen=True, slots=True)
+class RoadRouteResult:
+    edge_ids: tuple[str, ...]
+    geometry: tuple[Point, ...]
+    length_m: float
+    travel_time_min: float
+    snap_distances_m: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class OvertureNetwork:
     roads: tuple[RoadRecord, ...]
     connectors: tuple[ConnectorRecord, ...]
