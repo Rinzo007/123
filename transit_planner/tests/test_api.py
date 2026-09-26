@@ -66,6 +66,12 @@ def test_scenario_compare_endpoint_runs_two_networks():
         item["metric"] == "daily_operating_cost"
         for item in result["comparison"]["metrics"]
     )
+    assert result["comparison"]["services"]
+    assert all(
+        {"riders_delta", "peak_load_factor_delta", "fleet_delta", "effective_headway_delta"}
+        <= set(item)
+        for item in result["comparison"]["services"]
+    )
 
 
 def test_economics_endpoint_calculates_report():
