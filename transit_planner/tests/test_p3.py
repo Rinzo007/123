@@ -95,7 +95,7 @@ def test_router_can_use_road_graph_for_section_runtime():
     graph.add_node(RoadNode(2, 1000, 0))
     graph.add_node(RoadNode(3, 2000, 0))
     graph.add_edge(RoadEdge("e1", 1, 2, 1000, 60))
-    graph.add_edge(RoadEdge("e2", 2, 3, 1000, 30))
+    graph.add_edge(RoadEdge("e2", 2, 3, 3000, 30))
 
     router = TransitRouter(
         network,
@@ -106,4 +106,4 @@ def test_router_can_use_road_graph_for_section_runtime():
     journey = router.shortest(network.stops["a"], network.stops["b"], period_id="peak")
 
     assert journey is not None
-    assert abs(journey.duration_min - (5.0 + 5.0)) < 1e-9
+    assert abs(journey.duration_min - 19.0) < 1e-9
