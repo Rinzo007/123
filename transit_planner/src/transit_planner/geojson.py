@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .data import RoadRecord
+from .data import ConnectorRecord, RoadRecord
 from .network import Stop
 
 
@@ -23,9 +23,38 @@ def roads_to_geojson(roads: tuple[RoadRecord, ...]) -> dict:
                     "speed_kph": road.speed_kph,
                     "road_type": road.road_type,
                     "oneway": road.oneway,
+                    "connector_count": len(road.connectors),
+                    "connector_ids": [
+                        ref.connector_id for ref in road.connectors
+                    ],
                 },
             }
             for road in roads
+        ],
+    }
+
+
+def connectors_to_geojson(
+    connectors: tuple[ConnectorRecord, ...],
+) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": connector.id,
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        connector.location.x,
+                        connector.location.y,
+                    ],
+                },
+                "properties": {
+                    "id": connector.id,
+                },
+            }
+            for connector in connectors
         ],
     }
 
