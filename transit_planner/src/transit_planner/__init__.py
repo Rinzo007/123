@@ -17,7 +17,7 @@ from .assignment import (
     assign_demand,
 )
 from .calibration import CalibrationReport, ObservedRouteRidership, calibrate_route_ridership, route_boardings_from_assignment
-from .city_demand import CityDemandConfig, build_city_demand
+from .city_demand import build_city_daily_demand, build_city_demand, build_city_demand_layers
 from .city import City, DemandZone
 from .data import (
     ConnectorRecord,
@@ -32,13 +32,7 @@ from .economics import EconomicsConfig, EconomicsResult, calculate_economics
 from .places import CityPlace, PlacePurpose, PlacePurposeMapper, aggregate_place_attractions
 from .network import Network, default_service_periods
 from .od import GravityParameters, gravity_od
-from .demand_profile import (
-    DEFAULT_PERIOD_IDS,
-    DEFAULT_TEMPORAL_DEMAND_PROFILE,
-    PurposeProfile,
-    TemporalDemandProfile,
-    TripPurpose,
-)
+from .choice import ChoiceConfig
 from .temporal_assignment import (
     PeriodAssignment,
     TemporalAssignmentResult,
@@ -107,7 +101,9 @@ __all__ = [
     "calibrate_route_ridership",
     "route_boardings_from_assignment",
     "City",
-    "CityDemandConfig",
+    "build_city_demand_layers",
+"build_city_daily_demand",
+"ChoiceConfig",
     "build_city_demand",
     "DemandZone",
     "CityPlace",
@@ -142,12 +138,7 @@ __all__ = [
     "estimate_project_cost",
     "shared_track_departure_capacity",
     "total_reserved_capital",
-    "DEFAULT_PERIOD_IDS",
-    "DEFAULT_TEMPORAL_DEMAND_PROFILE",
-    "PurposeProfile",
     "aggregate_place_attractions",
-    "TemporalDemandProfile",
-    "TripPurpose",
     "PeriodTimetable",
     "ServiceTimetable",
     "connection_wait",
