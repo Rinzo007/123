@@ -11,10 +11,13 @@ class ModeChoiceConfig:
     car_constant: float = 0.0
     walk_constant: float = 0.0
     bike_constant: float = 0.0
+    transit_fare_weight: float = 0.0
 
     def __post_init__(self) -> None:
         if self.scale <= 0:
             raise ValueError("scale must be positive")
+        if self.transit_fare_weight < 0:
+            raise ValueError("transit_fare_weight cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,12 +34,13 @@ def utilities(
     car_time_min: float,
     transit_time_min: float | None,
     bike_time_min: float = float('inf'),
+    transit_fare: float = 0.0,
     config: ModeChoiceConfig = ModeChoiceConfig(),
 ) -> ModeUtilities:
     transit = (
         float("-inf")
         if transit_time_min is None
-        else config.transit_constant - config.scale * transit_time_min
+        else config.transit_constant - config.scale * transit_time_min - config.transit_fare_weight * transit_fare
     )
     return ModeUtilities(
         walk=config.walk_constant - config.scale * walk_time_min,
