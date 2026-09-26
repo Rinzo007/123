@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfile
-
 
 @dataclass(frozen=True, slots=True)
 class ODPairDemand:
@@ -60,43 +58,3 @@ class TemporalDemandMatrix:
         for pair in self.pairs:
             totals[pair.period_id] = totals.get(pair.period_id, 0.0) + pair.trips
         return totals
-
-
-def expand_daily_demand(
-    demand: DemandMatrix,
-    *,
-    profile: TemporalDemandProfile = DEFAULT_TEMPORAL_DEMAND_PROFILE,
-) -> TemporalDemandMatrix:
-    result: list[PeriodODPairDemand] = []
-    for pair in demand.pairs:
-        purpose = pair.purpose
-        if purpose == "all":
-            for purpose_profile in profile.purposes:
-                purpose_trips = pair.trips_per_day * purpose_profile.daily_share
-                for period_id in profile.period_ids:
-                    result.append(
-                        PeriodODPairDemand(
-                            pair.origin_zone_id,
-                            pair.destination_zone_id,
-                            period_id,
-                            purpose_trips * purpose_profile.period_shares[period_id],
-                            purpose_profile.purpose.value,
-                        )
-                    )
-            continue
-
-        purpose_share = profile.purpose_share(purpose)
-        if purpose_share <= 0.0:
-            raise ValueError(f"Unknown or inactive trip purpose: {purpose}")
-
-        for period_id in profile.period_ids:
-            result.append(
-                PeriodODPairDemand(
-                    pair.origin_zone_id,
-                    pair.destination_zone_id,
-                    period_id,
-                    pair.trips_per_day * profile.period_share(purpose, period_id),
-                    purpose,
-                )
-            )
-    return TemporalDemandMatrix(tuple(result))
