@@ -173,3 +173,58 @@ def test_physical_station_links_prevent_duplicate_station_capex() -> None:
     )
 
     assert result.capital_cost == 3 * 3.0
+
+
+def test_reference_row_costs_drive_default_capital_cost():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
+    network.add_service(Service("svc", "r1", "bus", {"peak": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "b", 10),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = calculate_economics(
+        network,
+        assignment,
+        config=EconomicsConfig(period_id="peak"),
+    )
+
+    assert result.capital_cost == 0.4
+
+
+def test_segment_reference_row_overrides_default_mode_row_for_capital_cost():
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("c", "C", Point(2000, 0)))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("peak", 0, 60))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.TRAM,
+            ("a", "b", "c"),
+            row_by_segment=(TrackRow.RESERVED, TrackRow.GRADE),
+        )
+    )
+    network.add_service(Service("svc", "r1", "tram", {"peak": 10}))
+
+    assignment = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("a", "c", 10),)),
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+    )
+    result = calculate_economics(
+        network,
+        assignment,
+        config=EconomicsConfig(period_id="peak"),
+    )
+
+    assert result.capital_cost == 18.0 + 85.0
