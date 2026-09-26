@@ -102,6 +102,7 @@ def generate_zones_from_population_raster(
     jobs_points: Iterable[tuple[float, float, float]] = (),
     origin_lon: float | None = None,
     origin_lat: float | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> tuple[DemandZone, ...]:
     try:
         import rasterio
@@ -119,7 +120,7 @@ def generate_zones_from_population_raster(
             raise ValueError("Population raster must use EPSG:4326")
 
         transform = dataset.transform
-        rows, cols = dataset.height, dataset.width
+        rows, cols = data.shape if 'data' in locals() else (dataset.height, dataset.width)
         center_lon = (
             float(origin_lon)
             if origin_lon is not None
@@ -148,8 +149,21 @@ def generate_zones_from_population_raster(
 
         step_x = max(1, int(round(target_size / max(native_x_m, 1e-9))))
         step_y = max(1, int(round(target_size / max(native_y_m, 1e-9))))
-        data = dataset.read(1, masked=True)
-        raster_transform = transform
+        if bbox is None:
+            window = None
+        else:
+            south, west, north, east = bbox
+            if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
+                raise ValueError("Invalid population raster bbox")
+            window = rasterio.windows.from_bounds(
+                west, south, east, north, transform=transform
+            ).round_offsets().round_lengths()
+        if window is None:
+            data = dataset.read(1, masked=True)
+            raster_transform = transform
+        else:
+            data = dataset.read(1, window=window, masked=True)
+            raster_transform = dataset.window_transform(window)
 
     zones: list[DemandZone] = []
     jobs_points = tuple(jobs_points)
