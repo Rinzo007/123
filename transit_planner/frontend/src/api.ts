@@ -207,7 +207,7 @@ export function calculateAssignment(
   network: NetworkPayload,
   demand: Array<{ origin_zone_id: string; destination_zone_id: string; trips_per_day: number; purpose?: string }>,
   zones: Array<{ id: string; centroid_x: number; centroid_y: number; population?: number; jobs?: number }>,
-  periodId = "morning_peak",
+  periodId = "am",
 ): Promise<AssignmentResponse> {
   return fetch("/api/v1/assignment", {
     method: "POST",
