@@ -216,16 +216,42 @@ def _service_analytics(
         route.mode.value,
         route_closed=route.closed,
     )
-    track_headway = min(
-        (
-            minimum_track_headway_min(
-                network.track_sections[section_id].capacity_departures_per_hour,
+    track_headways: list[float] = []
+    own_tph = 60.0 / headway
+    for section_id in route.track_section_ids:
+        section = network.track_sections.get(section_id)
+        if section is None:
+            continue
+        if section.shared_group is None:
+            track_headways.append(
+                minimum_track_headway_min(
+                    min(
+                        profile.track_capacity_per_hour,
+                        section.capacity_departures_per_hour,
+                    )
+                )
             )
-            for section_id in route.track_section_ids
-            if section_id in network.track_sections
-        ),
-        default=float("inf"),
-    )
+            continue
+        competing_tph = 0.0
+        for candidate in network.services.values():
+            if candidate.id == service.id:
+                continue
+            candidate_headway = candidate.headway_by_period.get(period_id)
+            if candidate_headway is None:
+                continue
+            candidate_route = network.routes[candidate.route_id]
+            if section_id in candidate_route.track_section_ids:
+                competing_tph += 60.0 / candidate_headway
+        available_tph = min(
+            profile.track_capacity_per_hour,
+            section.capacity_departures_per_hour - competing_tph,
+        )
+        track_headways.append(
+            float("inf")
+            if available_tph <= 0.01
+            else 60.0 / available_tph
+        )
+    track_headway = min(track_headways, default=float("inf"))
     if track_headway < station_headway:
         minimum_headway = track_headway
         headway_why = "track"
