@@ -128,6 +128,62 @@ def compare_scenarios(
         ("reserved_capital", base.reserved_capital, alternative.reserved_capital),
         ("bike_trips", base_metrics.bike_trips, alternative_metrics.bike_trips),
     )
+    if base.economics is not None and alternative.economics is not None:
+        base_economics = base.economics
+        alternative_economics = alternative.economics
+        pairs = pairs + (
+            (
+                "daily_vehicle_km",
+                base_economics.daily_vehicle_km,
+                alternative_economics.daily_vehicle_km,
+            ),
+            (
+                "daily_fleet_cost",
+                base_economics.daily_fleet_cost,
+                alternative_economics.daily_fleet_cost,
+            ),
+            (
+                "daily_operating_cost",
+                base_economics.daily_operating_cost,
+                alternative_economics.daily_operating_cost,
+            ),
+            (
+                "daily_fare_revenue",
+                base_economics.daily_fare_revenue,
+                alternative_economics.daily_fare_revenue,
+            ),
+            (
+                "annual_fleet_cost",
+                base_economics.annual_fleet_cost,
+                alternative_economics.annual_fleet_cost,
+            ),
+            (
+                "annual_operating_cost",
+                base_economics.annual_operating_cost,
+                alternative_economics.annual_operating_cost,
+            ),
+            (
+                "annual_fare_revenue",
+                base_economics.annual_fare_revenue,
+                alternative_economics.annual_fare_revenue,
+            ),
+            (
+                "capital_cost",
+                base_economics.capital_cost,
+                alternative_economics.capital_cost,
+            ),
+            (
+                "operating_cost_per_transit_trip",
+                base_economics.operating_cost_per_transit_trip,
+                alternative_economics.operating_cost_per_transit_trip,
+            ),
+            (
+                "revenue_per_transit_trip",
+                base_economics.revenue_per_transit_trip,
+                alternative_economics.revenue_per_transit_trip,
+            ),
+        )
+
     metrics = tuple(
         MetricDelta(metric=name, base=left, alternative=right)
         for name, left, right in pairs
