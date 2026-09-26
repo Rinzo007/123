@@ -92,3 +92,82 @@ def _aggregate_points(
         if min_x <= x < max_x and min_y <= y < max_y:
             total += max(0.0, float(value))
     return total
+
+
+def generate_zones_from_population_raster(
+    raster_path: str,
+    *,
+    cell_size_m: float | None = None,
+    jobs_points: Iterable[tuple[float, float, float]] = (),
+) -> tuple[DemandZone, ...]:
+    try:
+        import rasterio
+    except ImportError as exc:
+        raise RuntimeError(
+            "Population raster support requires the optional 'gis' extra"
+        ) from exc
+
+    with rasterio.open(raster_path) as dataset:
+        if dataset.crs is None:
+            raise ValueError("Population raster must define a CRS")
+        if dataset.crs.to_epsg() != 4326:
+            raise ValueError("Population raster must use EPSG:4326")
+        bounds = dataset.bounds
+        transform = dataset.transform
+        resolution_x = abs(transform.a)
+        resolution_y = abs(transform.e)
+        if cell_size_m is None:
+            cell_size_m = max(resolution_x, resolution_y) * 111_320.0
+        if cell_size_m <= 0:
+            raise ValueError("cell_size_m must be positive")
+
+        from math import ceil
+        rows, cols = dataset.height, dataset.width
+        scale_x = cell_size_m / max(1.0, resolution_x * 111_320.0)
+        scale_y = cell_size_m / max(1.0, resolution_y * 111_320.0)
+        step_x = max(1, int(round(scale_x)))
+        step_y = max(1, int(round(scale_y)))
+
+        data = dataset.read(1, masked=True)
+
+    zones: list[DemandZone] = []
+    jobs_points = tuple(jobs_points)
+    row_index = 0
+    for row_start in range(0, rows, step_y):
+        row_stop = min(rows, row_start + step_y)
+        for col_start in range(0, cols, step_x):
+            col_stop = min(cols, col_start + step_x)
+            window = data[row_start:row_stop, col_start:col_stop]
+            population = float(window.sum()) if window.count() else 0.0
+            if population <= 0.0 and not jobs_points:
+                continue
+
+            left, top = rasterio.transform.xy(
+                transform,
+                row_start,
+                col_start,
+                offset="ul",
+            )
+            right, bottom = rasterio.transform.xy(
+                transform,
+                row_stop - 1,
+                col_stop - 1,
+                offset="lr",
+            )
+            min_x = min(left, right)
+            max_x = max(left, right)
+            min_y = min(bottom, top)
+            max_y = max(bottom, top)
+            jobs = _aggregate_points(jobs_points, min_x, min_y, max_x, max_y)
+            zones.append(
+                DemandZone(
+                    id=f"raster_{row_index:06d}",
+                    centroid_x=(min_x + max_x) / 2.0,
+                    centroid_y=(min_y + max_y) / 2.0,
+                    population=max(0.0, population),
+                    jobs=max(0.0, jobs),
+                )
+            )
+            row_index += 1
+
+    return tuple(zones)
