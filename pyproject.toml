@@ -2,3 +2,12 @@
 # FastAPI registers these functions through decorators; they are intentionally
 # discovered at runtime rather than referenced by Python code.
 ignore_decorators = ["@app.get", "@app.post"]
+
+# The adapter layer talks to openpyxl dynamically. Its worksheet attributes
+# (font, fill, alignment, hyperlink, number_format, data_type, freeze_panes)
+# are external-library state rather than project definitions.
+exclude = ["xlsx/helpers.py", "xlsx/routes.py"]
+
+# Public API members confirmed to be consumed by callers, serializers, or
+# framework/library integration and therefore not statically discoverable.
+paths = [".", "vulture_whitelist.py"]
