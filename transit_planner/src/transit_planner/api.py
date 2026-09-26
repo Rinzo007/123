@@ -655,6 +655,75 @@ def city_demand(payload: dict) -> dict:
         ],
     }
 
+@app.get("/api/v1/demand/reference")
+def reference_demand(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+    origin_lon: float | None = Query(None),
+    origin_lat: float | None = Query(None),
+    release: str | None = Query(None),
+) -> dict:
+    """Возвращает demand.json-совместимый набор для клиентской модели."""
+    raster_path = os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
+    if not raster_path:
+        raise HTTPException(status_code=503, detail="TRANSIT_PLANNER_POPULATION_RASTER не настроен")
+    try:
+        bounds = _bbox(south, west, north, east)
+        lon0 = (west + east) / 2.0 if origin_lon is None else float(origin_lon)
+        lat0 = (south + north) / 2.0 if origin_lat is None else float(origin_lat)
+        zones = generate_zones_from_population_raster(
+            raster_path, bbox=bounds, origin_lon=lon0, origin_lat=lat0,
+        )
+        places = OverturePlacesProvider(
+            source=_overture_source(release), bbox=bounds,
+        ).load_places()
+        temporal = build_city_temporal_demand(
+            zones, places, origin_lon=lon0, origin_lat=lat0,
+        )
+        ordered = tuple(zones)
+        index = {zone.id: i for i, zone in enumerate(ordered)}
+        production = {zone.id: 0.0 for zone in ordered}
+        attraction = {zone.id: 0.0 for zone in ordered}
+        for pair in temporal.pairs:
+            production[pair.origin_zone_id] += pair.trips
+            attraction[pair.destination_zone_id] += pair.trips
+        pts = [
+            [float(zone.centroid_x), float(zone.centroid_y),
+             float(production[zone.id]), float(attraction[zone.id])]
+            for zone in ordered
+        ]
+        od = []
+        for pair in temporal.pairs:
+            i, j = index.get(pair.origin_zone_id), index.get(pair.destination_zone_id)
+            if i is None or j is None or pair.trips <= 0:
+                continue
+            base_s = max(120.0, float(pair.base_time_min or 0.0) * 60.0)
+            if not pair.base_time_min:
+                dx = ordered[i].centroid_x - ordered[j].centroid_x
+                dy = ordered[i].centroid_y - ordered[j].centroid_y
+                base_s = max(120.0, (dx * dx + dy * dy) ** 0.5 / 8.333333)
+            od.append([i, j, float(pair.trips), base_s])
+        n = len(ordered)
+        baseline_t = [[0.0] * n for _ in range(n)]
+        for i, a in enumerate(ordered):
+            for j, b in enumerate(ordered):
+                if i == j:
+                    continue
+                dx = a.centroid_x - b.centroid_x
+                dy = a.centroid_y - b.centroid_y
+                baseline_t[i][j] = max(120.0, (dx * dx + dy * dy) ** 0.5 / 8.333333)
+        return {
+            "city": "dynamic",
+            "source": "WorldPop + Overture + city demand model",
+            "pts": pts,
+            "od": od,
+            "baselineT": baseline_t,
+        }
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось подготовить reference demand: {exc}") from exc
+
 @app.post("/api/v1/demand/streets")
 def demand_streets(payload: dict) -> dict:
     pairs = tuple(
