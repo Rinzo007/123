@@ -260,7 +260,7 @@ class Network:
         if section_id is not None:
             section = self.track_sections[section_id]
             if section.speed_limit_kph is not None:
-                speed = min(speed, section.speed_limit_kph)
+                speed = section.speed_limit_kph
         curve_speed = self.route_segment_curve_speed_limit_kph(route, index)
         if isfinite(curve_speed):
             speed = min(speed, curve_speed)
@@ -396,6 +396,10 @@ def default_vehicle_type(mode: TransitMode) -> VehicleType:
         capacity=profile.capacity,
         operating_cost_per_km=profile.opex_per_vehicle_km,
     )
+
+
+def _point_distance_m(left: Point, right: Point) -> float:
+    return hypot(left.x - right.x, left.y - right.y)
 
 
 def _point_distance_km(left: Point, right: Point) -> float:
