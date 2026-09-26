@@ -330,7 +330,7 @@ def _assign_once(
 
         transit_trips = trips * probs["transit"]
         alternative_shares = (
-            alternative_probabilities(journey_stats)
+            alternative_probabilities(journey_stats, config=config.choice)
             if journeys else ()
         )
         car_trips = trips * probs["car"]
