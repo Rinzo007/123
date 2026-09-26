@@ -28,8 +28,10 @@ class EconomicsConfig:
 @dataclass(frozen=True, slots=True)
 class EconomicsResult:
     daily_vehicle_km: float
+    daily_fleet_cost: float
     daily_operating_cost: float
     daily_fare_revenue: float
+    annual_fleet_cost: float
     annual_operating_cost: float
     annual_fare_revenue: float
     capital_cost: float
@@ -46,6 +48,7 @@ def calculate_economics(
     period = network.periods[config.period_id]
     duration = period.end_minute - period.start_minute
     daily_vehicle_km = 0.0
+    daily_fleet_cost = 0.0
     daily_operating_cost = 0.0
     capital_cost = 0.0
     infrastructure_costs = config.infrastructure_cost_per_km or {}
@@ -58,11 +61,19 @@ def calculate_economics(
         route = network.routes[service.route_id]
         length_km = _route_length_km(network, route.stop_ids)
         vehicle = network.vehicle_types[service.vehicle_type_id]
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        speed_kph = profile.rows[profile.default_row].speed_kph
+        cycle_run_min = 2.0 * length_km / speed_kph * 60.0
+        cycle_dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
+        cycle_turnback_min = 2.0 * profile.turnback_s / 60.0
+        cycle_time_min = cycle_run_min + cycle_dwell_min + cycle_turnback_min
+        required_vehicles = max(1, ceil(cycle_time_min / headway))
+        daily_fleet_cost += required_vehicles * profile.vehicle_cost_day
 
         # Service is represented per direction in this engine slice.
         vehicle_km = departures * length_km * 2.0
         daily_vehicle_km += vehicle_km
-        operating_cost_per_km = vehicle.operating_cost_per_km or REFERENCE_MODE_PROFILES[route.mode.value].opex_per_vehicle_km
+        operating_cost_per_km = vehicle.operating_cost_per_km or profile.opex_per_vehicle_km
         daily_operating_cost += vehicle_km * operating_cost_per_km
         capital_cost += length_km * infrastructure_costs.get(route.mode, 0.0)
         capital_cost += len(route.stop_ids) * config.station_cost
@@ -71,8 +82,10 @@ def calculate_economics(
     daily_fare_revenue = transit_trips * config.fare_per_transit_trip
     return EconomicsResult(
         daily_vehicle_km=daily_vehicle_km,
+        daily_fleet_cost=daily_fleet_cost,
         daily_operating_cost=daily_operating_cost,
         daily_fare_revenue=daily_fare_revenue,
+        annual_fleet_cost=daily_fleet_cost * config.annual_days,
         annual_operating_cost=daily_operating_cost * config.annual_days,
         annual_fare_revenue=daily_fare_revenue * config.annual_days,
         capital_cost=capital_cost,
