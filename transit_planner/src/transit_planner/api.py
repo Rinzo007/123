@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
+from .analytics import _service_analytics
 from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city_demand import CityDemandConfig, build_city_demand, build_city_temporal_demand
@@ -559,7 +560,25 @@ def calculate_assignment(payload: dict) -> dict:
         zones=zones,
         config=config,
     )
+    service_analytics = tuple(
+        _service_analytics(network, service_id, config.period_id)
+        for service_id in network.services
+        if config.period_id in network.services[service_id].headway_by_period
+    )
     return {
+        "services": [
+            {
+                "service_id": item.service_id,
+                "route_id": item.route_id,
+                "period_id": item.period_id,
+                "departures": item.departures,
+                "fleet": item.fleet,
+                "daily_vehicle_km": item.daily_vehicle_km,
+                "daily_opex": item.daily_opex,
+                "capacity_per_direction": item.capacity_per_direction,
+            }
+            for item in service_analytics
+        ],
         "metrics": {
             "total_trips": result.metrics.total_trips,
             "transit_trips": result.metrics.transit_trips,
