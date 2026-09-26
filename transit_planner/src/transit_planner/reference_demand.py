@@ -133,17 +133,27 @@ def build_demand_layers(
 
 def build_daily_demand(
     zones: tuple[DemandZone, ...],
+    *,
+    trip_rate: float = 0.12,
+    decay: float = 0.08,
+    reference_speed_kph: float = 30.0,
 ) -> DemandMatrix:
+    if trip_rate < 0:
+        raise ValueError("trip_rate cannot be negative")
+    if decay <= 0:
+        raise ValueError("decay must be positive")
+    if reference_speed_kph <= 0:
+        raise ValueError("reference_speed_kph must be positive")
     # The reference runtime has a base commuter matrix plus auxiliary
     # purpose layers. Gravity OD provides the equivalent base commuter layer
     # when the city does not have a pre-calibrated demand.json.
     commuter = gravity_od(
         zones,
         parameters=GravityParameters(
-            reference_speed_kph=30.0,
-            decay=0.08,
+            reference_speed_kph=reference_speed_kph,
+            decay=decay,
         ),
-        trip_rate=0.12,
+        trip_rate=trip_rate,
     )
     layers = build_demand_layers(zones)
     pairs = [
