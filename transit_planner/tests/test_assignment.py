@@ -171,10 +171,14 @@ def test_zone_no_car_share_reduces_car_trips():
         "o": DemandZone("o", 0, 0, population=1000, no_car_share=1.0),
         "d": DemandZone("d", 2000, 0, population=1000, no_car_share=1.0),
     }
+    baseline_zones = {
+        "o": DemandZone("o", 0, 0, population=1000, no_car_share=0.0),
+        "d": DemandZone("d", 2000, 0, population=1000, no_car_share=0.0),
+    }
     baseline = assign_demand(
         network,
         demand,
-        zones={key: value.with_default_no_car_share() if False else value for key, value in zones.items()},
+        zones=baseline_zones,
         config=AssignmentConfig(period_id="peak"),
     )
     result = assign_demand(
