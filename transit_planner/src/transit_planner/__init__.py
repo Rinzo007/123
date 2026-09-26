@@ -16,7 +16,13 @@ from .assignment import (
     assign_demand,
 )
 from .city import City, DemandZone
-from .data import ConnectorRecord, ConnectorRef, RoadRecord
+from .data import (
+    ConnectorRecord,
+    ConnectorRef,
+    ProhibitedTransition,
+    ProhibitedTransitionSequenceEntry,
+    RoadRecord,
+)
 from .demand import DemandMatrix, ODPairDemand
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
 from .network import Network
@@ -64,6 +70,8 @@ __all__ = [
     "DemandZone",
     "ConnectorRecord",
     "ConnectorRef",
+    "ProhibitedTransition",
+    "ProhibitedTransitionSequenceEntry",
     "RoadRecord",
     "DemandMatrix",
     "ODPairDemand",
