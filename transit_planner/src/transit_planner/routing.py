@@ -17,6 +17,7 @@ class JourneyLeg:
     to_id: str
     duration_min: float
     route_id: str | None = None
+    wait_min: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +176,7 @@ class TransitRouter:
                             option.neighbor_stop_id,
                             wait + run + penalty,
                             option.route_id,
+                            wait_min=wait,
                         ),
                     )
                     heappush(queue, (candidate, serial, next_state))
