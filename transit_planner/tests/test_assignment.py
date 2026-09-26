@@ -31,6 +31,7 @@ def test_assignment_produces_transit_flow():
 
     assert result.metrics.total_trips == 100
     assert result.metrics.transit_trips > 0
+    assert result.metrics.average_wait_time_min >= 0.0
     assert result.route_flows[0].passenger_section_traversals > 0
     section = next(
         item for item in result.section_loads
