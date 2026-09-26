@@ -137,6 +137,7 @@ class ReferenceTransferProfile:
     base_s: float = 405.0
     wait_multiplier: float = 1.0
     walk_multiplier: float = 1.0
+    per_m_s: float = 0.25
     rider_bias_s: float = 0.0
 
     def __post_init__(self) -> None:
@@ -144,6 +145,8 @@ class ReferenceTransferProfile:
             raise ValueError("base_s cannot be negative")
         if self.wait_multiplier < 0 or self.walk_multiplier < 0:
             raise ValueError("transfer multipliers cannot be negative")
+        if self.per_m_s < 0:
+            raise ValueError("per_m_s cannot be negative")
         if self.rider_bias_s < 0:
             raise ValueError("rider_bias_s cannot be negative")
 
