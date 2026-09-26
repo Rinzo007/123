@@ -333,6 +333,7 @@ def calculate_assignment(payload: dict) -> dict:
         "iterations": result.iterations,
         "max_load_ratio": result.max_load_ratio,
         "unserved_transit_demand": result.unserved_transit_demand,
+        "loss_reasons": [{"reason": item.reason, "trips": item.trips} for item in result.loss_reasons],
         "route_flows": [
             {
                 "route_id": item.route_id,
