@@ -172,12 +172,12 @@ def _service_analytics(
             network.stops[left_id],
             network.stops[right_id],
         )
-        for left_id, right_id in zip(route.stop_ids, route.stop_ids[1:])
+        for left_id, right_id in route.segment_pairs()
     )
     speed_kph = profile.rows[profile.default_row].speed_kph
     run_min = 2.0 * length_km / speed_kph * 60.0
     dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
-    turnback_min = 2.0 * profile.turnback_s / 60.0
+    turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
     cycle_min = run_min + dwell_min + turnback_min
     fleet = max(1, ceil(cycle_min / headway))
     vehicle_km = departures * length_km * 2.0
