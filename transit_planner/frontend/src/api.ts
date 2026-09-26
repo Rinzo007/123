@@ -184,6 +184,14 @@ export function createTimetable(
   });
 }
 export interface AssignmentResponse {
+  track_capacity: Array<{
+    shared_group: string;
+    period_id: string;
+    route_ids: string[];
+    tph: number;
+    limit_tph: number;
+    utilization: number;
+  }>;
   metrics: {
     total_trips: number;
     transit_trips: number;
