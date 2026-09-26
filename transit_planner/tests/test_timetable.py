@@ -43,3 +43,10 @@ def test_connection_wait_targets_first_feasible_departure():
     ).for_period("peak")
 
     assert connection_wait(377.5, timetable) == 2.5
+
+
+def test_average_connection_wait_is_schedule_aware():
+    from transit_planner.timetable import average_connection_wait_minutes
+
+    assert average_connection_wait_minutes(10, 20, upstream_offset=0, downstream_offset=0, upstream_run_time=10) == 10.0
+    assert average_connection_wait_minutes(10, 20, upstream_offset=0, downstream_offset=5, upstream_run_time=10) == 15.0
