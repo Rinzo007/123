@@ -31,6 +31,31 @@ class LineString:
 
 
 
+def circumradius_m(a: Point, b: Point, c: Point) -> float:
+    """Return the circumcircle radius for three metric points."""
+    ab = hypot(b.x - a.x, b.y - a.y)
+    bc = hypot(c.x - b.x, c.y - b.y)
+    ca = hypot(a.x - c.x, a.y - c.y)
+    twice_area = abs(
+        (b.x - a.x) * (c.y - a.y)
+        - (b.y - a.y) * (c.x - a.x)
+    )
+    if min(ab, bc, ca) <= 0.0 or twice_area <= 1e-12:
+        return float("inf")
+    return ab * bc * ca / (2.0 * twice_area)
+
+
+def minimum_curve_radius_m(points: tuple[Point, ...]) -> float:
+    """Return the smallest finite curve radius in a polyline."""
+    radii = tuple(
+        radius
+        for a, b, c in zip(points, points[1:], points[2:])
+        for radius in (circumradius_m(a, b, c),)
+        if isfinite(radius)
+    )
+    return min(radii, default=float("inf"))
+
+
 @dataclass(frozen=True, slots=True)
 class BoundingBox:
     min_x: float
