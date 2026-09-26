@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
-from .city_demand import CityDemandConfig, build_city_demand
+from .city_demand import build_city_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
@@ -369,17 +369,11 @@ def city_demand(payload: dict) -> dict:
         )
         for item in payload.get("places", [])
     )
-    config = CityDemandConfig(
-        trip_rate=float(payload.get("trip_rate", 0.12)),
-        decay=float(payload.get("decay", 0.08)),
-        reference_speed_kph=float(payload.get("reference_speed_kph", 30.0)),
-    )
     demand = build_city_demand(
         zones,
         places,
         origin_lon=payload.get("origin_lon"),
         origin_lat=payload.get("origin_lat"),
-        config=config,
     )
     return {
         "model": "main",
