@@ -153,6 +153,11 @@ export function App() {
   const [headway, setHeadway] = useState(10);
   const [message, setMessage] = useState("Готово к редактированию");
   const [busy, setBusy] = useState(false);
+  const [viewMode, setViewMode] = useState<"map" | "network">("map");
+  const [showRoads, setShowRoads] = useState(true);
+  const [showStops, setShowStops] = useState(true);
+  const [showPlaces, setShowPlaces] = useState(true);
+  const [showConnectors, setShowConnectors] = useState(false);
 
   useEffect(() => {
     drawModeRef.current = drawMode;
@@ -308,11 +313,46 @@ export function App() {
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
     if (cityPlaces) cityPlaceSource?.setData(cityPlaces);
-  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute]);
+
+    if (map.getLayer("city-road-lines")) map.setLayoutProperty("city-road-lines", "visibility", showRoads ? "visible" : "none");
+    if (map.getLayer("city-connector-circles")) map.setLayoutProperty("city-connector-circles", "visibility", showConnectors ? "visible" : "none");
+    if (map.getLayer("city-stop-circles")) map.setLayoutProperty("city-stop-circles", "visibility", showStops ? "visible" : "none");
+    if (map.getLayer("city-place-circles")) map.setLayoutProperty("city-place-circles", "visibility", showPlaces ? "visible" : "none");
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, showRoads, showStops, showPlaces, showConnectors]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headway),
     [stops, mode, routeName, headway],
+  );
+
+  const routeRows = useMemo(
+    () =>
+      network.routes.map((route) => {
+        const service = network.services.find((item) => item.route_id === route.id);
+        const vehicle = network.vehicle_types.find((item) => item.id === service?.vehicle_type_id);
+        return {
+          route,
+          service,
+          vehicle,
+        };
+      }),
+    [network],
+  );
+
+  const totalDailyDepartures = useMemo(
+    () =>
+      network.services.reduce((sum, service) => {
+        const departures = Object.entries(service.headway_by_period).reduce(
+          (periodSum, [periodId, value]) => {
+            const period = network.periods.find((item) => item.id === periodId);
+            if (!period || value <= 0) return periodSum;
+            return periodSum + Math.ceil((period.end_minute - period.start_minute) / value);
+          },
+          0,
+        );
+        return sum + departures;
+      }, 0),
+    [network],
   );
 
   function removeStop(stopId: string) {
@@ -426,6 +466,12 @@ export function App() {
           <div className="subtitle">Проектирование транспортной сети</div>
         </div>
         <div className="actions">
+          <button onClick={() => setViewMode("map")} className={viewMode === "map" ? "active-toggle" : ""}>
+            Карта
+          </button>
+          <button onClick={() => setViewMode("network")} className={viewMode === "network" ? "active-toggle" : ""}>
+            Network View
+          </button>
           <button onClick={loadCityData} disabled={busy}>
             Загрузить Overture
           </button>
@@ -513,6 +559,26 @@ export function App() {
             )}
           </section>
 
+          <section className="layers-panel">
+            <div className="section-title">Слои карты</div>
+            <label className="check-row">
+              <input type="checkbox" checked={showRoads} onChange={(event) => setShowRoads(event.target.checked)} />
+              <span>Дороги Overture</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showStops} onChange={(event) => setShowStops(event.target.checked)} />
+              <span>Остановки</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showPlaces} onChange={(event) => setShowPlaces(event.target.checked)} />
+              <span>Places</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showConnectors} onChange={(event) => setShowConnectors(event.target.checked)} />
+              <span>Коннекторы</span>
+            </label>
+          </section>
+
           <section className="summary">
             <div className="section-title">Сводка</div>
             <div className="metric">
@@ -544,16 +610,70 @@ export function App() {
           <footer>{message}</footer>
         </aside>
 
-        <main className={drawMode ? "map-area drawing" : "map-area"}>
-          <div ref={mapContainer} className="map" />
-          {drawMode && (
-            <div className="map-hint">
-              Кликайте по карте, чтобы добавлять остановки
+        <main className={viewMode === "map" ? (drawMode ? "map-area drawing" : "map-area") : "network-area"}>
+          {viewMode === "map" ? (
+            <>
+              <div ref={mapContainer} className="map" />
+              {drawMode && (
+                <div className="map-hint">
+                  Кликайте по карте, чтобы добавлять остановки
+                </div>
+              )}
+              <button className="clear-button" onClick={clearRoute}>
+                Очистить
+              </button>
+            </>
+          ) : (
+            <div className="network-view">
+              <div className="network-header">
+                <div>
+                  <h2>Network View</h2>
+                  <p>Текущая схема линий, периодов и частоты обслуживания</p>
+                </div>
+                <div className="network-kpis">
+                  <div><span>Линий</span><b>{network.routes.length}</b></div>
+                  <div><span>Отправлений/сутки</span><b>{totalDailyDepartures}</b></div>
+                  <div><span>Остановок</span><b>{network.stops.length}</b></div>
+                </div>
+              </div>
+              {routeRows.length === 0 ? (
+                <div className="network-empty">
+                  Добавьте минимум две остановки и создайте маршрут — он появится здесь.
+                </div>
+              ) : (
+                <div className="network-table-wrap">
+                  <table className="network-table">
+                    <thead>
+                      <tr>
+                        <th>Линия</th>
+                        <th>Режим</th>
+                        <th>Остановки</th>
+                        <th>Вместимость</th>
+                        {network.periods.map((period) => <th key={period.id}>{period.id}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {routeRows.map(({ route, service, vehicle }) => (
+                        <tr key={route.id}>
+                          <td><strong>{route.name}</strong></td>
+                          <td>{MODE_LABELS[route.mode]}</td>
+                          <td>{route.stop_ids.length}</td>
+                          <td>{vehicle?.capacity ?? "—"}</td>
+                          {network.periods.map((period) => (
+                            <td key={period.id}>
+                              {service?.headway_by_period[period.id]
+                                ? `${service.headway_by_period[period.id]} мин`
+                                : "—"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
-          <button className="clear-button" onClick={clearRoute}>
-            Очистить
-          </button>
         </main>
       </div>
     </div>
