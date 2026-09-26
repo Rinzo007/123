@@ -1,4 +1,5 @@
-from transit_planner.data import ConnectorRef, ProhibitedTransitionSequenceEntry
+from transit_planner.data import ConnectorRef, ProhibitedTransitionSequenceEntry, ProhibitedTransition, RoadRecord
+from transit_planner.geo import LineString, Point
 from transit_planner.overture import (
     DEFAULT_RELEASE,
     OvertureConnectorProvider,
@@ -112,3 +113,34 @@ def test_prohibited_transition_parser_prefixes_segment_ids_and_skips_scoped_rule
     assert parsed[0].sequence == (
         ProhibitedTransitionSequenceEntry("overture:target", "c1"),
     )
+
+
+def test_overture_provider_load_graph_uses_connector_topology():
+    provider = OvertureTransportationProvider()
+    provider.load_roads = lambda: (
+        RoadRecord(
+            "overture:source",
+            LineString((Point(0, 0), Point(1, 0))),
+            30.0,
+            connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 1.0)),
+            prohibited_transitions=(
+                ProhibitedTransition(
+                    "overture:source",
+                    (ProhibitedTransitionSequenceEntry("overture:target", "c1"),),
+                ),
+            ),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "overture:target",
+            LineString((Point(1, 0), Point(2, 0))),
+            30.0,
+            connectors=(ConnectorRef("c1", 0.0), ConnectorRef("c2", 1.0)),
+            length_m=100.0,
+        ),
+    )
+
+    result = provider.load_graph()
+
+    assert result.connector_count == 3
+    assert len(result.graph.prohibited_transitions) == 1
