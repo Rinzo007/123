@@ -101,3 +101,10 @@ def test_no_car_availability_reduces_car_probability():
     assert without_car["walk"] > with_car["walk"]
 
 
+
+
+def test_choice_defaults_match_reference_active_mode_parameters():
+    config = ChoiceConfig()
+    assert config.walk_circuity == 1.33
+    assert config.bike_circuity == 1.25
+    assert config.two_wheel_share == 0.30
