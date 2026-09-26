@@ -141,3 +141,26 @@ def probabilities(values: ModeUtilities) -> dict[str, float]:
     if total <= 0:
         return {key: 0.0 for key in available}
     return {key: weight / total for key, weight in weights.items()}
+
+
+def alternative_probabilities(
+    alternatives: tuple[tuple[float, float], ...],
+    *,
+    config: ChoiceConfig = ChoiceConfig(),
+) -> tuple[float, ...]:
+    """Split transit demand across journeys by generalized transit cost."""
+    if not alternatives:
+        return ()
+    values = tuple(
+        -config.time_coefficient
+        * (
+            max(0.0, time_min)
+            + config.transit_wait_weight * max(0.0, wait_min)
+            + config.transit_bias_minutes
+        )
+        for time_min, wait_min in alternatives
+    )
+    maximum = max(values)
+    weights = tuple(exp(value - maximum) for value in values)
+    total = sum(weights)
+    return tuple(weight / total for weight in weights) if total > 0 else tuple(0.0 for _ in values)
