@@ -126,6 +126,7 @@ def compare_scenarios(
         ("max_load_ratio", base.assignment.max_load_ratio, alternative.assignment.max_load_ratio),
         ("passenger_km", base.analytics.passenger_km, alternative.analytics.passenger_km),
         ("reserved_capital", base.reserved_capital, alternative.reserved_capital),
+        ("bike_trips", base_metrics.bike_trips, alternative_metrics.bike_trips),
     )
     metrics = tuple(
         MetricDelta(metric=name, base=left, alternative=right)
