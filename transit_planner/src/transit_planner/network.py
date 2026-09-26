@@ -9,10 +9,9 @@ from .reference_model import REFERENCE_PERIODS
 
 class TransitMode(StrEnum):
     BUS = "bus"
-    TROLLEYBUS = "trolleybus"
     TRAM = "tram"
     METRO = "metro"
-    REGIONAL_RAIL = "regional_rail"
+    RAIL = "rail"
 
 
 @dataclass(frozen=True, slots=True)
