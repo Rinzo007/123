@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 
 from .geo import LineString, Point
-from .network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
+from .network import Network, Route, Service, ServicePeriod, Stop, TrackRow, TransitMode, VehicleType
 
 
 def network_to_dict(network: Network) -> dict:
@@ -32,6 +32,7 @@ def network_to_dict(network: Network) -> dict:
                 "track_section_ids": list(route.track_section_ids),
                 "both_ways": route.both_ways,
                 "closed": route.closed,
+                "row_by_segment": [row.value for row in route.row_by_segment],
             }
             for route in network.routes.values()
         ],
@@ -102,6 +103,7 @@ def network_from_dict(data: dict) -> Network:
                 tuple(raw.get("track_section_ids", ())),
                 bool(raw.get("both_ways", True)),
                 bool(raw.get("closed", False)),
+                tuple(TrackRow(raw_row) for raw_row in raw.get("row_by_segment", ())),
             )
         )
     for raw in data.get("services", []):
@@ -112,6 +114,7 @@ def network_from_dict(data: dict) -> Network:
                 raw["vehicle_type_id"],
                 dict(raw["headway_by_period"]),
                 dict(raw.get("departure_offset_by_period", {})),
+                dict(raw.get("phase_by_period", {})),
             )
         )
     return network
