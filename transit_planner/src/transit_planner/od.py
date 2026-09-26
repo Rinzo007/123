@@ -69,3 +69,7 @@ def gravity_od(
 
     return DemandMatrix(tuple(pairs))
 
+
+
+def _distance_m(a: DemandZone, b: DemandZone) -> float:
+    return ((a.centroid_x - b.centroid_x) ** 2 + (a.centroid_y - b.centroid_y) ** 2) ** 0.5
