@@ -385,12 +385,11 @@ def _assign_once(
                     key = (leg.route_id, leg.from_id, leg.to_id)
                     section_flow[key] = section_flow.get(key, 0.0) + candidate_trips
                     if leg.service_id is not None:
-                        for stop_id in (leg.from_id, leg.to_id):
-                            service_key = (leg.service_id, stop_id)
-                            service_stop_boardings[service_key] = (
-                                service_stop_boardings.get(service_key, 0.0)
-                                + candidate_trips
-                            )
+                        service_key = (leg.service_id, leg.from_id)
+                        service_stop_boardings[service_key] = (
+                            service_stop_boardings.get(service_key, 0.0)
+                            + candidate_trips
+                        )
                     route_traversals[leg.route_id] = (
                         route_traversals.get(leg.route_id, 0.0) + candidate_trips
                     )
