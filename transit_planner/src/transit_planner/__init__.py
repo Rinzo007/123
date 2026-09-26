@@ -27,6 +27,11 @@ from .demand import DemandMatrix, ODPairDemand
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
 from .network import Network
 from .od import GravityParameters, gravity_od
+from .overture_network import (
+    OvertureNetwork,
+    OvertureNetworkProvider,
+    build_overture_network,
+)
 from .overture import (
     DEFAULT_RELEASE,
     OvertureConnectorProvider,
@@ -81,6 +86,9 @@ __all__ = [
     "Network",
     "GravityParameters",
     "gravity_od",
+    "OvertureNetwork",
+    "OvertureNetworkProvider",
+    "build_overture_network",
     "DEFAULT_RELEASE",
     "OvertureConnectorProvider",
     "OvertureSource",
