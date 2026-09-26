@@ -52,6 +52,7 @@ class _TransitOption:
     headway: float
     departure_offset: float
     mode: TransitMode
+    speed_limit_kph: float | None = None
 
 
 class TransitRouter:
@@ -74,7 +75,7 @@ class TransitRouter:
         self.config = config
         self.road_graph = road_graph
         self.stop_road_nodes = dict(stop_road_nodes or {})
-        self._road_run_time_cache: dict[tuple[str, str, TransitMode], float | None] = {}
+        self._road_run_time_cache: dict[tuple[str, str, TransitMode, float | None], float | None] = {}
         self._walking_neighbors_cache = self._build_walking_neighbors()
         self._transit_options_by_period = self._build_transit_options()
 
@@ -161,6 +162,7 @@ class TransitRouter:
                     stop_id,
                     option.neighbor_stop_id,
                     option.mode,
+                    speed_limit_kph=option.speed_limit_kph,
                 )
                 next_state = (option.neighbor_stop_id, option.route_id)
                 weighted_wait = wait * self.config.wait_weight
