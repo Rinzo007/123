@@ -60,3 +60,20 @@ export function loadOvertureRoads(
     }),
   );
 }
+
+export function loadOvertureConnectors(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<GeoJSON.FeatureCollection> {
+  return loadGeoJson(
+    "/api/v1/data/overture/connectors",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  );
+}
