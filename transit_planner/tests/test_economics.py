@@ -6,6 +6,7 @@ from transit_planner.geo import Point
 from transit_planner.network import (
     Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType,
 )
+from transit_planner.reference_model import TrackRow
 
 
 def test_operating_economics():
