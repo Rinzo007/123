@@ -832,14 +832,16 @@
           summary={evaluationSummary}
           routeRows={routeRows}
           periods={PERIODS}
-          cityAssignmentMeta={cityAssignmentMeta}
-          periodsData={cityAssignmentPeriods}
-          assignmentResult={assignmentResult}
-          economicsResult={economicsResult}
-          scenarioComparison={scenarioComparison}
-          timetable={timetable}
           modeLabels={MODE_LABELS}
           onGenerateTimetable={generateTimetable}
+        />
+        <EvaluationPanel
+          cityMeta={cityAssignmentMeta}
+          periodsData={cityAssignmentPeriods}
+          assignment={assignmentResult}
+          economics={economicsResult}
+          scenario={scenarioComparison}
+          timetable={timetable}
         />
       {/if}
     </main>
