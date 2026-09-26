@@ -349,3 +349,20 @@ input:focus, select:focus {
 .timetable-row span {
   color: #4b5563;
 }
+
+.preview-demand {
+  padding-top: 8px;
+}
+
+.preview-demand .section-title {
+  margin-top: 4px;
+}
+
+.preview-demand button {
+  width: 100%;
+}
+
+.period-headways label {
+  display: grid;
+  gap: 6px;
+}
