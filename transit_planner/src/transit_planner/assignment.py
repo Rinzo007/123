@@ -63,9 +63,9 @@ class AssignmentResult:
     section_loads: tuple[SectionLoad, ...]
     stop_flows: tuple[StopFlow, ...]
     unserved_transit_demand: float
-    loss_reasons: tuple[DemandLoss, ...] = ()
-    iterations: int = 0
+    iterations: int
     max_load_ratio: float
+    loss_reasons: tuple[DemandLoss, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
