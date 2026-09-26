@@ -70,7 +70,7 @@ def calculate_economics(
             continue
         departures = ceil(duration / headway)
         route = network.routes[service.route_id]
-        length_km = _route_length_km(network, route.stop_ids)
+        length_km = _route_length_km(network, route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
         speed_kph = profile.rows[profile.default_row].speed_kph
@@ -120,9 +120,9 @@ def calculate_economics(
     )
 
 
-def _route_length_km(network: Network, stop_ids: tuple[str, ...]) -> float:
+def _route_length_km(network: Network, route) -> float:
     total_m = 0.0
-    for left_id, right_id in zip(stop_ids, stop_ids[1:]):
+    for left_id, right_id in route.segment_pairs():
         left = network.stops[left_id]
         right = network.stops[right_id]
         total_m += sqrt(
