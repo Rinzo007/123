@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from math import ceil, hypot
+from math import ceil, hypot, isfinite
 
-from .geo import LineString, Point
+from .geo import LineString, Point, minimum_curve_radius_m
 from .infrastructure import TrackSection
 from .reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_PERIODS,
     TrackRow,
+    lateral_speed_limit_kph,
 )
 
 
@@ -177,11 +178,61 @@ class Network:
                 errors.append(f"Route {route.id} contains duplicate stops")
         return errors
 
+    def route_segment_geometry_points(
+        self,
+        route: Route,
+        index: int,
+    ) -> tuple[Point, ...]:
+        """Return the geometry slice corresponding to one route segment."""
+        if route.geometry is None:
+            return ()
+        pairs = route.segment_pairs()
+        if index < 0 or index >= len(pairs):
+            raise IndexError("segment index out of range")
+        stop_points = tuple(
+            self.stops[stop_id].location
+            for stop_id in route.stop_ids
+        )
+        points = route.geometry.points
+        indices = _match_geometry_to_stops(points, stop_points, route.closed)
+        if indices is None:
+            return ()
+        start = indices[index]
+        if route.closed and index == len(pairs) - 1:
+            first = indices[0]
+            return points[start:] + points[: first + 1]
+        end = indices[index + 1]
+        if end < start:
+            return ()
+        return points[start : end + 1]
+
+    def route_segment_curve_speed_limit_kph(
+        self,
+        route: Route,
+        index: int,
+    ) -> float:
+        points = self.route_segment_geometry_points(route, index)
+        if len(points) < 3:
+            return float("inf")
+        radius_m = minimum_curve_radius_m(points)
+        if not isfinite(radius_m):
+            return float("inf")
+        return lateral_speed_limit_kph(
+            route.mode.value,
+            radius_m,
+        )
+
     def route_segment_length_km(self, route: Route, index: int) -> float:
         left_id, right_id = route.segment_pairs()[index]
         section_id = route.track_section_for_segment(index)
         if section_id is not None:
             return self.track_sections[section_id].length_km
+        geometry = self.route_segment_geometry_points(route, index)
+        if len(geometry) >= 2:
+            return sum(
+                hypot(b.x - a.x, b.y - a.y)
+                for a, b in zip(geometry, geometry[1:])
+            ) / 1000.0
         return _point_distance_km(
             self.stops[left_id].location,
             self.stops[right_id].location,
@@ -208,7 +259,12 @@ class Network:
         if section_id is not None:
             section = self.track_sections[section_id]
             if section.speed_limit_kph is not None:
-                speed = section.speed_limit_kph
+                speed = min(speed, section.speed_limit_kph)
+        curve_speed = self.route_segment_curve_speed_limit_kph(route, index)
+        if isfinite(curve_speed):
+            speed = min(speed, curve_speed)
+        if speed <= 0:
+            raise ValueError("Route segment speed must be positive")
         return self.route_segment_length_km(route, index) / speed * 60.0
 
     def route_length_km(self, route: Route) -> float:
@@ -246,6 +302,79 @@ class Network:
             raise ValueError(f"{kind.title()} id cannot be empty")
         if item_id in collection:
             raise ValueError(f"Duplicate {kind} id: {item_id}")
+
+
+def _match_geometry_to_stops(
+    points: tuple[Point, ...],
+    stops: tuple[Point, ...],
+    closed: bool,
+) -> tuple[int, ...] | None:
+    if len(points) < 2 or len(stops) < 2:
+        return None
+
+    def match(sequence: tuple[Point, ...]) -> tuple[tuple[int, ...], float] | None:
+        if not closed:
+            indices: list[int] = []
+            cursor = 0
+            score = 0.0
+            for stop in stops:
+                if cursor >= len(sequence):
+                    return None
+                index = min(
+                    range(cursor, len(sequence)),
+                    key=lambda item: _point_distance_m(sequence[item], stop),
+                )
+                score += _point_distance_m(sequence[index], stop) ** 2
+                indices.append(index)
+                cursor = index
+            if any(left >= right for left, right in zip(indices, indices[1:])):
+                return None
+            return tuple(indices), score
+
+        first = min(
+            range(len(sequence)),
+            key=lambda item: _point_distance_m(sequence[item], stops[0]),
+        )
+        indices = [first]
+        score = _point_distance_m(sequence[first], stops[0]) ** 2
+        cursor = first
+        for stop in stops[1:]:
+            candidates = [
+                first + offset
+                for offset in range(1, len(sequence) + 1)
+                if first + offset < first + len(sequence)
+            ]
+            index = min(
+                candidates,
+                key=lambda item: _point_distance_m(
+                    sequence[item % len(sequence)],
+                    stop,
+                ),
+            )
+            score += _point_distance_m(
+                sequence[index % len(sequence)],
+                stop,
+            ) ** 2
+            indices.append(index % len(sequence))
+            cursor = index
+        if len(set(indices)) != len(indices):
+            return None
+        unwrapped = [first]
+        current = first
+        for index in indices[1:]:
+            while index <= current:
+                index += len(sequence)
+            unwrapped.append(index)
+            current = index
+        return tuple(item % len(sequence) for item in unwrapped), score
+
+    candidates = [match(points)]
+    if not closed:
+        candidates.append(match(tuple(reversed(points))))
+    valid = [item for item in candidates if item is not None]
+    if not valid:
+        return None
+    return min(valid, key=lambda item: item[1])[0]
 
 
 def default_service_periods() -> tuple[ServicePeriod, ...]:
