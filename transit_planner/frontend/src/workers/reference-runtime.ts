@@ -34,6 +34,8 @@ export type ReferenceMatrixOutput = {
   previous: Int32Array;
 };
 
+let referenceRequestId = 0;
+
 export class ReferenceEvaluationClient {
   private readonly workers: Worker[] = [];
   private readonly tasks = new Map<number, { resolve: (value: ReferenceEvaluationResult) => void; reject: (error: Error) => void }>();
@@ -98,9 +100,8 @@ export class ReferenceEvaluationClient {
 export function solveReferenceDemand(batch: ReferenceDemandBatch): Promise<ReferenceDemandOutput> {
   return new Promise((resolve, reject) => {
     const worker = new Worker("/assets/demand-choice.worker-DAUlrAj6.js", { type: "module" });
-    const id = Math.random().toString(36).slice(2);
-    const started = performance.now();
-    worker.onmessage = (event: MessageEvent<{ id: string; output: Omit<ReferenceDemandOutput, "computeMs">; computeMs: number }>) => {
+    const id = `demand-${Date.now()}-${referenceRequestId++}`;
+      worker.onmessage = (event: MessageEvent<{ id: string; output: Omit<ReferenceDemandOutput, "computeMs">; computeMs: number }>) => {
       if (event.data.id !== id) return;
       worker.terminate();
       resolve({ ...event.data.output, computeMs: event.data.computeMs });
@@ -118,7 +119,6 @@ export function solveReferenceDemand(batch: ReferenceDemandBatch): Promise<Refer
       batch.restWait.buffer,
       batch.transfer.buffer,
     ]);
-    void started;
   });
 }
 
