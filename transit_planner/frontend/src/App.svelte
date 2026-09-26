@@ -15,6 +15,7 @@
     compareScenarios,
     type ScenarioPayload,
     type OvertureNetworkResponse,
+    type OvertureRouteResponse,
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
@@ -336,15 +337,21 @@
     message = "Построение маршрута по Overture…";
     try {
       const bounds = mapRef.getBounds();
-      const data = await loadOvertureRoute(
-        stops.map((stop) => ({ lon: stop.lon, lat: stop.lat })),
+      const routePoints = stops.map((stop) => ({ lon: stop.lon, lat: stop.lat }));
+      const routeKey = datasetCacheKey("overture-route", {
+        south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
+      }) + ":" + routePoints.map((point) => `${point.lon.toFixed(5)},${point.lat.toFixed(5)}`).join(";");
+      const cached = await loadDataset<OvertureRouteResponse>(routeKey);
+      const data = cached ?? await loadOvertureRoute(
+        routePoints,
         bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
       );
+      if (!cached) await saveDataset(routeKey, data);
       roadRoute = {
         type: "FeatureCollection",
         features: [{ type: "Feature", geometry: data.geometry, properties: data.properties }],
       };
-      message = `Маршрут Overture: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`;
+      message = `${cached ? "Кэш Overture" : "Overture"} маршрут: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`;
     } catch (error) {
       roadRoute = null;
       message = error instanceof Error ? error.message : "Ошибка построения маршрута";
