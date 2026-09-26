@@ -138,14 +138,19 @@ def overture_network(
     def stops_task():
         return OvertureTransitProvider(source=source, bbox=bounds).load_stops()
 
+    def places_task():
+        return OverturePlacesProvider(source=source, bbox=bounds).load_places()
+
     try:
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="overture") as pool:
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="overture") as pool:
             roads_future = pool.submit(roads_task)
             connectors_future = pool.submit(connectors_task)
             stops_future = pool.submit(stops_task)
+            places_future = pool.submit(places_task)
             roads = roads_future.result()
             connectors = connectors_future.result()
             stops = stops_future.result()
+            places = places_future.result()
     except (OSError, RuntimeError, TimeoutError) as exc:
         raise HTTPException(
             status_code=502,
@@ -156,11 +161,13 @@ def overture_network(
         "roads": roads_to_geojson(roads),
         "connectors": connectors_to_geojson(connectors),
         "stops": stops_to_geojson(stops),
+        "places": places_to_geojson(places),
         "release": source.release,
         "counts": {
             "roads": len(roads),
             "connectors": len(connectors),
             "stops": len(stops),
+            "places": len(places),
         },
     }
 
