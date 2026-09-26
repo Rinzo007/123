@@ -290,7 +290,8 @@ class TransitRouter:
                     base_penalties.get(route_id, 0.0) + increment,
                 )
         return tuple(results)
-\n    def _run_time_between(
+
+    def _run_time_between(
         self,
         from_id: str,
         to_id: str,
