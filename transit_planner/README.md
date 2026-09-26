@@ -12,7 +12,7 @@
 - физические узлы: transportation/connector;
 - остановки и станции: base/infrastructure, subtype=transit.
 
-Топология дорожного графа строится по общим connector_id и линейной позиции at из Segment.connectors. Совпадающие координаты без общей ссылки на connector не считаются физическим соединением. Это соответствует модели Overture. citeturn382678search1turn382678search3
+Топология дорожного графа строится по общим connector_id и линейной позиции at из Segment.connectors. Совпадающие координаты без общей ссылки на connector не считаются физическим соединением. Это соответствует модели Overture.
 
 ## Реализовано
 
