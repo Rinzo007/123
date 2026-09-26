@@ -217,6 +217,7 @@ export function App() {
   const [previewTrips, setPreviewTrips] = useState(1000);
   const [assignmentResult, setAssignmentResult] = useState<Awaited<ReturnType<typeof calculateAssignment>> | null>(null);
   const [cityAssignmentMeta, setCityAssignmentMeta] = useState<Awaited<ReturnType<typeof calculateCityAssignment>>["data"] | null>(null);
+  const [cityAssignmentPeriods, setCityAssignmentPeriods] = useState<Awaited<ReturnType<typeof calculateCityAssignment>>["periods"]>([]);
   const [demandStreets, setDemandStreets] = useState<FeatureCollection | null>(null);
   const [showDemandStreets, setShowDemandStreets] = useState(true);
   const [populationZones, setPopulationZones] = useState<FeatureCollection | null>(null);
@@ -650,6 +651,7 @@ export function App() {
       );
       setAssignmentResult(result.assignment);
       setCityAssignmentMeta(result.data);
+      setCityAssignmentPeriods(result.periods);
       setMessage(`Citywide: ${result.data.zones} зон, ${result.data.places} Places, ${result.data.od_pairs} OD-пар`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Городской расчёт недоступен");
@@ -1025,6 +1027,21 @@ export function App() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+              {cityAssignmentPeriods.length > 0 && (
+                <div className="analytics-panel">
+                  <div className="section-title">Расчёт по периодам</div>
+                  <div className="period-result-list">
+                    {cityAssignmentPeriods.map((period) => (
+                      <div className="period-result-row" key={period.period_id}>
+                        <strong>{period.period_id}</strong>
+                        <span>спрос {period.demand_trips.toFixed(0)}</span>
+                        <span>transit {(period.transit_share * 100).toFixed(1)}%</span>
+                        <span>load {(period.max_load_ratio * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {assignmentResult && (
