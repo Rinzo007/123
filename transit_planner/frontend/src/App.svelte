@@ -25,7 +25,7 @@
   import NetworkView from "./components/NetworkView.svelte";
   import EvaluationPanel from "./components/EvaluationPanel.svelte";
   import { stops as stopsStore, mode as modeStore, routeName as routeNameStore, headways as headwaysStore } from "./stores/network";
-  import { project as projectStore, markProjectDirty } from "./stores/project";
+  import { project as projectStore, markProjectDirty, markProjectClean } from "./stores/project";
 
   const DEFAULT_CENTER: [number, number] = [39.20, 51.67];
   const MAP_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
@@ -252,12 +252,28 @@
     return { type: "FeatureCollection", features: [] };
   }
 
+  function syncProjectStore(dirty = $projectStore.dirty) {
+    projectStore.set({
+      id: "current",
+      network: buildNetworkPayload(),
+      scenarioBase: structuredClone(scenarioBase),
+      initialized,
+      dirty,
+    });
+  }
+
+  function handleProjectChange() {
+    markProjectDirty();
+    syncProjectStore(true);
+  }
+
   function commitStops(next: StopDraft[]) {
     $stopsStore = next;
     roadRoute = null;
     assignmentResult = null;
     demandStreets = null;
     scenarioComparison = null;
+    handleProjectChange();
   }
 
   function addStop(event: MapMouseEvent) {
@@ -284,6 +300,7 @@
     economicsResult = null;
     timetable = null;
     message = "Маршрут очищен";
+    handleProjectChange();
   }
 
   function datasetCacheKey(prefix: string, bounds: { south: number; west: number; north: number; east: number }) {
@@ -496,6 +513,7 @@
       annualDays,
     };
     scenarioComparison = null;
+    handleProjectChange();
     message = "Базовый сценарий зафиксирован";
   }
 
@@ -558,6 +576,8 @@
     anchor.click();
     URL.revokeObjectURL(url);
     void saveProject("current", projectData());
+    markProjectClean();
+    syncProjectStore(false);
     message = "JSON сети экспортирован";
   }
 
@@ -578,6 +598,8 @@
     economicsResult = null;
     scenarioComparison = null;
     timetable = null;
+    markProjectClean();
+    syncProjectStore(false);
     message = "Проект загружен";
   }
 
