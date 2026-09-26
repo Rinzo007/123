@@ -9,6 +9,7 @@ from .analytics import (
 from .assignment import (
     AssignmentConfig,
     AssignmentMetrics,
+    DemandLoss,
     AssignmentResult,
     RouteFlow,
     SectionLoad,
@@ -91,6 +92,7 @@ __all__ = [
     "calculate_accessibility",
     "AssignmentConfig",
     "AssignmentMetrics",
+    "DemandLoss",
     "AssignmentResult",
     "RouteFlow",
     "SectionLoad",
