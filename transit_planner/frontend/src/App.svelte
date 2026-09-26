@@ -809,7 +809,7 @@
           routeRows={routeRows}
           periods={PERIODS}
           cityAssignmentMeta={cityAssignmentMeta}
-          cityAssignmentPeriods={cityAssignmentPeriods}
+          periodsData={cityAssignmentPeriods}
           assignmentResult={assignmentResult}
           economicsResult={economicsResult}
           scenarioComparison={scenarioComparison}
