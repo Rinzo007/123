@@ -200,6 +200,7 @@ def _assign_once(
     stop_boardings: dict[str, float] = {}
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
+    stop_platform_m: dict[str, float] = {}
     total_transit = total_car = total_walk = total_bike = 0.0
     weighted_transit_time = weighted_transfers = 0.0
     unserved = 0.0
@@ -335,6 +336,8 @@ def _assign_once(
             boardings=stop_boardings.get(stop_id, 0.0),
             alightings=stop_alightings.get(stop_id, 0.0),
             transfers=stop_transfers.get(stop_id, 0.0),
+            dwell_seconds=_stop_dwell_seconds(network, stop_id, config.period_id, stop_boardings.get(stop_id, 0.0)),
+            platform_m=stop_platform_m.get(stop_id, 0.0),
         )
         for stop_id in network.stops
     )
@@ -391,10 +394,17 @@ def _section_capacities(
         headway = service.headway_by_period.get(period_id)
         if headway is None:
             continue
-        departures = ceil(duration / headway)
-        vehicle_capacity = network.vehicle_types[service.vehicle_type_id].capacity
-        capacity = departures * vehicle_capacity
         route = network.routes[service.route_id]
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        scheduled_departures = ceil(duration / headway)
+        track_limited_departures = int(duration / 60.0 * profile.track_capacity_per_hour)
+        departures = min(scheduled_departures, track_limited_departures)
+        if departures <= 0:
+            continue
+        vehicle_capacity = network.vehicle_types[service.vehicle_type_id].capacity or profile.capacity
+        capacity = departures * vehicle_capacity
+        for stop_id in route.stop_ids:
+            stop_platform_m[stop_id] = max(stop_platform_m.get(stop_id, 0.0), profile.platform_m)
         for from_id, to_id in zip(route.stop_ids, route.stop_ids[1:]):
             key = (route.id, from_id, to_id)
             reverse_key = (route.id, to_id, from_id)
@@ -418,6 +428,28 @@ def _route_crowding_penalties(
         penalties[section.route_id] = max(penalties.get(section.route_id, 0.0), penalty)
     return penalties
 
+
+def _stop_dwell_seconds(
+    network: Network,
+    stop_id: str,
+    period_id: str,
+    boardings: float,
+) -> float:
+    period = network.periods[period_id]
+    duration = period.end_minute - period.start_minute
+    total = 0.0
+    for service in network.services.values():
+        headway = service.headway_by_period.get(period_id)
+        if headway is None:
+            continue
+        route = network.routes[service.route_id]
+        if stop_id not in route.stop_ids:
+            continue
+        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        departures = ceil(duration / headway)
+        total += departures * profile.dwell_s
+        total += boardings * profile.dwell_per_passenger_s
+    return total
 
 def _nearest_stop_id(
     network: Network,
