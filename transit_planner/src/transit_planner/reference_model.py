@@ -200,6 +200,19 @@ def minimum_station_headway_min(
     return dwell_headway, "dwell"
 
 
+def lateral_speed_limit_kph(
+    mode: str,
+    radius_m: float,
+) -> float:
+    """Return the speed limit imposed by reference lateral acceleration."""
+    if radius_m < 0:
+        raise ValueError("radius_m cannot be negative")
+    profile = REFERENCE_MODE_PROFILES[mode]
+    if radius_m == 0.0:
+        return 0.0
+    return (profile.lateral_acceleration_mps2 * radius_m) ** 0.5 * 3.6
+
+
 def minimum_track_headway_min(
     capacity_departures_per_hour: float | None,
 ) -> float:
