@@ -4,7 +4,13 @@ import json
 from dataclasses import dataclass
 from math import asin, cos, radians, sin, sqrt
 
-from .data import ConnectorRecord, ConnectorRef, RoadRecord
+from .data import (
+    ConnectorRecord,
+    ConnectorRef,
+    ProhibitedTransition,
+    ProhibitedTransitionSequenceEntry,
+    RoadRecord,
+)
 from .geo import LineString, Point
 from .network import Stop
 
@@ -96,18 +102,24 @@ class OvertureTransportationProvider:
                 for x, y, *_ in coordinates
             )
             refs = _parse_connector_refs(connector_refs)
+            source_id = f"overture:{road_id}"
+            restrictions = _parse_prohibited_transitions(
+                prohibited_transitions,
+                source_segment_id=source_id,
+            )
             road_type = str(segment_class or subclass or "unknown")
             class_speed = _class_speed(road_type)
 
             roads.append(
                 RoadRecord(
-                    id=f"overture:{road_id}",
+                    id=source_id,
                     geometry=LineString(points),
                     speed_kph=_effective_speed_kph(speed_limits, class_speed),
                     road_type=road_type,
                     oneway=bool(oneway) or _is_oneway(access_restrictions),
                     connectors=refs,
                     length_m=_haversine_linestring_m(points),
+                    prohibited_transitions=restrictions,
                 )
             )
 
@@ -129,7 +141,8 @@ class OvertureTransportationProvider:
                 FALSE AS oneway,
                 connectors,
                 access_restrictions,
-                speed_limits
+                speed_limits,
+                prohibited_transitions
             FROM read_parquet('{_sql_quote(self.source.transportation_segments())}')
             WHERE subtype = 'road'
               AND (
@@ -292,6 +305,68 @@ def _bbox_sql(
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _parse_prohibited_transitions(
+    raw,
+    *,
+    source_segment_id: str,
+) -> tuple[ProhibitedTransition, ...]:
+    if not raw:
+        return ()
+
+    result: list[ProhibitedTransition] = []
+    for rule in raw:
+        sequence_raw = _field(rule, "sequence") or ()
+        sequence: list[ProhibitedTransitionSequenceEntry] = []
+        for item in sequence_raw:
+            segment_id = _field(item, "segment_id")
+            connector_id = _field(item, "connector_id")
+            if segment_id is None or connector_id is None:
+                continue
+            segment_text = str(segment_id)
+            if not segment_text.startswith("overture:"):
+                segment_text = f"overture:{segment_text}"
+            sequence.append(
+                ProhibitedTransitionSequenceEntry(
+                    segment_id=segment_text,
+                    connector_id=str(connector_id),
+                )
+            )
+
+        if not sequence:
+            continue
+
+        when = _field(rule, "when")
+        heading = _field(when, "heading")
+        scoped = False
+        for name in ("during", "mode", "using", "recognized", "vehicle"):
+            value = _field(when, name)
+            if value not in (None, (), [], {}, ""):
+                scoped = True
+                break
+        if scoped:
+            continue
+
+        final_heading = _field(rule, "final_heading")
+        final_heading = None if final_heading is None else str(final_heading).lower()
+        heading = None if heading is None else str(heading).lower()
+
+        if final_heading not in (None, "forward", "backward"):
+            final_heading = None
+        if heading not in (None, "forward", "backward"):
+            heading = None
+
+        result.append(
+            ProhibitedTransition(
+                source_segment_id=source_segment_id,
+                sequence=tuple(sequence),
+                final_heading=final_heading,
+                when_heading=heading,
+            )
+        )
+
+    return tuple(result)
 
 
 def _parse_connector_refs(raw) -> tuple[ConnectorRef, ...]:
