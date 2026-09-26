@@ -7,6 +7,7 @@ import {
   validateNetwork,
   calculateAssignment,
   loadDemandStreets,
+  loadPopulationZones,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
@@ -218,6 +219,8 @@ export function App() {
   const [assignmentResult, setAssignmentResult] = useState<Awaited<ReturnType<typeof calculateAssignment>> | null>(null);
   const [demandStreets, setDemandStreets] = useState<FeatureCollection | null>(null);
   const [showDemandStreets, setShowDemandStreets] = useState(true);
+  const [populationZones, setPopulationZones] = useState<FeatureCollection | null>(null);
+  const [showPopulation, setShowPopulation] = useState(false);
   const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
   const [stopHistory, setStopHistory] = useState<StopDraft[][]>([]);
   const [stopFuture, setStopFuture] = useState<StopDraft[][]>([]);
@@ -307,6 +310,18 @@ export function App() {
           "circle-opacity": 0.65,
           "circle-stroke-width": 1,
           "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.addSource("population-zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "population-zone-points",
+        type: "circle",
+        source: "population-zones",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["get", "population"], 0, 2, 500, 5, 2000, 9, 5000, 15],
+          "circle-opacity": 0.28,
+          "circle-color": "#0f766e",
         },
       });
 
@@ -405,6 +420,7 @@ export function App() {
     const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
     const cityPlaceSource = map.getSource("city-places") as GeoJSONSource | undefined;
+    const populationSource = map.getSource("population-zones") as GeoJSONSource | undefined;
     const demandStreetSource = map.getSource("demand-streets") as GeoJSONSource | undefined;
     const analysisSectionSource = map.getSource("analysis-sections") as GeoJSONSource | undefined;
     const analysisStopSource = map.getSource("analysis-stops") as GeoJSONSource | undefined;
@@ -415,7 +431,9 @@ export function App() {
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
     if (cityPlaces) cityPlaceSource?.setData(cityPlaces);
+    if (populationZones) populationSource?.setData(populationZones);
     if (demandStreets) demandStreetSource?.setData(demandStreets);
+    if (map.getLayer("population-zone-points")) map.setLayoutProperty("population-zone-points", "visibility", showPopulation ? "visible" : "none");
     if (map.getLayer("demand-street-lines")) map.setLayoutProperty("demand-street-lines", "visibility", showDemandStreets ? "visible" : "none");
     if (assignmentResult) {
       analysisSectionSource?.setData(assignmentSectionGeoJSON(assignmentResult, stops));
@@ -440,7 +458,7 @@ export function App() {
     if (map.getLayer("city-connector-circles")) map.setLayoutProperty("city-connector-circles", "visibility", showConnectors ? "visible" : "none");
     if (map.getLayer("city-stop-circles")) map.setLayoutProperty("city-stop-circles", "visibility", showStops ? "visible" : "none");
     if (map.getLayer("city-place-circles")) map.setLayoutProperty("city-place-circles", "visibility", showPlaces ? "visible" : "none");
-  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, demandStreets, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads, showDemandStreets]);
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, demandStreets, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads, showDemandStreets, showPopulation]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headways),
@@ -575,6 +593,17 @@ export function App() {
       setCityConnectors(data.connectors);
       setCityStops(data.stops);
       setCityPlaces(data.places);
+      try {
+        const population = await loadPopulationZones(
+          bounds.getSouth(),
+          bounds.getWest(),
+          bounds.getNorth(),
+          bounds.getEast(),
+        );
+        setPopulationZones(population);
+      } catch {
+        setPopulationZones(null);
+      }
       setMessage(
         `Overture ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`,
       );
@@ -848,6 +877,10 @@ export function App() {
             <label className="check-row">
               <input type="checkbox" checked={showDemandStreets} onChange={(event) => setShowDemandStreets(event.target.checked)} />
               <span>Demand streets</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showPopulation} onChange={(event) => setShowPopulation(event.target.checked)} />
+              <span>Население WorldPop</span>
             </label>
           </section>
 
