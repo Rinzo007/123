@@ -43,3 +43,17 @@ def test_vehicle_mode_must_match_route_mode():
         assert "vehicle mode" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_default_service_periods_match_reference_model():
+    from transit_planner.reference_model import REFERENCE_PERIODS
+
+    actual = [
+        (period.id, period.start_minute, period.end_minute)
+        for period in __import__("transit_planner.network", fromlist=["default_service_periods"]).default_service_periods()
+    ]
+    expected = [
+        (period.key, period.start_minute, period.end_minute)
+        for period in REFERENCE_PERIODS
+    ]
+    assert actual == expected
