@@ -238,6 +238,10 @@ class TransitRouter:
             tuple(legs),
             service_headway_factors=headway_factors,
         )
+        adjusted_legs = _add_intermediate_dwell(
+            self.network,
+            adjusted_legs,
+        )
         return Journey(
             origin_stop_id=origin.id,
             destination_stop_id=destination.id,
@@ -451,6 +455,37 @@ def _scheduled_wait_minutes(
     if first_departure >= period_end:
         return None
     return headway / 2.0
+
+def _add_intermediate_dwell(
+    network: Network,
+    legs: tuple[JourneyLeg, ...],
+) -> tuple[JourneyLeg, ...]:
+    result: list[JourneyLeg] = []
+    previous_transit_route: str | None = None
+    for leg in legs:
+        duration = leg.duration_min
+        if (
+            leg.kind == "transit"
+            and leg.route_id is not None
+            and previous_transit_route == leg.route_id
+        ):
+            profile = REFERENCE_MODE_PROFILES[network.routes[leg.route_id].mode.value]
+            duration += profile.dwell_s / 60.0
+        result.append(
+            JourneyLeg(
+                leg.kind,
+                leg.from_id,
+                leg.to_id,
+                duration,
+                leg.route_id,
+                leg.wait_min,
+                leg.service_id,
+            )
+        )
+        previous_transit_route = (
+            leg.route_id if leg.kind == "transit" else None
+        )
+    return tuple(result)
 
 
 def _adjust_connection_waits(
