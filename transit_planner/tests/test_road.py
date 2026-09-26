@@ -217,3 +217,30 @@ def test_via_prohibited_transition_blocks_two_segment_sequence():
 
     assert time == float("inf")
     assert path == ()
+
+
+def test_directional_access_flags_build_only_allowed_direction():
+    road = RoadRecord(
+        "forward-only",
+        LineString((Point(0, 0), Point(1, 0))),
+        30,
+        connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 1.0)),
+        forward_allowed=True,
+        backward_allowed=False,
+        length_m=100.0,
+    )
+    graph = build_topological_road_graph((road,)).graph
+
+    forward_time, forward_path = graph.shortest_path(
+        graph.connector_nodes["c0"],
+        graph.connector_nodes["c1"],
+    )
+    backward_time, backward_path = graph.shortest_path(
+        graph.connector_nodes["c1"],
+        graph.connector_nodes["c0"],
+    )
+
+    assert forward_time > 0
+    assert forward_path == ("forward-only:c0:c1",)
+    assert backward_time == float("inf")
+    assert backward_path == ()
