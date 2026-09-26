@@ -396,6 +396,7 @@ def city_demand(payload: dict) -> dict:
                 "destination_zone_id": pair.destination_zone_id,
                 "trips_per_day": pair.trips_per_day,
                 "purpose": pair.purpose,
+                "base_time_min": pair.base_time_min,
             }
             for pair in demand.pairs
         ],
@@ -546,6 +547,11 @@ def calculate_assignment(payload: dict) -> dict:
             destination_zone_id=str(item["destination_zone_id"]),
             trips_per_day=float(item["trips_per_day"]),
             purpose=str(item.get("purpose", "all")),
+            base_time_min=(
+                None
+                if item.get("base_time_min") is None
+                else float(item["base_time_min"])
+            ),
         )
         for item in payload.get("demand", [])
     )
