@@ -33,6 +33,7 @@ def network_to_dict(network: Network) -> dict:
                 "both_ways": route.both_ways,
                 "closed": route.closed,
                 "row_by_segment": [row.value for row in route.row_by_segment],
+                "open_stop_ids": list(route.open_stop_ids),
             }
             for route in network.routes.values()
         ],
@@ -104,6 +105,7 @@ def network_from_dict(data: dict) -> Network:
                 bool(raw.get("both_ways", True)),
                 bool(raw.get("closed", False)),
                 tuple(TrackRow(raw_row) for raw_row in raw.get("row_by_segment", ())),
+                tuple(raw.get("open_stop_ids", ())),
             )
         )
     for raw in data.get("services", []):
