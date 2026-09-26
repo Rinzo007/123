@@ -80,6 +80,8 @@ class OvertureTransportationProvider:
             subclass,
             oneway,
             connector_refs,
+            access_restrictions,
+            speed_limits,
         ) in rows:
             if not geojson:
                 continue
@@ -95,14 +97,15 @@ class OvertureTransportationProvider:
             )
             refs = _parse_connector_refs(connector_refs)
             road_type = str(segment_class or subclass or "unknown")
+            class_speed = _class_speed(road_type)
 
             roads.append(
                 RoadRecord(
                     id=f"overture:{road_id}",
                     geometry=LineString(points),
-                    speed_kph=_class_speed(road_type),
+                    speed_kph=_effective_speed_kph(speed_limits, class_speed),
                     road_type=road_type,
-                    oneway=bool(oneway),
+                    oneway=bool(oneway) or _is_oneway(access_restrictions),
                     connectors=refs,
                     length_m=_haversine_linestring_m(points),
                 )
@@ -124,7 +127,9 @@ class OvertureTransportationProvider:
                 class,
                 subclass,
                 FALSE AS oneway,
-                connectors
+                connectors,
+                access_restrictions,
+                speed_limits
             FROM read_parquet('{_sql_quote(self.source.transportation_segments())}')
             WHERE subtype = 'road'
               AND (
@@ -321,6 +326,69 @@ def _parse_connector_refs(raw) -> tuple[ConnectorRef, ...]:
 
     refs.sort(key=lambda ref: ref.at)
     return tuple(refs)
+
+
+def _field(value, name: str):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    try:
+        return value[name]
+    except (KeyError, TypeError, IndexError):
+        return None
+    return getattr(value, name, None)
+
+
+def _when_has_only_heading(when, heading: str) -> bool:
+    if when is None:
+        return False
+    if _field(when, "heading") != heading:
+        return False
+    for name in ("during", "mode", "using", "recognized", "vehicle"):
+        value = _field(when, name)
+        if value not in (None, (), [], ""):
+            return False
+    return True
+
+
+def _is_oneway(access_restrictions) -> bool:
+    if not access_restrictions:
+        return False
+    backward_denied = False
+    backward_allowed = False
+    for rule in access_restrictions:
+        if _field(rule, "access_type") == "denied":
+            if _when_has_only_heading(_field(rule, "when"), "backward"):
+                backward_denied = True
+        elif _field(rule, "access_type") == "allowed":
+            if _when_has_only_heading(_field(rule, "when"), "backward"):
+                backward_allowed = True
+    return backward_denied and not backward_allowed
+
+
+def _effective_speed_kph(speed_limits, fallback: float) -> float:
+    if not speed_limits:
+        return fallback
+    for rule in speed_limits:
+        if _field(rule, "between") not in (None, (), []):
+            continue
+        when = _field(rule, "when")
+        if when not in (None, {}, (), []):
+            continue
+        maximum = _field(rule, "max_speed")
+        value = _field(maximum, "value")
+        unit = str(_field(maximum, "unit") or "").lower()
+        if value is None:
+            continue
+        speed = float(value)
+        if "mph" in unit:
+            speed *= 1.609344
+        elif "m/s" in unit or unit.replace(" ", "") == "ms":
+            speed *= 3.6
+        if speed > 0:
+            return speed
+    return fallback
 
 
 def _haversine_linestring_m(points: tuple[Point, ...]) -> float:
