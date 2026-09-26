@@ -51,8 +51,7 @@ class _TransitOption:
     headway: float
     departure_offset: float
     mode: TransitMode
-    speed_limit_kph: float | None = None
-    distance_km: float | None = None
+    physical_run_time_min: float | None = None
 
 
 class TransitRouter:
@@ -76,7 +75,7 @@ class TransitRouter:
         self.road_graph = road_graph
         self.stop_road_nodes = dict(stop_road_nodes or {})
         self._road_run_time_cache: dict[
-            tuple[str, str, TransitMode, float | None, float | None],
+            tuple[str, str, TransitMode, float | None],
             float | None,
         ] = {}
         self._walking_neighbors_cache = self._build_walking_neighbors()
@@ -165,8 +164,7 @@ class TransitRouter:
                     stop_id,
                     option.neighbor_stop_id,
                     option.mode,
-                    speed_limit_kph=option.speed_limit_kph,
-                    distance_km=option.distance_km,
+                    physical_run_time_min=option.physical_run_time_min,
                 )
                 next_state = (option.neighbor_stop_id, option.route_id)
                 weighted_wait = wait * self.config.wait_weight
@@ -221,23 +219,16 @@ class TransitRouter:
         to_id: str,
         mode: TransitMode,
         *,
-        speed_limit_kph: float | None = None,
-        distance_km: float | None = None,
+        physical_run_time_min: float | None = None,
     ) -> float:
-        cache_key = (from_id, to_id, mode, speed_limit_kph, distance_km)
+        if physical_run_time_min is not None:
+            return physical_run_time_min
+
+        cache_key = (from_id, to_id, mode)
         if cache_key in self._road_run_time_cache:
             cached = self._road_run_time_cache[cache_key]
             if cached is not None:
                 return cached
-
-        if distance_km is not None:
-            speed = speed_limit_kph or self._SPEEDS.get(
-                mode,
-                self.config.default_transit_speed_kph,
-            )
-            physical_time = distance_km / speed * 60.0
-            self._road_run_time_cache[cache_key] = physical_time
-            return physical_time
 
         if self.road_graph is not None:
             origin_node = self.stop_road_nodes.get(from_id)
@@ -245,7 +236,7 @@ class TransitRouter:
             if origin_node is not None and destination_node is not None:
                 _, path = self.road_graph.shortest_path(origin_node, destination_node)
                 if path:
-                    mode_speed = speed_limit_kph or self._SPEEDS.get(
+                    mode_speed = self._SPEEDS.get(
                         mode,
                         self.config.default_transit_speed_kph,
                     )
@@ -260,12 +251,12 @@ class TransitRouter:
 
         a = self.network.stops[from_id]
         b = self.network.stops[to_id]
-        fallback_distance_km = self._point_distance(a, b) / 1000.0
-        speed = speed_limit_kph or self._SPEEDS.get(
+        distance_km = self._point_distance(a, b) / 1000.0
+        speed = self._SPEEDS.get(
             mode,
             self.config.default_transit_speed_kph,
         )
-        direct_time = fallback_distance_km / speed * 60.0
+        direct_time = distance_km / speed * 60.0
         self._road_run_time_cache[cache_key] = direct_time
         return direct_time
 
@@ -307,9 +298,11 @@ class TransitRouter:
                 offset = service.departure_offset_by_period.get(period_id, 0.0)
                 for index, (from_id, to_id) in enumerate(route.segment_pairs()):
                     section_id = route.track_section_for_segment(index)
-                    section = None if section_id is None else self.network.track_sections[section_id]
-                    speed_limit = None if section is None else section.speed_limit_kph
-                    distance_km = None if section is None else section.length_km
+                    physical_run_time_min = (
+                        None
+                        if section_id is None
+                        else self.network.route_segment_run_time_min(route, index)
+                    )
                     stop_map.setdefault(from_id, []).append(
                         _TransitOption(
                             route.id,
@@ -317,8 +310,7 @@ class TransitRouter:
                             headway,
                             offset,
                             route.mode,
-                            speed_limit,
-                            distance_km,
+                            physical_run_time_min,
                         )
                     )
                     if route.both_ways:
@@ -329,8 +321,7 @@ class TransitRouter:
                                 headway,
                                 offset,
                                 route.mode,
-                                speed_limit,
-                                distance_km,
+                                physical_run_time_min,
                             )
                         )
         return {
