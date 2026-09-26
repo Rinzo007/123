@@ -491,7 +491,7 @@ export function App() {
   }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, demandStreets, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads, showDemandStreets, showPopulation]);
 
   const network = useMemo(
-    () => buildNetworkPayload(stops, mode, routeName, headways),
+    () => buildNetworkPayload(stops, mode, routeName, headways, roadRoute),
     [stops, mode, routeName, headways, roadRoute],
   );
 
@@ -910,7 +910,7 @@ export function App() {
         const project = JSON.parse(String(reader.result));
         if (project.format !== "transit-planner-project") throw new Error("Неверный формат проекта");
         const version = Number(project.version ?? 1);
-        if (version < 1 || version > 2) throw new Error("Неподдерживаемая версия проекта");
+        if (version < 1 || version > 3) throw new Error("Неподдерживаемая версия проекта");
         setRouteName(String(project.routeName ?? "Новый маршрут"));
         setMode((project.mode ?? "bus") as TransitMode);
         setHeadways({ ...headways, ...(project.headways ?? {}) });
@@ -943,7 +943,6 @@ export function App() {
         setScenarioComparison(null);
         setEconomicsResult(null);
         commitStops(Array.isArray(project.stops) ? project.stops : []);
-        setRoadRoute(null);
         setTimetable(null);
         setMessage("Проект загружен");
       } catch (error) {
