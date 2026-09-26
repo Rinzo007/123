@@ -308,10 +308,6 @@ def _assign_once(
             zones,
             default_share=config.choice.no_car_share,
         )
-        car_availability = 1.0 - min(
-            1.0,
-            no_car_share * config.choice.no_car_effectiveness,
-        )
         probs = probabilities(
             utilities(
                 walk_time_min=walk_time,
@@ -323,8 +319,9 @@ def _assign_once(
                 car_distance_km=distance_m / 1000.0,
                 bike_distance_km=distance_m / 1000.0,
                 config=config.choice,
+                base_time_min=pair.base_time_min,
             ),
-            car_availability=car_availability,
+            no_car_share=no_car_share,
             bike_availability=config.choice.two_wheel_share,
         )
 
