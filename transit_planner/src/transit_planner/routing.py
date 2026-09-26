@@ -57,6 +57,7 @@ class _TransitOption:
     headway: float
     departure_offset: float
     mode: TransitMode
+    service_id: str
     physical_run_time_min: float | None = None
 
 
@@ -386,6 +387,7 @@ class TransitRouter:
                             headway,
                             offset,
                             route.mode,
+                            service.id,
                             physical_run_time_min,
                         )
                     )
