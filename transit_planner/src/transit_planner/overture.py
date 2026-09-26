@@ -88,6 +88,7 @@ class OvertureTransportationProvider:
             connector_refs,
             access_restrictions,
             speed_limits,
+            prohibited_transitions,
         ) in rows:
             if not geojson:
                 continue
