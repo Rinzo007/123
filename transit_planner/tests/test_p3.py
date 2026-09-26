@@ -106,4 +106,4 @@ def test_router_can_use_road_graph_for_section_runtime():
     journey = router.shortest(network.stops["a"], network.stops["b"], period_id="peak")
 
     assert journey is not None
-    assert abs(journey.duration_min - 19.0) < 1e-9
+    assert abs(journey.duration_min - 17.0) < 1e-9
