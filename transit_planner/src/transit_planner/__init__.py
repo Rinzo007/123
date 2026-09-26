@@ -25,6 +25,7 @@ from .data import (
 )
 from .demand import DemandMatrix, ODPairDemand
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
+from .places import CityPlace, PlacePurpose, PlacePurposeMapper, aggregate_place_attractions
 from .network import Network
 from .od import GravityParameters, gravity_od
 from .demand_profile import (
@@ -97,6 +98,9 @@ __all__ = [
     "assign_demand",
     "City",
     "DemandZone",
+    "CityPlace",
+    "PlacePurpose",
+    "PlacePurposeMapper",
     "ConnectorRecord",
     "ConnectorRef",
     "ProhibitedTransition",
