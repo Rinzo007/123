@@ -6,6 +6,7 @@ from transit_planner.overture import (
     OvertureSource,
     OvertureTransitProvider,
     OvertureTransportationProvider,
+    _access_directions,
     _effective_speed_kph,
     _haversine_linestring_m,
     _parse_prohibited_transitions,
@@ -144,3 +145,18 @@ def test_overture_provider_load_graph_uses_connector_topology():
 
     assert result.connector_count == 3
     assert len(result.graph.prohibited_transitions) == 1
+
+def test_access_direction_parser_handles_forward_backward_and_global_denials():
+    assert _access_directions([
+        {"access_type": "denied", "when": {"heading": "backward"}}
+    ]) == (True, False)
+    assert _access_directions([
+        {"access_type": "denied", "when": {"heading": "forward"}}
+    ]) == (False, True)
+    assert _access_directions([
+        {"access_type": "denied"}
+    ]) == (False, False)
+    assert _access_directions([
+        {"access_type": "denied"},
+        {"access_type": "allowed", "when": {"heading": "forward"}},
+    ]) == (True, False)
