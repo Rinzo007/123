@@ -28,7 +28,8 @@ def network_to_dict(network: Network) -> dict:
                 if route.geometry is None
                 else {
                     "points": [{"x": p.x, "y": p.y} for p in route.geometry.points]
-                },
+                },                "track_section_ids": list(route.track_section_ids),
+
             }
             for route in network.routes.values()
         ],
