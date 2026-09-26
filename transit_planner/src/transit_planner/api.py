@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
+from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson
@@ -263,6 +264,33 @@ def overture_stops(
         ) from exc
     return stops_to_geojson(stops)
 
+
+@app.post("/api/v1/calibration/route-ridership")
+def route_ridership_calibration(payload: dict) -> dict:
+    observed = tuple(
+        ObservedRouteRidership(
+            route_id=str(item["route_id"]),
+            observed_boardings_per_day=float(item["observed_boardings_per_day"]),
+        )
+        for item in payload.get("observed", [])
+    )
+    simulated = {str(key): float(value) for key, value in payload.get("simulated", {}).items()}
+    report = calibrate_route_ridership(observed, simulated)
+    return {
+        "mae": report.mae,
+        "rmse": report.rmse,
+        "mape": report.mape,
+        "routes": [
+            {
+                "route_id": item.route_id,
+                "observed": item.observed,
+                "simulated": item.simulated,
+                "absolute_error": item.absolute_error,
+                "relative_error": item.relative_error,
+            }
+            for item in report.routes
+        ],
+    }
 
 @app.post("/api/v1/timetable")
 def create_timetable(payload: dict) -> dict:
