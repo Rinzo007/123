@@ -102,7 +102,6 @@ class AssignmentConfig:
     bike_speed_kph: float = 15.12
     choice: ChoiceConfig = ChoiceConfig()
     transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
-    crowding_penalty_min: float = 20.0
     crowding_start_ratio: float = 0.85
     iterations: int = 6
     damping: float = 0.5
@@ -117,8 +116,6 @@ class AssignmentConfig:
             raise ValueError("Speeds must be positive")
         if self.transfer_penalty_min < 0:
             raise ValueError("transfer_penalty_min cannot be negative")
-        if self.crowding_penalty_min < 0:
-            raise ValueError("crowding_penalty_min cannot be negative")
         if self.crowding_start_ratio < 0:
             raise ValueError("crowding_start_ratio cannot be negative")
         if self.iterations <= 0:
