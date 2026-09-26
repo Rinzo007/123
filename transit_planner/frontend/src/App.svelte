@@ -861,21 +861,23 @@
       {#if viewMode === "map"}
         <MapView bind:mapElement={mapContainer} drawMode={drawMode} />
       {:else}
-        <NetworkView
-          summary={evaluationSummary}
-          routeRows={routeRows}
-          periods={PERIODS}
-          modeLabels={MODE_LABELS}
-          onGenerateTimetable={generateTimetable}
-        />
-        <EvaluationPanel
-          cityMeta={cityAssignmentMeta}
-          periodsData={cityAssignmentPeriods}
-          assignment={assignmentResult}
-          economics={economicsResult}
-          scenario={scenarioComparison}
-          timetable={timetable}
-        />
+        <div class="analysis-workspace">
+          <NetworkView
+            summary={evaluationSummary}
+            routeRows={routeRows}
+            periods={PERIODS}
+            modeLabels={MODE_LABELS}
+            onGenerateTimetable={generateTimetable}
+          />
+          <EvaluationPanel
+            cityMeta={cityAssignmentMeta}
+            periodsData={cityAssignmentPeriods}
+            assignment={assignmentResult}
+            economics={economicsResult}
+            scenario={scenarioComparison}
+            timetable={timetable}
+          />
+        </div>
       {/if}
     </main>
   </div>
@@ -899,7 +901,7 @@
   .check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; font-size: 13px; }.check input { width: auto; }
   .stop-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #e5e7eb; border-radius: 7px; margin-bottom: 6px; }.stop-row small { display: block; color: #6b7280; margin-top: 2px; }
   .empty { color: #6b7280; font-size: 13px; line-height: 1.4; }.status { position: sticky; bottom: 0; padding: 10px; background: #f9fafb; border-radius: 7px; font-size: 12px; }.status.busy { color: #1d4ed8; }
-  .main-panel { min-width: 0; min-height: 0; position: relative; }.map-wrap, .map { width: 100%; height: 100%; min-height: 640px; }.map-hint { position: absolute; top: 12px; left: 12px; padding: 8px 10px; background: rgba(17,24,39,.9); color: #fff; border-radius: 7px; font-size: 12px; }
+  .main-panel { min-width: 0; min-height: 0; position: relative; }.map-wrap, .map { width: 100%; height: 100%; min-height: 640px; }.analysis-workspace { height: 100%; overflow: auto; padding: 20px; box-sizing: border-box; }.map-hint { position: absolute; top: 12px; left: 12px; padding: 8px 10px; background: rgba(17,24,39,.9); color: #fff; border-radius: 7px; font-size: 12px; }
   .network-view { height: 100%; overflow: auto; padding: 20px; box-sizing: border-box; }.network-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 16px; }.network-header h2 { margin: 0 0 4px; }.network-header p { color: #6b7280; margin: 0 0 10px; }
   .network-kpis, .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)); gap: 8px; }.kpi-grid { grid-template-columns: repeat(4, minmax(110px, 1fr)); }.network-kpis > div, .kpi-grid > div { background: #fff; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; }.network-kpis span, .kpi-grid span { display: block; color: #6b7280; font-size: 11px; }.network-kpis b, .kpi-grid b { display: block; margin-top: 4px; }
   .network-empty, .analytics-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 12px; }.analytics-panel .section-title { margin-bottom: 12px; }
