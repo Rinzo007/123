@@ -15,12 +15,8 @@ def test_build_overture_network_projects_and_snaps_stops():
         ),
     )
     connectors = (
-        __import__("transit_planner.data", fromlist=["ConnectorRecord"]).ConnectorRecord(
-            "c0", Point(39.2000, 51.6700)
-        ),
-        __import__("transit_planner.data", fromlist=["ConnectorRecord"]).ConnectorRecord(
-            "c1", Point(39.2010, 51.6700)
-        ),
+        ConnectorRecord("c0", Point(39.2000, 51.6700)),
+        ConnectorRecord("c1", Point(39.2010, 51.6700)),
     )
     stops = (
         Stop("s1", "Test", Point(39.20005, 51.6700)),
