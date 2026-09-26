@@ -10,6 +10,7 @@ class ModeChoiceConfig:
     transit_constant: float = 0.0
     car_constant: float = 0.0
     walk_constant: float = 0.0
+    bike_constant: float = 0.0
 
     def __post_init__(self) -> None:
         if self.scale <= 0:
@@ -21,6 +22,7 @@ class ModeUtilities:
     walk: float
     car: float
     transit: float
+    bike: float
 
 
 def utilities(
@@ -28,6 +30,7 @@ def utilities(
     walk_time_min: float,
     car_time_min: float,
     transit_time_min: float | None,
+    bike_time_min: float,
     config: ModeChoiceConfig = ModeChoiceConfig(),
 ) -> ModeUtilities:
     transit = (
@@ -39,6 +42,7 @@ def utilities(
         walk=config.walk_constant - config.scale * walk_time_min,
         car=config.car_constant - config.scale * car_time_min,
         transit=transit,
+        bike=config.bike_constant - config.scale * bike_time_min,
     )
 
 
@@ -47,6 +51,7 @@ def probabilities(values: ModeUtilities) -> dict[str, float]:
         "walk": values.walk,
         "car": values.car,
         "transit": values.transit,
+        "bike": values.bike,
     }
     maximum = max(finite.values())
     if maximum == float("-inf"):
