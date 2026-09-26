@@ -75,15 +75,11 @@ def calculate_economics(
         length_km = network.route_length_km(route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
         profile = REFERENCE_MODE_PROFILES[route.mode.value]
-        direction_factor = 1.0 if not route.both_ways else 2.0
-        cycle_run_min = direction_factor * network.route_run_time_min(route)
-        cycle_dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
-        cycle_turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
-        cycle_time_min = cycle_run_min + cycle_dwell_min + cycle_turnback_min
-        required_vehicles = max(1, ceil(cycle_time_min / headway))
+        required_vehicles = max(1, ceil(network.route_cycle_time_min(route) / headway))
         daily_fleet_cost += required_vehicles * profile.vehicle_cost_day
 
         # Service is represented per direction in this engine slice.
+        direction_factor = 1.0 if not route.both_ways else 2.0
         vehicle_km = departures * length_km * direction_factor
         daily_vehicle_km += vehicle_km
         operating_cost_per_km = vehicle.operating_cost_per_km or profile.opex_per_vehicle_km
