@@ -89,6 +89,7 @@ class AssignmentResult:
     iterations: int
     max_load_ratio: float
     loss_reasons: tuple[DemandLoss, ...] = ()
+    service_headway_factors: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +199,7 @@ def assign_demand(
         iterations=converged_after,
         max_load_ratio=max((s.load_ratio for s in snapshot.section_loads), default=0.0),
         loss_reasons=snapshot.loss_reasons,
+        service_headway_factors=tuple(sorted(service_headway_factors.items())),
     )
 
 
