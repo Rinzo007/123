@@ -527,20 +527,22 @@ export function App() {
                 ))}
               </select>
             </label>
-            <label>
-              Частота по периодам
+            <div className="period-headways">
+              <div className="section-title">Частота по периодам</div>
               {network.periods.map((period) => (
-                <input
-                  key={period.id}
-                  aria-label={period.id}
-                  type="number"
-                  min={1}
-                  max={180}
-                  value={headways[period.id] ?? 10}
-                  onChange={(event) => setHeadways((current) => ({ ...current, [period.id]: Number(event.target.value) }))}
-                />
+                <label key={period.id}>
+                  {period.id.replace("_", " ")}
+                  <input
+                    aria-label={period.id}
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={headways[period.id] ?? 10}
+                    onChange={(event) => setHeadways((current) => ({ ...current, [period.id]: Number(event.target.value) }))}
+                  />
+                </label>
               ))}
-            </label>
+            </div>
           </section>
 
           <section className="stops-panel">
