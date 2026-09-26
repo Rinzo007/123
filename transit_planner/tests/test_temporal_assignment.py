@@ -59,4 +59,5 @@ def test_temporal_totals_sum_mode_results():
         result.total_transit_trips
         + result.total_car_trips
         + result.total_walk_trips
+        + result.total_bike_trips
     ) == result.total_demand_trips
