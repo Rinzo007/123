@@ -155,50 +155,55 @@ def probabilities(
     if not 0.0 <= no_car_share <= 1.0:
         raise ValueError("no_car_share must be in [0, 1]")
 
-    def weight(value: float, availability: float = 1.0) -> float:
-        if value == float("-inf"):
-            return 0.0
-        return exp(value) * availability
+    entries = (
+        ("transit", values.transit, 1.0),
+        ("car", values.car, car_availability),
+        ("walk", values.walk, 1.0),
+        ("bike", values.bike, bike_availability),
+        ("rest", values.rest, 1.0),
+    )
+    finite_values = tuple(value for _, value, _ in entries if value != float("-inf"))
+    if not finite_values:
+        return {key: 0.0 for key, _, _ in entries}
+    maximum = max(finite_values)
+    weights = {
+        key: (
+            0.0
+            if value == float("-inf")
+            else exp(value - maximum) * availability
+        )
+        for key, value, availability in entries
+    }
 
-    transit = weight(values.transit)
-    car = weight(values.car, car_availability)
-    walk = weight(values.walk)
-    bike = weight(values.bike, bike_availability)
-    rest = weight(values.rest)
-
-    active = walk + bike
+    transit = weights["transit"]
+    car = weights["car"]
+    active = weights["walk"] + weights["bike"]
+    rest = weights["rest"]
     with_car = transit + car + active + rest
     without_car = transit + active + rest
     if with_car <= 0.0:
-        return {
-            "walk": 0.0,
-            "car": 0.0,
-            "transit": 0.0,
-            "bike": 0.0,
-            "rest": 0.0,
-        }
+        return {key: 0.0 for key, _, _ in entries}
 
-    non_car_share = (
+    denominator_without_car = max(without_car, 1e-300)
+    active_share = (
         (1.0 - no_car_share) * active / with_car
-        + no_car_share * active / max(without_car, 1e-300)
+        + no_car_share * active / denominator_without_car
     )
-    bike_ratio = bike / active if active > 0.0 else 0.0
-    walk_ratio = 1.0 - bike_ratio
+    bike_ratio = weights["bike"] / active if active > 0.0 else 0.0
 
     return {
         "transit": (
             (1.0 - no_car_share) * transit / with_car
-            + no_car_share * transit / max(without_car, 1e-300)
+            + no_car_share * transit / denominator_without_car
         ),
         "car": (1.0 - no_car_share) * car / with_car,
-        "walk": non_car_share * walk_ratio,
-        "bike": non_car_share * bike_ratio,
+        "walk": active_share * (1.0 - bike_ratio),
+        "bike": active_share * bike_ratio,
         "rest": (
             (1.0 - no_car_share) * rest / with_car
-            + no_car_share * rest / max(without_car, 1e-300)
+            + no_car_share * rest / denominator_without_car
         ),
     }
-
 
 def alternative_probabilities(
     alternatives: tuple[tuple[float, float], ...],
