@@ -22,6 +22,7 @@ class ChoiceConfig:
     bike_constant: float = 0.0
     transit_fare_weight: float = 0.0
     transit_wait_weight: float = REFERENCE_TRANSFER.wait_multiplier
+    transit_bias_minutes: float = REFERENCE_TRANSFER.rider_bias_s / 60.0
     car_cost_per_km_eur: float = REFERENCE_CAR.cost_per_km_eur
     car_parking_eur: float = REFERENCE_CAR.parking_eur
     car_parking_minutes: float = REFERENCE_CAR.parking_s / 60.0
@@ -39,6 +40,8 @@ class ChoiceConfig:
             raise ValueError("value_of_time_s_per_eur must be positive")
         if self.transit_fare_weight < 0 or self.transit_wait_weight < 0:
             raise ValueError("Transit weights cannot be negative")
+        if self.transit_bias_minutes < 0:
+            raise ValueError("transit_bias_minutes cannot be negative")
         if self.car_cost_per_km_eur < 0 or self.bike_cost_per_km_eur < 0:
             raise ValueError("Mode operating cost cannot be negative")
         if self.car_parking_eur < 0 or self.car_parking_minutes < 0:
@@ -84,6 +87,7 @@ def utilities(
             - coefficient * (
                 transit_time_min
                 + config.transit_wait_weight * max(0.0, transit_wait_min)
+                + config.transit_bias_minutes
             )
             - config.transit_fare_weight * transit_fare
         )
