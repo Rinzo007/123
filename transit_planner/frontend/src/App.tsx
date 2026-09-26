@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
 import {
   loadOvertureNetwork,
+  loadOvertureRoute,
   validateNetwork,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
