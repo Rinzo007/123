@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from urllib.error import URLError
 
 from .assignment import AssignmentConfig, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .geojson import roads_to_geojson, stops_to_geojson
-from .osm import OverpassRoadProvider, OverpassStopProvider
+from .overture import (
+    OvertureSource,
+    OvertureTransitProvider,
+    OvertureTransportationProvider,
+)
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -25,19 +28,41 @@ app.add_middleware(
 )
 
 MAX_BBOX_AREA = 0.04
+DEFAULT_OVERTURE_RELEASE = "2026-09-23.1"
 
 
-def _bbox(south: float, west: float, north: float, east: float) -> tuple[float, float, float, float]:
+def _bbox(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+) -> tuple[float, float, float, float]:
     if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
-        raise HTTPException(status_code=400, detail="Некорректная географическая область")
+        raise HTTPException(
+            status_code=400,
+            detail="Некорректная географическая область",
+        )
     if (north - south) * (east - west) > MAX_BBOX_AREA:
-        raise HTTPException(status_code=400, detail="Слишком большая область. Уменьшите масштаб карты.")
+        raise HTTPException(
+            status_code=400,
+            detail="Слишком большая область. Уменьшите масштаб карты.",
+        )
     return south, west, north, east
+
+
+def _overture_source(release: str | None) -> OvertureSource:
+    return OvertureSource(
+        release=(release or DEFAULT_OVERTURE_RELEASE).strip()
+    )
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "data_source": "overture",
+        "overture_release": DEFAULT_OVERTURE_RELEASE,
+    }
 
 
 @app.post("/api/v1/network/validate")
@@ -47,32 +72,48 @@ def validate_network(payload: dict) -> dict:
     return {"valid": not errors, "errors": errors}
 
 
-@app.get("/api/v1/data/osm/stops")
-def osm_stops(
+@app.get("/api/v1/data/overture/roads")
+def overture_roads(
     south: float = Query(...),
     west: float = Query(...),
     north: float = Query(...),
     east: float = Query(...),
+    release: str | None = Query(None),
 ) -> dict:
     try:
-        stops = OverpassStopProvider(_bbox(south, west, north, east)).load_stops()
-    except (OSError, URLError, TimeoutError) as exc:
-        raise HTTPException(status_code=502, detail="Overpass недоступен") from exc
-    return stops_to_geojson(stops)
-
-
-@app.get("/api/v1/data/osm/roads")
-def osm_roads(
-    south: float = Query(...),
-    west: float = Query(...),
-    north: float = Query(...),
-    east: float = Query(...),
-) -> dict:
-    try:
-        roads = OverpassRoadProvider(_bbox(south, west, north, east)).load_roads()
-    except (OSError, URLError, TimeoutError) as exc:
-        raise HTTPException(status_code=502, detail="Overpass недоступен") from exc
+        bbox = _bbox(south, west, north, east)
+        roads = OvertureTransportationProvider(
+            source=_overture_source(release),
+            bbox=bbox,
+        ).load_roads()
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Overture недоступен: {exc}",
+        ) from exc
     return roads_to_geojson(roads)
+
+
+@app.get("/api/v1/data/overture/stops")
+def overture_stops(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+    release: str | None = Query(None),
+) -> dict:
+    try:
+        bbox = _bbox(south, west, north, east)
+        stops = OvertureTransitProvider(
+            source=_overture_source(release),
+            bbox=bbox,
+        ).load_stops()
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Overture недоступен: {exc}",
+        ) from exc
+    return stops_to_geojson(stops)
 
 
 @app.post("/api/v1/assignment")

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
-import { loadOsmRoads, loadOsmStops, validateNetwork } from "./api";
+import { loadOvertureRoads, loadOvertureStops, validateNetwork } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
 
@@ -287,17 +287,17 @@ export function App() {
     const map = mapRef.current;
     if (!map) return;
     setBusy(true);
-    setMessage("Загрузка OSM для текущей области…");
+    setMessage("Загрузка Overture для текущей области…");
     try {
       const bounds = map.getBounds();
       const [roads, stopsData] = await Promise.all([
-        loadOsmRoads(
+        loadOvertureRoads(
           bounds.getSouth(),
           bounds.getWest(),
           bounds.getNorth(),
           bounds.getEast(),
         ),
-        loadOsmStops(
+        loadOvertureStops(
           bounds.getSouth(),
           bounds.getWest(),
           bounds.getNorth(),
@@ -307,10 +307,10 @@ export function App() {
       setCityRoads(roads);
       setCityStops(stopsData);
       setMessage(
-        `OSM загружен: ${roads.features.length} участков, ${stopsData.features.length} остановок`,
+        `Overture загружен: ${roads.features.length} участков, ${stopsData.features.length} остановок`,
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Ошибка загрузки OSM");
+      setMessage(error instanceof Error ? error.message : "Ошибка загрузки Overture");
     } finally {
       setBusy(false);
     }
@@ -355,7 +355,7 @@ export function App() {
         </div>
         <div className="actions">
           <button onClick={loadCityData} disabled={busy}>
-            Загрузить OSM
+            Загрузить Overture
           </button>
           <button
             className={drawMode ? "primary active" : "primary"}
@@ -453,7 +453,7 @@ export function App() {
               <b>{MODE_CAPACITY[mode]} мест</b>
             </div>
             <div className="metric">
-              <span>OSM-дороги</span>
+              <span>Overture-дороги</span>
               <b>{cityRoads?.features.length ?? 0}</b>
             </div>
           </section>

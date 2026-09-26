@@ -15,7 +15,10 @@ export async function validateNetwork(
   return response.json() as Promise<ValidationResult>;
 }
 
-async function loadGeoJson(path: string, params: URLSearchParams): Promise<GeoJSON.FeatureCollection> {
+async function loadGeoJson(
+  path: string,
+  params: URLSearchParams,
+): Promise<GeoJSON.FeatureCollection> {
   const response = await fetch(path + "?" + params.toString());
   if (!response.ok) {
     const body = await response.text();
@@ -24,14 +27,14 @@ async function loadGeoJson(path: string, params: URLSearchParams): Promise<GeoJS
   return response.json() as Promise<GeoJSON.FeatureCollection>;
 }
 
-export function loadOsmStops(
+export function loadOvertureStops(
   south: number,
   west: number,
   north: number,
   east: number,
 ): Promise<GeoJSON.FeatureCollection> {
   return loadGeoJson(
-    "/api/v1/data/osm/stops",
+    "/api/v1/data/overture/stops",
     new URLSearchParams({
       south: String(south),
       west: String(west),
@@ -41,14 +44,14 @@ export function loadOsmStops(
   );
 }
 
-export function loadOsmRoads(
+export function loadOvertureRoads(
   south: number,
   west: number,
   north: number,
   east: number,
 ): Promise<GeoJSON.FeatureCollection> {
   return loadGeoJson(
-    "/api/v1/data/osm/roads",
+    "/api/v1/data/overture/roads",
     new URLSearchParams({
       south: String(south),
       west: String(west),
