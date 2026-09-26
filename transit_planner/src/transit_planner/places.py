@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from .geo import Point
@@ -81,7 +81,7 @@ DEFAULT_PLACE_PURPOSE_CATEGORIES: dict[PlacePurpose, tuple[str, ...]] = {
 
 @dataclass(frozen=True, slots=True)
 class PlacePurposeMapper:
-    categories: dict[PlacePurpose, tuple[str, ...]] = DEFAULT_PLACE_PURPOSE_CATEGORIES
+    categories: dict[PlacePurpose, tuple[str, ...]] = field(default_factory=lambda: dict(DEFAULT_PLACE_PURPOSE_CATEGORIES))
 
     def purpose_for(self, place: CityPlace) -> PlacePurpose | None:
         categories = {
@@ -92,3 +92,37 @@ class PlacePurposeMapper:
             if any(value in categories for value in values):
                 return purpose
         return None
+
+def aggregate_place_attractions(
+    zones: tuple['DemandZone', ...],
+    places: tuple[CityPlace, ...],
+    *,
+    mapper: PlacePurposeMapper | None = None,
+) -> tuple['DemandZone', ...]:
+    from .city import DemandZone
+
+    mapper = mapper or PlacePurposeMapper()
+    assigned = {zone.id: dict(zone.attractions) for zone in zones}
+
+    for place in places:
+        purpose = mapper.purpose_for(place)
+        if purpose is None:
+            continue
+
+        nearest_zone = min(
+            zones,
+            key=lambda zone: (
+                (place.location.x - zone.centroid_x) ** 2
+                + (place.location.y - zone.centroid_y) ** 2
+            ),
+            default=None,
+        )
+        if nearest_zone is None:
+            continue
+        values = assigned[nearest_zone.id]
+        values[purpose.value] = values.get(purpose.value, 0.0) + place.importance
+
+    return tuple(
+        replace(zone, purpose_attractions=tuple(sorted(assigned[zone.id].items())))
+        for zone in zones
+    )
