@@ -77,3 +77,32 @@ export function loadOvertureConnectors(
     }),
   );
 }
+
+export interface OvertureNetworkResponse {
+  roads: GeoJSON.FeatureCollection;
+  connectors: GeoJSON.FeatureCollection;
+  stops: GeoJSON.FeatureCollection;
+  release: string;
+  counts: {
+    roads: number;
+    connectors: number;
+    stops: number;
+  };
+}
+
+export function loadOvertureNetwork(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<OvertureNetworkResponse> {
+  return loadGeoJson(
+    "/api/v1/data/overture/network",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  ) as Promise<OvertureNetworkResponse>;
+}
