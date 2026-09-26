@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .geo import LineString, Point
+from .reference_model import REFERENCE_PERIODS
 
 
 class TransitMode(StrEnum):
@@ -145,10 +146,8 @@ class Network:
 
 
 def default_service_periods() -> tuple[ServicePeriod, ...]:
-    return (
-        ServicePeriod("night", 0, 360),
-        ServicePeriod("morning_peak", 360, 600),
-        ServicePeriod("daytime", 600, 960),
-        ServicePeriod("evening_peak", 960, 1200),
-        ServicePeriod("late_evening", 1200, 1440),
+    """Return the canonical five operating periods used by the model."""
+    return tuple(
+        ServicePeriod(period.key, period.start_minute, period.end_minute)
+        for period in REFERENCE_PERIODS
     )
