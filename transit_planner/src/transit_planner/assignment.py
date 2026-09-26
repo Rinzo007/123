@@ -15,6 +15,7 @@ from .reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_TRANSFER,
     SEVERE_LOAD_RATIO,
+    crowding_time_multiplier,
     headway_unevenness_factor,
 )
 
@@ -171,7 +172,11 @@ def assign_demand(
             route_penalties,
             service_headway_factors,
         )
-        route_target_penalties = _route_crowding_penalties(snapshot.section_loads, config)
+        route_target_penalties = _route_crowding_penalties(
+            network,
+            snapshot.section_loads,
+            config,
+        )
         max_delta = _max_penalty_delta(route_penalties, route_target_penalties)
         route_penalties = {
             route_id: (
@@ -631,14 +636,26 @@ def _section_capacity_and_platforms(
 
 
 def _route_crowding_penalties(
+    network: Network,
     sections: tuple[SectionLoad, ...],
     config: AssignmentConfig,
 ) -> dict[str, float]:
     penalties: dict[str, float] = {}
     for section in sections:
-        excess = max(0.0, section.load_ratio - config.crowding_start_ratio)
-        penalty = excess * config.crowding_penalty_min
-        penalties[section.route_id] = max(penalties.get(section.route_id, 0.0), penalty)
+        if section.load_ratio <= config.crowding_start_ratio:
+            continue
+        route = network.routes[section.route_id]
+        pairs = route.segment_pairs()
+        try:
+            segment_index = pairs.index(
+                (section.from_stop_id, section.to_stop_id)
+            )
+        except ValueError:
+            continue
+        base_runtime = network.route_segment_run_time_min(route, segment_index)
+        multiplier = crowding_time_multiplier(section.load_ratio)
+        penalty = base_runtime * (multiplier - 1.0)
+        penalties[route.id] = penalties.get(route.id, 0.0) + penalty
     return penalties
 
 
