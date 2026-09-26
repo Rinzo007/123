@@ -15,6 +15,7 @@ from .road import RoadGraph
 from .road_builder import RoadGraphBuildResult, build_topological_road_graph
 from .snap import StopSnap, snap_stops_to_road_graph
 from .data import ConnectorRecord, RoadRecord
+from .geo import Point
 from .network import Stop
 
 
