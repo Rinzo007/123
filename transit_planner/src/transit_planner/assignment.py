@@ -306,6 +306,10 @@ def _assign_once(
             zones,
             default_share=config.choice.no_car_share,
         )
+        car_availability = 1.0 - min(
+            1.0,
+            no_car_share * config.choice.no_car_effectiveness,
+        )
         probs = probabilities(
             utilities(
                 walk_time_min=walk_time,
@@ -319,13 +323,14 @@ def _assign_once(
                 config=config.choice,
                 base_time_min=pair.base_time_min,
             ),
-            no_car_share=no_car_share,
+            car_availability=car_availability,
+            no_car_share=0.0,
             bike_availability=config.choice.two_wheel_share,
         )
 
         transit_trips = trips * probs["transit"]
         alternative_shares = (
-            alternative_probabilities(journey_stats, config=config.choice)
+            alternative_probabilities(journey_stats)
             if journeys else ()
         )
         car_trips = trips * probs["car"]
