@@ -75,6 +75,7 @@ class ModeUtilities:
     car: float
     transit: float
     bike: float
+    rest: float = 0.0
 
 
 def utilities(
@@ -87,6 +88,7 @@ def utilities(
     transit_fare: float = 0.0,
     car_distance_km: float = 0.0,
     bike_distance_km: float | None = None,
+    base_time_min: float | None = None,
     config: ChoiceConfig = ChoiceConfig(),
 ) -> ModeUtilities:
     coefficient = config.time_coefficient
@@ -128,11 +130,18 @@ def utilities(
             + config.car_parking_eur
         ) * config.value_of_time_s_per_eur / 60.0
     )
+    rest = (
+        float("-inf")
+        if base_time_min is None
+        else config.transit_constant
+        - coefficient * max(0.0, base_time_min)
+    )
     return ModeUtilities(
         walk=config.walk_constant - coefficient * walk_generalized_minutes,
         car=config.car_constant - coefficient * car_generalized_minutes,
         transit=transit,
         bike=bike,
+        rest=rest,
     )
 
 
@@ -141,39 +150,58 @@ def probabilities(
     *,
     car_availability: float = 1.0,
     bike_availability: float = 1.0,
+    no_car_share: float = REFERENCE_MOBILITY.no_car_share,
 ) -> dict[str, float]:
     if not 0.0 <= car_availability <= 1.0:
         raise ValueError("car_availability must be in [0, 1]")
-
     if not 0.0 <= bike_availability <= 1.0:
         raise ValueError("bike_availability must be in [0, 1]")
+    if not 0.0 <= no_car_share <= 1.0:
+        raise ValueError("no_car_share must be in [0, 1]")
 
-    available = {
-        "walk": values.walk,
-        "car": values.car,
-        "transit": values.transit,
-        "bike": values.bike,
-    }
-    maximum = max(available.values())
-    if maximum == float("-inf"):
-        return {key: 0.0 for key in available}
+    def weight(value: float, availability: float = 1.0) -> float:
+        if value == float("-inf"):
+            return 0.0
+        return exp(value) * availability
 
-    weights = {
-        key: (
-            0.0
-            if value == float("-inf")
-            else exp(value - maximum) * (
-                car_availability if key == "car" else (
-                    bike_availability if key == "bike" else 1.0
-                )
-            )
-        )
-        for key, value in available.items()
+    transit = weight(values.transit)
+    car = weight(values.car, car_availability)
+    walk = weight(values.walk)
+    bike = weight(values.bike, bike_availability)
+    rest = weight(values.rest)
+
+    active = walk + bike
+    with_car = transit + car + active + rest
+    without_car = transit + active + rest
+    if with_car <= 0.0:
+        return {
+            "walk": 0.0,
+            "car": 0.0,
+            "transit": 0.0,
+            "bike": 0.0,
+            "rest": 0.0,
+        }
+
+    non_car_share = (
+        (1.0 - no_car_share) * active / with_car
+        + no_car_share * active / max(without_car, 1e-300)
+    )
+    bike_ratio = bike / active if active > 0.0 else 0.0
+    walk_ratio = 1.0 - bike_ratio
+
+    return {
+        "transit": (
+            (1.0 - no_car_share) * transit / with_car
+            + no_car_share * transit / max(without_car, 1e-300)
+        ),
+        "car": (1.0 - no_car_share) * car / with_car,
+        "walk": non_car_share * walk_ratio,
+        "bike": non_car_share * bike_ratio,
+        "rest": (
+            (1.0 - no_car_share) * rest / with_car
+            + no_car_share * rest / max(without_car, 1e-300)
+        ),
     }
-    total = sum(weights.values())
-    if total <= 0:
-        return {key: 0.0 for key in available}
-    return {key: weight / total for key, weight in weights.items()}
 
 
 def trip_suppression_factor(
