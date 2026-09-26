@@ -27,7 +27,7 @@ class ChoiceConfig:
     car_parking_eur: float = REFERENCE_CAR.parking_eur
     car_parking_minutes: float = REFERENCE_CAR.parking_s / 60.0
     car_circuity: float = REFERENCE_CAR.circuity
-    walk_circuity: float = 1.25 * REFERENCE_TRANSFER.walk_multiplier
+    walk_circuity: float = 1.33 * REFERENCE_TRANSFER.walk_multiplier
     bike_circuity: float = 1.25
     bike_cost_per_km_eur: float = REFERENCE_MOBILITY.two_wheel_per_km_eur
     bike_fixed_minutes: float = REFERENCE_CAR.parking_s / 60.0
