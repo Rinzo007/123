@@ -162,7 +162,7 @@ def test_router_uses_physical_track_length():
 
 def test_router_applies_reference_transfer_penalty_and_multiplier():
     network = Network()
-    for stop_id, x in (("a", 0), ("b", 100), ("c", 600)):
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 2000)):
         network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
     network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
     network.add_period(ServicePeriod("am", 360, 540))
