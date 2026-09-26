@@ -471,6 +471,29 @@ def compare_scenario_payload(payload: dict) -> dict:
                 }
                 for item in comparison.sections
             ],
+            "services": [
+                {
+                    "service_id": item.service_id,
+                    "route_id": item.route_id,
+                    "period_id": item.period_id,
+                    "base_riders": item.base_riders,
+                    "alternative_riders": item.alternative_riders,
+                    "riders_delta": item.riders_delta,
+                    "base_peak_load_factor": item.base_peak_load_factor,
+                    "alternative_peak_load_factor": item.alternative_peak_load_factor,
+                    "peak_load_factor_delta": item.peak_load_factor_delta,
+                    "base_fleet": item.base_fleet,
+                    "alternative_fleet": item.alternative_fleet,
+                    "fleet_delta": item.fleet_delta,
+                    "base_effective_headway_min": item.base_effective_headway_min,
+                    "alternative_effective_headway_min": item.alternative_effective_headway_min,
+                    "effective_headway_delta": item.effective_headway_delta,
+                    "base_minimum_headway_min": item.base_minimum_headway_min,
+                    "alternative_minimum_headway_min": item.alternative_minimum_headway_min,
+                    "minimum_headway_delta": item.minimum_headway_delta,
+                }
+                for item in comparison.services
+            ],
         },
     }
 
