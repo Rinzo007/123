@@ -183,3 +183,36 @@ def test_service_analytics_accounts_for_competing_shared_track_service():
     service = next(item for item in result.services if item.service_id == "s1")
     assert service.minimum_headway_why == "track"
     assert abs(service.minimum_headway_min - 3.75) < 1e-9
+
+
+def test_shared_track_capacity_reports_combined_tph():
+    from transit_planner.geo import Point
+    from transit_planner.infrastructure import TrackSection
+    from transit_planner.network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0, 0)))
+    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_track_section(TrackSection(
+        "s1", 1.0, capacity_departures_per_hour=30.0, shared_group="tram-corridor",
+    ))
+    network.add_vehicle_type(VehicleType("tram", "Tram", TransitMode.TRAM, 250))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(
+        Route("r1", "1", TransitMode.TRAM, ("a", "b"), track_section_ids=("s1",))
+    )
+    network.add_route(
+        Route("r2", "2", TransitMode.TRAM, ("a", "b"), track_section_ids=("s1",))
+    )
+    network.add_service(Service("svc1", "r1", "tram", {"am": 10.0}))
+    network.add_service(Service("svc2", "r2", "tram", {"am": 20.0}))
+
+    from transit_planner.analytics import _track_capacity_analytics
+
+    rows = _track_capacity_analytics(network)
+    row = next(item for item in rows if item.shared_group == "tram-corridor")
+    assert row.period_id == "am"
+    assert row.route_ids == ("r1", "r2")
+    assert row.tph == 9.0
+    assert row.limit_tph == 30.0
+    assert row.utilization == 0.3
