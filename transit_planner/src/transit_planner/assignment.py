@@ -15,6 +15,7 @@ from .reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_TRANSFER,
     SEVERE_LOAD_RATIO,
+    headway_unevenness_factor,
 )
 
 
@@ -154,6 +155,7 @@ def assign_demand(
     }
 
     route_penalties: dict[str, float] = {}
+    service_headway_factors: dict[str, float] = {}
     snapshot: _FlowSnapshot | None = None
     converged_after = config.iterations
 
@@ -166,6 +168,7 @@ def assign_demand(
             zones,
             zone_stops,
             route_penalties,
+            service_headway_factors,
         )
         route_target_penalties = _route_crowding_penalties(snapshot.section_loads, config)
         max_delta = _max_penalty_delta(route_penalties, route_target_penalties)
@@ -176,6 +179,11 @@ def assign_demand(
             )
             for route_id, target in route_target_penalties.items()
         }
+        service_headway_factors = _service_headway_feedback(
+            network,
+            snapshot,
+            config.period_id,
+        )
         if iteration > 1 and max_delta <= config.convergence_tolerance:
             converged_after = iteration
             break
@@ -201,6 +209,7 @@ class _FlowSnapshot:
     stop_flows: tuple[StopFlow, ...]
     unserved: float
     loss_reasons: tuple[DemandLoss, ...]
+    service_stop_boardings: tuple[tuple[str, str, float], ...] = ()
 
 
 def _assign_once(
@@ -213,6 +222,7 @@ def _assign_once(
     route_penalties: dict[str, float],
 ) -> _FlowSnapshot:
     section_flow: dict[tuple[str, str, str], float] = {}
+    service_stop_boardings: dict[tuple[str, str], float] = {}
     section_capacity, stop_platform_m = _section_capacity_and_platforms(
         network,
         config.period_id,
@@ -249,6 +259,7 @@ def _assign_once(
                 max_alternatives=config.max_transit_alternatives,
                 route_penalties=route_penalties,
                 diversity_penalty_min=config.alternative_diversity_penalty_min,
+                service_headway_factors=service_headway_factors,
             )
             journeys = tuple(
                 candidate
@@ -343,6 +354,13 @@ def _assign_once(
                         continue
                     key = (leg.route_id, leg.from_id, leg.to_id)
                     section_flow[key] = section_flow.get(key, 0.0) + candidate_trips
+                    if leg.service_id is not None:
+                        for stop_id in (leg.from_id, leg.to_id):
+                            service_key = (leg.service_id, stop_id)
+                            service_stop_boardings[service_key] = (
+                                service_stop_boardings.get(service_key, 0.0)
+                                + candidate_trips
+                            )
                     route_traversals[leg.route_id] = (
                         route_traversals.get(leg.route_id, 0.0) + candidate_trips
                     )
@@ -443,7 +461,19 @@ def _assign_once(
         DemandLoss(reason, trips)
         for reason, trips in sorted(loss_reasons.items())
     )
-    return _FlowSnapshot(metrics, route_flows, section_loads, stop_flows, unserved, losses)
+    service_stop_rows = tuple(
+        (service_id, stop_id, value)
+        for (service_id, stop_id), value in sorted(service_stop_boardings.items())
+    )
+    return _FlowSnapshot(
+        metrics,
+        route_flows,
+        section_loads,
+        stop_flows,
+        unserved,
+        losses,
+        service_stop_rows,
+    )
 
 
 def _no_car_share(
@@ -456,6 +486,34 @@ def _no_car_share(
     if zone is not None:
         return zone.no_car_share
     return default_share if 0.0 <= default_share <= 1.0 else REFERENCE_MOBILITY.no_car_share
+
+def _service_headway_feedback(
+    network: Network,
+    snapshot: _FlowSnapshot,
+    period_id: str,
+) -> dict[str, float]:
+    period = network.periods[period_id]
+    period_hours = (period.end_minute - period.start_minute) / 60.0
+    stop_rows = {(service_id, stop_id): value for service_id, stop_id, value in snapshot.service_stop_boardings}
+    factors: dict[str, float] = {}
+    for service in network.services.values():
+        headway = service.headway_by_period.get(period_id)
+        if headway is None:
+            continue
+        route = network.routes[service.route_id]
+        stop_boardings = tuple(
+            stop_rows.get((service.id, stop_id), 0.0)
+            for stop_id in route.stop_ids
+        )
+        factors[service.id] = headway_unevenness_factor(
+            route.mode.value,
+            headway,
+            period_hours,
+            stop_boardings,
+            route_closed=route.closed,
+            both_ways=route.both_ways,
+        )
+    return factors
 
 
 def _classify_demand_loss(
