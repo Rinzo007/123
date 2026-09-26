@@ -81,7 +81,7 @@ class OverturePlacesProvider:
 
         rows = _query_duckdb(self._sql())
         places: list[CityPlace] = []
-        for place_id, geojson, name, basic_category, taxonomy_primary, confidence in rows:
+        for place_id, geojson, name, basic_category, taxonomy_primary, taxonomy_hierarchy, confidence in rows:
             if not geojson:
                 continue
             geometry = json.loads(geojson)
@@ -95,6 +95,7 @@ class OverturePlacesProvider:
                     location=Point(float(coordinates[0]), float(coordinates[1])),
                     basic_category=None if basic_category is None else str(basic_category),
                     taxonomy_primary=None if taxonomy_primary is None else str(taxonomy_primary),
+                    taxonomy_hierarchy=tuple(str(item) for item in (taxonomy_hierarchy or ())),
                     importance=max(0.0, float(confidence or 1.0)),
                 )
             )
@@ -121,6 +122,7 @@ class OverturePlacesProvider:
                 names.primary AS name,
                 basic_category,
                 taxonomy.primary AS taxonomy_primary,
+                taxonomy.hierarchy AS taxonomy_hierarchy,
                 confidence
             FROM read_parquet('{_sql_quote(self.source.places())}')
             WHERE TRUE
