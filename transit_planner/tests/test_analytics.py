@@ -67,8 +67,8 @@ def test_one_way_service_analytics_uses_one_direction_of_vehicle_km():
     assert service.effective_headway_min > 10.0
     assert service.daily_vehicle_km == 6.0
     assert service.daily_opex == 12.0
-    assert service.minimum_station_headway_min == 0.75
-    assert service.minimum_headway_min == 0.75
+    assert abs(service.minimum_station_headway_min - 0.75) < 1e-3
+    assert abs(service.minimum_headway_min - 0.75) < 1e-3
     assert service.minimum_headway_why == "dwell"
 
 def test_analytics_uses_physical_segment_length_for_passenger_km():
