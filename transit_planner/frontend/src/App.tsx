@@ -47,7 +47,7 @@ function buildNetworkPayload(
   stops: StopDraft[],
   mode: TransitMode,
   routeName: string,
-  headway: number,
+  headways: Record<string, number>,
 ): NetworkPayload {
   const origin = stops[0] ?? {
     lon: DEFAULT_CENTER[0],
@@ -99,11 +99,11 @@ function buildNetworkPayload(
               route_id: "draft-route",
               vehicle_type_id: vehicleType.id,
               headway_by_period: {
-                night: headway,
-                morning_peak: headway,
-                daytime: headway,
-                evening_peak: headway,
-                late_evening: headway,
+                night: headways.night,
+                morning_peak: headways.morning_peak,
+                daytime: headways.daytime,
+                evening_peak: headways.evening_peak,
+                late_evening: headways.late_evening,
               },
             },
           ]
@@ -162,7 +162,7 @@ export function App() {
   const [roadRoute, setRoadRoute] = useState<FeatureCollection<LineString, object> | null>(null);
   const [mode, setMode] = useState<TransitMode>("bus");
   const [routeName, setRouteName] = useState("Новый маршрут");
-  const [headway, setHeadway] = useState(10);
+  const [headways, setHeadways] = useState<Record<string, number>>({ night: 20, morning_peak: 10, daytime: 12, evening_peak: 10, late_evening: 20 });
   const [message, setMessage] = useState("Готово к редактированию");
   const [busy, setBusy] = useState(false);
   const [viewMode, setViewMode] = useState<"map" | "network">("map");
@@ -333,8 +333,8 @@ export function App() {
   }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, showRoads, showStops, showPlaces, showConnectors]);
 
   const network = useMemo(
-    () => buildNetworkPayload(stops, mode, routeName, headway),
-    [stops, mode, routeName, headway],
+    () => buildNetworkPayload(stops, mode, routeName, headways),
+    [stops, mode, routeName, headways],
   );
 
   const routeRows = useMemo(
@@ -528,14 +528,18 @@ export function App() {
               </select>
             </label>
             <label>
-              Интервал, мин
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={headway}
-                onChange={(event) => setHeadway(Number(event.target.value))}
-              />
+              Частота по периодам
+              {network.periods.map((period) => (
+                <input
+                  key={period.id}
+                  aria-label={period.id}
+                  type="number"
+                  min={1}
+                  max={180}
+                  value={headways[period.id] ?? 10}
+                  onChange={(event) => setHeadways((current) => ({ ...current, [period.id]: Number(event.target.value) }))}
+                />
+              ))}
             </label>
           </section>
 
@@ -599,7 +603,7 @@ export function App() {
             </div>
             <div className="metric">
               <span>Интервал</span>
-              <b>{headway} мин</b>
+              <b>{headways.morning_peak} мин peak</b>
             </div>
             <div className="metric">
               <span>Вместимость</span>
