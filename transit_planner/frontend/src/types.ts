@@ -1,9 +1,4 @@
-export type TransitMode =
-  | "bus"
-  | "trolleybus"
-  | "tram"
-  | "metro"
-  | "regional_rail";
+export type TransitMode = "bus" | "tram" | "metro" | "rail";
 
 export interface StopDraft {
   id: string;
