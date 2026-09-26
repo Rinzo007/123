@@ -23,6 +23,7 @@ def roads_to_geojson(roads: tuple[RoadRecord, ...]) -> dict:
                     "speed_kph": road.speed_kph,
                     "road_type": road.road_type,
                     "oneway": road.oneway,
+                    "length_m": road.length_m,
                     "connector_count": len(road.connectors),
                     "connector_ids": [
                         ref.connector_id for ref in road.connectors
