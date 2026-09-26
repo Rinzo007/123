@@ -6,7 +6,11 @@ from math import ceil, sqrt
 from .assignment import AssignmentResult
 from .city import DemandZone
 from .network import Network
-from .reference_model import REFERENCE_MODE_PROFILES
+from .reference_model import (
+    REFERENCE_MODE_PROFILES,
+    minimum_station_headway_min,
+    minimum_track_headway_min,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +76,9 @@ class ServiceAnalytics:
     daily_vehicle_km: float
     daily_opex: float
     capacity_per_direction: float
+    minimum_station_headway_min: float = 0.0
+    minimum_headway_min: float = 0.0
+    minimum_headway_why: str = "dwell"
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +203,26 @@ def _service_analytics(
     vehicle_km = departures * length_km * direction_factor
     vehicle = network.vehicle_types[service.vehicle_type_id]
     opex = vehicle_km * (vehicle.operating_cost_per_km or profile.opex_per_vehicle_km)
+    station_headway, station_why = minimum_station_headway_min(
+        route.mode.value,
+        route_closed=route.closed,
+    )
+    track_headway = min(
+        (
+            minimum_track_headway_min(
+                network.track_sections[section_id].capacity_departures_per_hour,
+            )
+            for section_id in route.track_section_ids
+            if section_id in network.track_sections
+        ),
+        default=float("inf"),
+    )
+    if track_headway >= station_headway:
+        minimum_headway = track_headway
+        headway_why = "track"
+    else:
+        minimum_headway = station_headway
+        headway_why = station_why
     return ServiceAnalytics(
         service_id=service_id,
         route_id=route.id,
@@ -205,6 +232,9 @@ def _service_analytics(
         daily_vehicle_km=vehicle_km,
         daily_opex=opex,
         capacity_per_direction=departures * (vehicle.capacity or profile.capacity),
+        minimum_station_headway_min=station_headway,
+        minimum_headway_min=minimum_headway,
+        minimum_headway_why=headway_why,
     )
 
 
