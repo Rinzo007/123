@@ -54,6 +54,12 @@ class Route:
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Route id cannot be empty")
+        if len(self.stop_ids) < 2:
+            raise ValueError("A route needs at least two stops")
+        expected_segments = len(self.stop_ids) if self.closed else len(self.stop_ids) - 1
+        if self.track_section_ids and len(self.track_section_ids) != expected_segments:
+            raise ValueError("track_section_ids must match route segments")
+
     def segment_pairs(self) -> tuple[tuple[str, str], ...]:
         pairs = list(zip(self.stop_ids, self.stop_ids[1:]))
         if self.closed:
@@ -61,8 +67,8 @@ class Route:
         return tuple(pairs)
 
     def track_section_for_segment(self, index: int) -> str | None:
-        if index < 0:
-            raise IndexError("segment index cannot be negative")
+        if index < 0 or index >= len(self.segment_pairs()):
+            raise IndexError("segment index out of range")
         if not self.track_section_ids:
             return None
         return self.track_section_ids[index]
