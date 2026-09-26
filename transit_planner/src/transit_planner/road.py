@@ -21,6 +21,9 @@ class RoadEdge:
     speed_kph: float
     road_type: str = "unknown"
     segment_id: str | None = None
+    from_connector_id: str | None = None
+    to_connector_id: str | None = None
+    direction: str | None = None
 
     @property
     def travel_time_minutes(self) -> float:
@@ -37,6 +40,8 @@ class RoadGraph:
     edges: dict[str, RoadEdge] = field(default_factory=dict)
     outgoing: dict[int, list[str]] = field(default_factory=dict)
     connector_nodes: dict[str, int] = field(default_factory=dict)
+    prohibited_transitions: tuple[object, ...] = ()
+    _restriction_index: dict[str, tuple[object, ...]] = field(default_factory=dict, init=False, repr=False)
 
     def add_node(self, node: RoadNode) -> None:
         if node.id in self.nodes:
@@ -68,6 +73,15 @@ class RoadGraph:
             raise ValueError("Edge speed must be positive")
         self.edges[edge.id] = edge
         self.outgoing.setdefault(edge.from_node, []).append(edge.id)
+
+    def add_prohibited_transition(self, rule: object) -> None:
+        self.prohibited_transitions = (*self.prohibited_transitions, rule)
+        source_segment_id = getattr(rule, "source_segment_id", None)
+        if source_segment_id:
+            self._restriction_index[source_segment_id] = (
+                *self._restriction_index.get(source_segment_id, ()),
+                rule,
+            )
 
     def shortest_path(self, origin: int, destination: int) -> tuple[float, tuple[str, ...]]:
         if origin not in self.nodes or destination not in self.nodes:
