@@ -4,8 +4,6 @@ from dataclasses import dataclass
 
 from .city import DemandZone
 from .demand import DemandMatrix
-from .demand_profile import DEFAULT_TEMPORAL_DEMAND_PROFILE, TemporalDemandProfile
-from .od import purpose_gravity_od
 from .projection import project_wgs84_point
 from .places import CityPlace, aggregate_place_attractions
 from .reference_demand import ReferenceDemandLayers, build_daily_demand, build_demand_layers
@@ -33,7 +31,6 @@ def build_city_demand(
     origin_lon: float | None = None,
     origin_lat: float | None = None,
     config: CityDemandConfig = CityDemandConfig(),
-    profile: TemporalDemandProfile = DEFAULT_TEMPORAL_DEMAND_PROFILE,
 ) -> DemandMatrix:
     if (origin_lon is None) != (origin_lat is None):
         raise ValueError("origin_lon and origin_lat must be provided together")
@@ -57,9 +54,8 @@ def build_city_demand(
         )
 
     enriched_zones = aggregate_place_attractions(zones, places)
-    return purpose_gravity_od(
+    return build_daily_demand(
         enriched_zones,
-        profile=profile,
         trip_rate=config.trip_rate,
         decay=config.decay,
         reference_speed_kph=config.reference_speed_kph,
