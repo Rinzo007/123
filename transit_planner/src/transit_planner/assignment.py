@@ -156,7 +156,7 @@ def assign_demand(
         for zone_id in zones
     }
 
-    route_penalties: dict[str, float] = {}
+    segment_crowding_penalties: dict[tuple[str, str, str], float] = {}
     service_headway_factors: dict[str, float] = {}
     snapshot: _FlowSnapshot | None = None
     converged_after = config.iterations
@@ -169,21 +169,24 @@ def assign_demand(
             config,
             zones,
             zone_stops,
-            route_penalties,
+            segment_crowding_penalties,
             service_headway_factors,
         )
-        route_target_penalties = _route_crowding_penalties(
+        segment_target_penalties = _segment_crowding_penalties(
             network,
             snapshot.section_loads,
             config,
         )
-        max_delta = _max_penalty_delta(route_penalties, route_target_penalties)
-        route_penalties = {
-            route_id: (
-                route_penalties.get(route_id, 0.0) * config.damping
+        max_delta = _max_penalty_delta(
+            segment_crowding_penalties,
+            segment_target_penalties,
+        )
+        segment_crowding_penalties = {
+            segment: (
+                segment_crowding_penalties.get(segment, 0.0) * config.damping
                 + target * (1.0 - config.damping)
             )
-            for route_id, target in route_target_penalties.items()
+            for segment, target in segment_target_penalties.items()
         }
         service_headway_factors = _service_headway_feedback(
             network,
@@ -226,7 +229,7 @@ def _assign_once(
     config: AssignmentConfig,
     zones: dict[str, DemandZone],
     zone_stops: dict[str, str | None],
-    route_penalties: dict[str, float],
+    segment_crowding_penalties: dict[tuple[str, str, str], float],
     service_headway_factors: dict[str, float],
 ) -> _FlowSnapshot:
     section_flow: dict[tuple[str, str, str], float] = {}
@@ -265,7 +268,8 @@ def _assign_once(
                 network.stops[destination_stop_id],
                 period_id=config.period_id,
                 max_alternatives=config.max_transit_alternatives,
-                route_penalties=route_penalties,
+                route_penalties={},
+                segment_crowding_penalties=segment_crowding_penalties,
                 diversity_penalty_min=config.alternative_diversity_penalty_min,
                 service_headway_factors=service_headway_factors,
             )
@@ -635,27 +639,28 @@ def _section_capacity_and_platforms(
     )
 
 
-def _route_crowding_penalties(
+def _segment_crowding_penalties(
     network: Network,
     sections: tuple[SectionLoad, ...],
     config: AssignmentConfig,
-) -> dict[str, float]:
-    penalties: dict[str, float] = {}
+) -> dict[tuple[str, str, str], float]:
+    penalties: dict[tuple[str, str, str], float] = {}
     for section in sections:
         if section.load_ratio <= config.crowding_start_ratio:
             continue
         route = network.routes[section.route_id]
-        pairs = route.segment_pairs()
+        segment = (route.id, section.from_stop_id, section.to_stop_id)
         try:
-            segment_index = pairs.index(
+            segment_index = route.segment_pairs().index(
                 (section.from_stop_id, section.to_stop_id)
             )
         except ValueError:
             continue
         base_runtime = network.route_segment_run_time_min(route, segment_index)
-        multiplier = crowding_time_multiplier(section.load_ratio)
-        penalty = base_runtime * (multiplier - 1.0)
-        penalties[route.id] = penalties.get(route.id, 0.0) + penalty
+        penalty = base_runtime * (
+            crowding_time_multiplier(section.load_ratio) - 1.0
+        )
+        penalties[segment] = penalties.get(segment, 0.0) + penalty
     return penalties
 
 
