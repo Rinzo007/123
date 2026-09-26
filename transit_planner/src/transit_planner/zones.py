@@ -8,21 +8,6 @@ from .city import DemandZone
 from .geo import Point
 
 
-@dataclass(frozen=True, slots=True)
-class ZoneCell:
-    id: str
-    min_x: float
-    min_y: float
-    max_x: float
-    max_y: float
-    population: float = 0.0
-    jobs: float = 0.0
-
-    @property
-    def centroid(self) -> tuple[float, float]:
-        return ((self.min_x + self.max_x) / 2.0, (self.min_y + self.max_y) / 2.0)
-
-
 def generate_grid_zones(
     min_x: float,
     min_y: float,
