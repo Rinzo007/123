@@ -28,8 +28,8 @@ def network_to_dict(network: Network) -> dict:
                 if route.geometry is None
                 else {
                     "points": [{"x": p.x, "y": p.y} for p in route.geometry.points]
-                },                "track_section_ids": list(route.track_section_ids),
-
+                },
+                "track_section_ids": list(route.track_section_ids),
             }
             for route in network.routes.values()
         ],
@@ -92,6 +92,7 @@ def network_from_dict(data: dict) -> Network:
                 TransitMode(raw["mode"]),
                 tuple(raw["stop_ids"]),
                 line,
+                tuple(raw.get("track_section_ids", ())),
             )
         )
     for raw in data.get("services", []):
