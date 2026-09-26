@@ -6,6 +6,7 @@ import {
   loadOvertureRoute,
   validateNetwork,
   calculateAssignment,
+  loadDemandStreets,
 } from "./api";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
@@ -215,6 +216,8 @@ export function App() {
   const [showStationLoads, setShowStationLoads] = useState(true);
   const [previewTrips, setPreviewTrips] = useState(1000);
   const [assignmentResult, setAssignmentResult] = useState<Awaited<ReturnType<typeof calculateAssignment>> | null>(null);
+  const [demandStreets, setDemandStreets] = useState<FeatureCollection | null>(null);
+  const [showDemandStreets, setShowDemandStreets] = useState(true);
   const [timetable, setTimetable] = useState<{ service_id: string; periods: Array<{ period_id: string; departures_minute: number[] }> } | null>(null);
   const [stopHistory, setStopHistory] = useState<StopDraft[][]>([]);
   const [stopFuture, setStopFuture] = useState<StopDraft[][]>([]);
@@ -307,6 +310,18 @@ export function App() {
         },
       });
 
+      map.addSource("demand-streets", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "demand-street-lines",
+        type: "line",
+        source: "demand-streets",
+        paint: {
+          "line-width": ["interpolate", ["linear"], ["get", "flow_weight"], 0, 1, 100, 3, 500, 7, 1000, 11],
+          "line-opacity": 0.45,
+          "line-color": "#7c3aed",
+        },
+      });
+
       map.addSource("analysis-sections", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
         id: "analysis-section-loads",
@@ -390,6 +405,7 @@ export function App() {
     const cityConnectorSource = map.getSource("city-connectors") as GeoJSONSource | undefined;
     const cityStopSource = map.getSource("city-stops") as GeoJSONSource | undefined;
     const cityPlaceSource = map.getSource("city-places") as GeoJSONSource | undefined;
+    const demandStreetSource = map.getSource("demand-streets") as GeoJSONSource | undefined;
     const analysisSectionSource = map.getSource("analysis-sections") as GeoJSONSource | undefined;
     const analysisStopSource = map.getSource("analysis-stops") as GeoJSONSource | undefined;
 
@@ -399,6 +415,8 @@ export function App() {
     if (cityConnectors) cityConnectorSource?.setData(cityConnectors);
     if (cityStops) cityStopSource?.setData(cityStops);
     if (cityPlaces) cityPlaceSource?.setData(cityPlaces);
+    if (demandStreets) demandStreetSource?.setData(demandStreets);
+    if (map.getLayer("demand-street-lines")) map.setLayoutProperty("demand-street-lines", "visibility", showDemandStreets ? "visible" : "none");
     if (assignmentResult) {
       analysisSectionSource?.setData(assignmentSectionGeoJSON(assignmentResult, stops));
       analysisStopSource?.setData(assignmentStopGeoJSON(assignmentResult, stops));
@@ -422,7 +440,7 @@ export function App() {
     if (map.getLayer("city-connector-circles")) map.setLayoutProperty("city-connector-circles", "visibility", showConnectors ? "visible" : "none");
     if (map.getLayer("city-stop-circles")) map.setLayoutProperty("city-stop-circles", "visibility", showStops ? "visible" : "none");
     if (map.getLayer("city-place-circles")) map.setLayoutProperty("city-place-circles", "visibility", showPlaces ? "visible" : "none");
-  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads]);
+  }, [stops, cityRoads, cityConnectors, cityStops, cityPlaces, roadRoute, assignmentResult, demandStreets, showRoads, showRoadSpeed, showStops, showPlaces, showConnectors, showPassengerFlow, showStationLoads, showDemandStreets]);
 
   const network = useMemo(
     () => buildNetworkPayload(stops, mode, routeName, headways),
@@ -598,7 +616,18 @@ export function App() {
         "morning_peak",
       );
       setAssignmentResult(result);
-      setMessage(`Пассажиропоток рассчитан: transit ${result.metrics.transit_share.toFixed(1)}%`);
+      const zones = stops.map((stop) => {
+        const point = toLocalMeters(stop.lon, stop.lat, stops[0].lon, stops[0].lat);
+        return { id: stop.id, centroid_x: point.x, centroid_y: point.y };
+      });
+      const streets = await loadDemandStreets(
+        [{ origin_zone_id: stops[0].id, destination_zone_id: stops[stops.length - 1].id, trips_per_day: previewTrips, purpose: "all" }],
+        zones,
+        stops[0].lon,
+        stops[0].lat,
+      );
+      setDemandStreets(streets);
+      setMessage(`Пассажиропоток рассчитан: transit ${(result.metrics.transit_share * 100).toFixed(1)}%`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка расчёта пассажиропотока");
     } finally {
@@ -815,6 +844,10 @@ export function App() {
             <label className="check-row">
               <input type="checkbox" checked={showStationLoads} onChange={(event) => setShowStationLoads(event.target.checked)} />
               <span>Загрузка остановок</span>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={showDemandStreets} onChange={(event) => setShowDemandStreets(event.target.checked)} />
+              <span>Demand streets</span>
             </label>
           </section>
 
