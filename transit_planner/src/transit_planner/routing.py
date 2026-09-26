@@ -248,6 +248,7 @@ class TransitRouter:
         period_id: str,
         max_alternatives: int = 3,
         route_penalties: dict[str, float] | None = None,
+        service_headway_factors: dict[str, float] | None = None,
         diversity_penalty_min: float = 15.0,
     ) -> tuple[Journey, ...]:
         """Return route-diverse journeys using deterministic route penalties.
