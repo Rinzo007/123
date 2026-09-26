@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .assignment import AssignmentConfig, assign_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
-from .city_demand import CityDemandConfig, build_city_demand, build_reference_city_daily_demand
+from .city_demand import CityDemandConfig, build_city_demand, build_city_daily_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
@@ -376,7 +376,7 @@ def city_demand(payload: dict) -> dict:
     )
     model = str(payload.get("model", "default")).strip().lower()
     if model == "reference":
-        demand = build_reference_city_daily_demand(
+        demand = build_city_daily_demand(
             zones,
             places,
             origin_lon=payload.get("origin_lon"),
