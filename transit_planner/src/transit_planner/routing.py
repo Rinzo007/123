@@ -275,9 +275,7 @@ class TransitRouter:
             route = self.network.routes[service.route_id]
             for period_id, headway in service.headway_by_period.items():
                 stop_map = result.setdefault(period_id, {})
-                pairs = list(zip(route.stop_ids, route.stop_ids[1:]))
-                if route.closed:
-                    pairs.append((route.stop_ids[-1], route.stop_ids[0]))
+                pairs = route.segment_pairs()
                 offset = service.departure_offset_by_period.get(period_id, 0.0)
                 for from_id, to_id in pairs:
                     stop_map.setdefault(from_id, []).append(
