@@ -155,3 +155,31 @@ export function loadOvertureRoute(
     return response.json() as Promise<OvertureRouteResponse>;
   });
 }
+
+export interface TimetableResponse {
+  service_id: string;
+  periods: Array<{ period_id: string; departures_minute: number[] }>;
+}
+
+export function createTimetable(
+  serviceId: string,
+  periods: NetworkPayload["periods"],
+  headwayByPeriod: Record<string, number>,
+  offsetMinute = 0,
+): Promise<TimetableResponse> {
+  return fetch("/api/v1/timetable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: serviceId,
+      periods: Object.fromEntries(
+        periods.map((period) => [period.id, { start_minute: period.start_minute, end_minute: period.end_minute }]),
+      ),
+      headway_by_period: headwayByPeriod,
+      offset_minute: offsetMinute,
+    }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось создать расписание");
+    return response.json() as Promise<TimetableResponse>;
+  });
+}
