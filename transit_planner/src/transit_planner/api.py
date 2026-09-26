@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, HTTPException, Query
@@ -11,7 +12,7 @@ from .city_demand import CityDemandConfig, build_city_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand, expand_daily_demand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
-from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson
+from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson, zones_to_geojson
 from .projection import project_local_point_wgs84
 from .overture import (
     OvertureConnectorProvider,
@@ -23,6 +24,7 @@ from .overture import (
 from .overture_network import OvertureNetworkProvider
 from .places import CityPlace
 from .timetable import generate_service_timetable
+from .zones import generate_zones_from_population_raster
 from .serialization import network_from_dict
 
 app = FastAPI(title="Transit Planner", version="0.1.0")
@@ -316,6 +318,27 @@ def create_timetable(payload: dict) -> dict:
             for period in timetable.periods
         ],
     }
+
+@app.get("/api/v1/demand/population-zones")
+def population_zones(
+    south: float = Query(...),
+    west: float = Query(...),
+    north: float = Query(...),
+    east: float = Query(...),
+) -> dict:
+    raster_path = os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
+    if not raster_path:
+        raise HTTPException(status_code=503, detail="TRANSIT_PLANNER_POPULATION_RASTER не настроен")
+    try:
+        zones = generate_zones_from_population_raster(
+            raster_path,
+            bbox=_bbox(south, west, north, east),
+            origin_lon=(west + east) / 2.0,
+            origin_lat=(south + north) / 2.0,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось прочитать population raster: {exc}") from exc
+    return zones_to_geojson(zones)
 
 @app.post("/api/v1/demand/city")
 def city_demand(payload: dict) -> dict:
