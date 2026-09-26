@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from math import hypot
+from math import ceil, hypot
 
 from .geo import LineString, Point
 from .infrastructure import TrackSection
@@ -204,6 +204,11 @@ class Network:
         dwell_min = 2.0 * len(route.stop_ids) * profile.dwell_s / 60.0
         turnback_min = 0.0 if route.closed else 2.0 * profile.turnback_s / 60.0
         return run_min + dwell_min + turnback_min
+
+    def service_departures(self, service: Service, period_id: str) -> int:
+        period = self.periods[period_id]
+        headway = service.headway_by_period[period_id]
+        return ceil((period.end_minute - period.start_minute) / headway)
 
     @staticmethod
     def _add_unique(collection: dict[str, object], item_id: str, kind: str) -> None:
