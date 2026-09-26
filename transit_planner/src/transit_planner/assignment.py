@@ -252,7 +252,7 @@ def _assign_once(
                 bike_time=bike_time,
                 transfers=journey.transfers,
                 transit_fare=config.transit_fare,
-                fare_weight=config.mode_choice.transit_fare_weight,
+                fare_weight=config.choice.transit_fare_weight,
                 route_penalized=any(
                     route_penalties.get(leg.route_id or "", 0.0) > 0.0
                     for leg in journey.legs
