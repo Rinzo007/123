@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import exp
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +87,7 @@ def connection_wait(
     return wait_minutes(downstream, upstream_arrival_minute)
 
 
+
 def average_connection_wait_minutes(
     upstream_headway: float,
     downstream_headway: float,
@@ -93,36 +95,53 @@ def average_connection_wait_minutes(
     upstream_offset: float = 0.0,
     downstream_offset: float = 0.0,
     upstream_run_time: float = 0.0,
+    mode_jitter_s: float = 90.0,
+    walk_time_min: float = 0.0,
 ) -> float | None:
-    """Average downstream wait for periodic upstream arrivals.
+    """Calculate schedule-aware average connection wait.
 
-    When the two headways are commensurate, evaluate the exact repeating
-    departure pattern. Otherwise use the stationary half-headway expectation.
+    This follows the reference worker's phase-aware connection rule.
     """
     if upstream_headway <= 0 or downstream_headway <= 0:
         return None
-    if upstream_run_time < 0:
-        raise ValueError("upstream_run_time cannot be negative")
+    if upstream_run_time < 0 or walk_time_min < 0 or mode_jitter_s < 0:
+        raise ValueError("Connection timing inputs cannot be negative")
 
     ratio = upstream_headway / downstream_headway
     reverse_ratio = downstream_headway / upstream_headway
-    if abs(round(ratio) - ratio) > 1e-9 and abs(round(reverse_ratio) - reverse_ratio) > 1e-9:
+    if (
+        abs(round(ratio) - ratio) > 1e-9
+        and abs(round(reverse_ratio) - reverse_ratio) > 1e-9
+    ):
         return downstream_headway / 2.0
 
-    cycle = max(upstream_headway, downstream_headway)
-    if abs(ratio - round(ratio)) <= 1e-9:
-        cycle *= 1.0
-    else:
-        cycle *= round(reverse_ratio)
-    count = max(1, int(round(cycle / upstream_headway)))
-    waits = []
+    downstream_period_s = downstream_headway * 60.0
+    upstream_period_s = upstream_headway * 60.0
+    transfer_walk_s = walk_time_min * 60.0
+    upstream_arrival_s = (upstream_offset + upstream_run_time) * 60.0
+    downstream_phase_s = downstream_offset * 60.0
+    jitter_s = max(
+        20.0,
+        (mode_jitter_s**2 + (0.4 * transfer_walk_s) ** 2) ** 0.5,
+    )
+    count = (
+        1
+        if upstream_period_s % downstream_period_s == 0
+        else max(1, round(downstream_period_s / upstream_period_s))
+    )
+
+    total_wait_s = 0.0
     for index in range(count):
-        arrival = upstream_offset + index * upstream_headway + upstream_run_time
-        next_departure = downstream_offset + (
-            (arrival - downstream_offset + downstream_headway - 1e-12)
-            // downstream_headway
-        ) * downstream_headway
-        if next_departure < arrival - 1e-9:
-            next_departure += downstream_headway
-        waits.append(max(0.0, next_departure - arrival))
-    return sum(waits) / len(waits)
+        phase_residual_s = (
+            downstream_phase_s
+            - (upstream_arrival_s + index * upstream_period_s)
+        ) % downstream_period_s
+        hold_probability = 1.0 / (
+            1.0 + exp(
+                -1.702 * phase_residual_s / max(1.0, jitter_s),
+            )
+        )
+        total_wait_s += phase_residual_s + (
+            1.0 - hold_probability
+        ) * downstream_period_s
+    return total_wait_s / count / 60.0
