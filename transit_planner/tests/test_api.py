@@ -138,6 +138,7 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
     def fake_temporal(*args, **kwargs):
         return temporal
 
+    monkeypatch.setenv("TRANSIT_PLANNER_POPULATION_RASTER", "synthetic.tif")
     monkeypatch.setattr(api_module, "generate_zones_from_population_raster", lambda *args, **kwargs: ())
     monkeypatch.setattr(api_module.OverturePlacesProvider, "load_places", lambda self: ())
     monkeypatch.setattr(api_module, "assign_temporal_demand", fake_temporal)
