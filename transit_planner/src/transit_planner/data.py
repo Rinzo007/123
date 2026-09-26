@@ -65,6 +65,8 @@ class RoadRecord:
     oneway: bool = False
     connectors: tuple[ConnectorRef, ...] = ()
     length_m: float | None = None
+    forward_allowed: bool = True
+    backward_allowed: bool = True
     prohibited_transitions: tuple[ProhibitedTransition, ...] = ()
 
     def __post_init__(self) -> None:
