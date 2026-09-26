@@ -49,6 +49,43 @@ class MetricDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class ServiceDelta:
+    service_id: str
+    route_id: str
+    period_id: str
+    base_riders: float
+    alternative_riders: float
+    base_peak_load_factor: float
+    alternative_peak_load_factor: float
+    base_fleet: float
+    alternative_fleet: float
+    base_effective_headway_min: float
+    alternative_effective_headway_min: float
+    base_minimum_headway_min: float
+    alternative_minimum_headway_min: float
+
+    @property
+    def riders_delta(self) -> float:
+        return self.alternative_riders - self.base_riders
+
+    @property
+    def peak_load_factor_delta(self) -> float:
+        return self.alternative_peak_load_factor - self.base_peak_load_factor
+
+    @property
+    def fleet_delta(self) -> float:
+        return self.alternative_fleet - self.base_fleet
+
+    @property
+    def effective_headway_delta(self) -> float:
+        return self.alternative_effective_headway_min - self.base_effective_headway_min
+
+    @property
+    def minimum_headway_delta(self) -> float:
+        return self.alternative_minimum_headway_min - self.base_minimum_headway_min
+
+
+@dataclass(frozen=True, slots=True)
 class SectionDelta:
     route_id: str
     from_stop_id: str
@@ -67,6 +104,7 @@ class ScenarioComparison:
     alternative_scenario_id: str
     metrics: tuple[MetricDelta, ...]
     sections: tuple[SectionDelta, ...]
+    services: tuple[ServiceDelta, ...] = ()
 
 
 def run_scenario(
@@ -197,6 +235,45 @@ def compare_scenarios(
         (item.route_id, item.from_stop_id, item.to_stop_id): item
         for item in alternative.assignment.section_loads
     }
+    base_services = {
+        (item.service_id, item.route_id, item.period_id): item
+        for item in base.analytics.services
+    }
+    alt_services = {
+        (item.service_id, item.route_id, item.period_id): item
+        for item in alternative.analytics.services
+    }
+    services = tuple(
+        ServiceDelta(
+            service_id=key[0],
+            route_id=key[1],
+            period_id=key[2],
+            base_riders=base_services[key].riders if key in base_services else 0.0,
+            alternative_riders=alt_services[key].riders if key in alt_services else 0.0,
+            base_peak_load_factor=(
+                base_services[key].peak_load_factor if key in base_services else 0.0
+            ),
+            alternative_peak_load_factor=(
+                alt_services[key].peak_load_factor if key in alt_services else 0.0
+            ),
+            base_fleet=base_services[key].fleet if key in base_services else 0.0,
+            alternative_fleet=alt_services[key].fleet if key in alt_services else 0.0,
+            base_effective_headway_min=(
+                base_services[key].effective_headway_min if key in base_services else 0.0
+            ),
+            alternative_effective_headway_min=(
+                alt_services[key].effective_headway_min if key in alt_services else 0.0
+            ),
+            base_minimum_headway_min=(
+                base_services[key].minimum_headway_min if key in base_services else 0.0
+            ),
+            alternative_minimum_headway_min=(
+                alt_services[key].minimum_headway_min if key in alt_services else 0.0
+            ),
+        )
+        for key in sorted(set(base_services) | set(alt_services))
+    )
+
     sections = tuple(
         SectionDelta(
             route_id=key[0],
@@ -212,4 +289,5 @@ def compare_scenarios(
         alternative_scenario_id=alternative.scenario_id,
         metrics=metrics,
         sections=sections,
+        services=services,
     )
