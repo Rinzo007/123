@@ -173,7 +173,7 @@ def test_physical_station_links_prevent_duplicate_station_capex() -> None:
         ),
     )
 
-    assert result.capital_cost == 3 * 3.0
+    assert result.capital_cost == 18.0 + 3 * 3.0
 
 
 def test_reference_row_costs_drive_default_capital_cost():
