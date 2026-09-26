@@ -44,6 +44,13 @@ class TemporalAssignmentResult:
             for period in self.periods
         )
 
+    @property
+    def total_bike_trips(self) -> float:
+        return sum(
+            period.result.metrics.bike_trips
+            for period in self.periods
+        )
+
 
 def assign_temporal_demand(
     network: Network,
