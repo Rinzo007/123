@@ -1,7 +1,7 @@
 import type {NetworkPayload} from "../types";
 export type EvaluationSummary={lines:number;stops:number;dailyDepartures:number};
 export type MatrixResult={ids:string[];times:number[]};
-export type ChoiceResult={shares:{transit:number;car:number;walk:number;bike:number};trips:{transit:number;car:number;walk:number;bike:number}};
+export type ChoiceResult={shares:{transit:number;car:number;walk:number;bike:number;rest:number};trips:{transit:number;car:number;walk:number;bike:number;rest:number}};
 export type ClientPreviewResult={
   evaluation: EvaluationSummary;
   operations: {dailyDepartures:number; fleetEstimate:number};
@@ -34,7 +34,7 @@ function request<T>(kind:WorkerKind,payload:unknown):Promise<T>{
 export function evaluateNetwork(network:NetworkPayload){return request<EvaluationSummary>("evaluation",{kind:"summary",network});}
 export function estimateDepartures(network:NetworkPayload){return request<{kind:"departures";dailyDepartures:number;fleetEstimate:number}>("assignment",{kind:"departures",network});}
 export function buildZoneMatrix(zones:Array<{id:string;centroid_x:number;centroid_y:number}>){return request<MatrixResult>("matrix",{kind:"matrix",zones});}
-export function chooseModes(trips:number,utilities:{transit:number;car:number;walk:number;bike:number}){return request<ChoiceResult>("demand-choice",{kind:"choice",trips,utilities});}
+export function chooseModes(trips:number,utilities:{transit:number;car:number;walk:number;bike:number;rest?:number}){return request<ChoiceResult>("demand-choice",{kind:"choice",trips,utilities});}
 export function disposeComputationWorkers(){for(const worker of Object.values(workers)) worker?.terminate(); for(const key of Object.keys(workers) as WorkerKind[]) delete workers[key];}
 
 export async function runClientPreview(network:NetworkPayload):Promise<ClientPreviewResult>{
