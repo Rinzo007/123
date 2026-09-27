@@ -20,8 +20,8 @@
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
-  import { createReferenceEvaluationClient, disposeComputationWorkers, evaluateNetwork, runClientPreview } from "./workers";
-  import { runReferencePreview } from "./workers/reference-runtime";
+  import { createEvaluationClient, disposeComputationWorkers, evaluateNetwork, runClientPreview } from "./workers";
+  import { runRuntimePreview } from "./workers/reference-runtime";
   import MapView from "./components/MapView.svelte";
   import ControlPanel from "./components/ControlPanel.svelte";
   import NetworkView from "./components/NetworkView.svelte";
@@ -122,7 +122,7 @@
   let initialized = false;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let projectRevision = 0;
-  let referenceEvaluationClient: ReturnType<typeof createReferenceEvaluationClient> | null = null;
+  let referenceEvaluationClient: ReturnType<typeof createEvaluationClient> | null = null;
 
   function toLocalMeters(lon: number, lat: number, originLon: number, originLat: number) {
     const earthRadius = 6378137;
@@ -425,7 +425,7 @@
     try {
       const clientPreview = await runClientPreview(network);
       evaluationSummary = clientPreview.evaluation;
-      if (!referenceEvaluationClient) referenceEvaluationClient = createReferenceEvaluationClient();
+      if (!referenceEvaluationClient) referenceEvaluationClient = createEvaluationClient();
       const bounds = mapRef?.getBounds();
       const referenceDemand = bounds
         ? await loadReferenceDemand(
@@ -433,7 +433,7 @@
             network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
           )
         : undefined;
-      const referencePreview = await runReferencePreview(referenceEvaluationClient, network, referenceDemand);
+      const referencePreview = await runRuntimePreview(referenceEvaluationClient, network, referenceDemand);
       const referenceResult = referencePreview.result as { lines?: unknown[]; stops?: number; };
       if (Array.isArray(referenceResult.lines)) {
         evaluationSummary = {
