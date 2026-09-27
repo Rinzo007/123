@@ -36,7 +36,7 @@ export function decodeLines(buffer: ArrayBuffer): { version: number; lines: Cach
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
   if (magic !== MAGIC) throw new Error("Некорректный TLC1: неверная сигнатура");
   const version = view.getUint32(4, true);
-  if (version !== VERSION) throw new Error(\`Неподдерживаемая версия TLC1: \${version}\`);
+  if (version !== VERSION) throw new Error(`Неподдерживаемая версия TLC1: \${version}`);
   const lineCount = view.getUint32(8, true);
   const pointCount = view.getUint32(12, true);
   const offsetsStart = HEADER_BYTES;
