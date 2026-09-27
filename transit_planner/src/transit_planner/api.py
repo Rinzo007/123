@@ -20,7 +20,6 @@ from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city_demand import (
     CityDemandConfig,
     build_city_demand,
-    build_city_demand_layers,
     build_city_temporal_demand,
 )
 from .city import DemandZone
@@ -43,6 +42,7 @@ from .timetable import generate_service_timetable
 from .zones import generate_zones_from_population_raster
 from .network import TransitMode
 from .reference_model import REFERENCE_MOBILITY, REFERENCE_PURPOSE_LAYERS, TrackRow
+from .reference_demand import build_reference_demand_layers
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 
@@ -707,7 +707,7 @@ def reference_demand(
             ),
             trip_rate=demand_config.trip_rate,
         )
-        purpose_layers = build_city_demand_layers(
+        purpose_layers = build_reference_demand_layers(
             zones,
             places,
             origin_lon=lon0,
