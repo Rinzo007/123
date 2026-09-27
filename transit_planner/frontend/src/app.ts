@@ -31,6 +31,7 @@ import {
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runModelPreview } from "./workers/reference-runtime";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
+import { RouteEditor } from "./planning/route-editor";
 import { estimateFleetRequirement } from "./planning/fleet";
 import { generateServiceTimetable } from "./planning/timetable";
 import { decodeLines, encodeLines } from "./line-cache";
@@ -1204,6 +1205,12 @@ shell.addEventListener("click", (event) => {
     case "city-assignment": void runCityAssignment(); break;
     case "capture-base": captureScenarioBase(); break;
     case "compare": void compareWithBase(); break;
+    case "build-route-from-network":
+      try {
+        const result = new RouteEditor(network).buildRoute("draft-route", routeName, mode, network.track_sections.map(t => t.id), stops.map(s => s.id));
+        network = result.network; previousNetwork = structuredClone(network); markDirty(); mapNetworkEditor?.refresh(); setStatus("Маршрут собран из участков сети"); render();
+      } catch (error) { setStatus(error instanceof Error ? error.message : "Не удалось собрать маршрут"); }
+      break;
     case "timetable": void generateTimetable(); break;
     case "validate":
       busy = true;
