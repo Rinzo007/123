@@ -183,8 +183,8 @@ def _reference_generator_weights(
     point_cells: dict[tuple[int, int], list[int]] = {}
     for index, point in enumerate(demand_points):
         key = (
-            floor(point.x / 111_320.0 / 0.01),
-            floor(point.y / 111_000.0 / (0.01 * 0.62)),
+            floor(point.x / 0.01),
+            floor(point.y / (0.01 * 0.62)),
         )
         point_cells.setdefault(key, []).append(index)
 
