@@ -1,6 +1,9 @@
 export type TransitMode = "bus" | "tram" | "metro" | "rail";
 
-export type TrackType = "surface" | "elevated" | "tunnel";
+export type TrackType = "surface" | "elevated" | "tunnel" | "trenched" | "ramp";
+
+export type PlatformLayout = "side" | "island" | "center" | "express_local";
+export type FareSystem = "flat" | "route" | "distance" | "zone";
 
 export interface StopDraft {
   id: string;
@@ -8,6 +11,11 @@ export interface StopDraft {
   lon: number;
   lat: number;
 }
+
+export interface StationPayload { id: string; name: string; stop_id: string; platform_ids: string[]; group_id?: string | null; interchange: boolean; platform_length_m?: number | null; }
+export interface PlatformPayload { id: string; station_id: string; length_m: number; track_ids: string[]; layout: PlatformLayout; number: number; }
+export interface RollingStockPayload { id: string; name: string; vehicle_type_id: string; car_capacity: number; car_length_m: number; train_width_m: number; max_cars: number; max_speed_kph: number; acceleration_mps2: number; deceleration_mps2: number; lateral_acceleration_mps2: number; minimum_curve_radius_m: number; dwell_seconds: number; car_cost: number; train_operating_cost_per_hour: number; car_operating_cost_per_hour: number; track_maintenance_cost_per_km_year: number; station_maintenance_cost_per_year: number; tph_limit: number; }
+export interface FareGroupPayload { id: string; name: string; fare_system: FareSystem; flat_fare: number; route_fares: Record<string, number>; transfer_policy: "none" | "free" | "time_window"; transfer_window_min: number; boarding_charge: number; per_km_rate: number; fare_cap?: number | null; zones: Array<{ id: string; name: string; zone_number: number }>; zone_base_fare: number; zone_per_zone_fare: number; }
 
 export interface TrackSectionPayload {
   id: string;
@@ -59,6 +67,11 @@ export interface NetworkPayload {
     phase_by_period?: Record<string, number>;
   }>;
   track_sections: TrackSectionPayload[];
+  stations: StationPayload[];
+  platforms: PlatformPayload[];
+  station_groups: Array<{ id: string; name: string; station_ids: string[]; transfer_walk_min: number }>;
+  rolling_stock: RollingStockPayload[];
+  fare_groups: FareGroupPayload[];
 }
 
 export interface ValidationResult {
