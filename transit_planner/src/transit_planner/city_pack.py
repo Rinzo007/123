@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .binary_pack import encode_buildings_bin, encode_streets_bin
+from .geo import Point
 from .overture import OvertureSource, OvertureUrbanProvider
 from .overture_network import OvertureNetworkProvider
 from .projection import project_local_point_wgs84
