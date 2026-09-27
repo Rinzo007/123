@@ -259,6 +259,7 @@ def _network_capital_cost(
             track_costs=track_infrastructure_costs,
             reference_cost_multiplier=reference_cost_multiplier,
             reference_row_cost_multipliers=reference_row_cost_multipliers,
+            reference_segment_cost_multipliers=reference_segment_cost_multipliers,
         )
         physical_station_ids = {
             station_id
