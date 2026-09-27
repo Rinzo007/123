@@ -285,6 +285,7 @@ def _route_capital_cost(
     track_costs: dict[TrackType, float],
     reference_cost_multiplier: float = 1.0,
     reference_row_cost_multipliers: dict[TrackRow, float] | None = None,
+    reference_segment_cost_multipliers: dict[str, tuple[float, ...]] | None = None,
 ) -> float:
     if route.track_section_ids and track_costs:
         return sum(
