@@ -1,13 +1,13 @@
 import type {NetworkPayload} from "../types";
-import { solveReferenceDemand, solveReferenceMatrix, ReferenceEvaluationClient, type ReferenceDemandBatch, type ReferenceMatrixInput } from "./reference-runtime";
+import { solveDemand, solveMatrix, ReferenceEvaluationClient, type ReferenceDemandBatch, type ReferenceMatrixInput } from "./reference-runtime";
 
 export type EvaluationSummary={lines:number;stops:number;dailyDepartures:number};
 export type ClientPreviewResult={
   evaluation: EvaluationSummary;
   operations: {dailyDepartures:number; fleetEstimate:number};
 };
-export type ReferenceDemandBatchResult=Awaited<ReturnType<typeof solveReferenceDemand>>;
-export type ReferenceMatrixResult=Awaited<ReturnType<typeof solveReferenceMatrix>>;
+export type ReferenceDemandBatchResult=Awaited<ReturnType<typeof solveDemand>>;
+export type ReferenceMatrixResult=Awaited<ReturnType<typeof solveMatrix>>;
 
 type WorkerKind="evaluation"|"assignment";
 const workers:Partial<Record<WorkerKind,Worker>>={};
@@ -39,14 +39,14 @@ export function evaluateNetwork(network:NetworkPayload){return request<Evaluatio
 export function estimateDepartures(network:NetworkPayload){return request<{kind:"departures";dailyDepartures:number;fleetEstimate:number}>("assignment",{kind:"departures",network});}
 
 export function solveDemandStrategy(batch:ReferenceDemandBatch):Promise<ReferenceDemandBatchResult>{
-  return solveReferenceDemand(batch);
+  return solveDemand(batch);
 }
 
 export function solveRoadMatrix(input:ReferenceMatrixInput):Promise<ReferenceMatrixResult>{
-  return solveReferenceMatrix(input);
+  return solveMatrix(input);
 }
 
-export function createReferenceEvaluationClient(workerCount?:number):ReferenceEvaluationClient{
+export function createEvaluationClient(workerCount?:number):ReferenceEvaluationClient{
   return new ReferenceEvaluationClient(workerCount);
 }
 
