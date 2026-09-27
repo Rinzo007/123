@@ -34,7 +34,7 @@ ScenarioComparison содержит только измеряемые разли
 
 ## Веб
 
-Svelte 5 + TypeScript + MapLibre отвечает за интерфейс, карту и редактирование. IndexedDB хранит проекты и кэш наборов данных, Web Workers выполняют неблокирующие клиентские предрасчёты. Серверный Python/FastAPI остаётся авторитетным источником транспортных расчётов.
+Vanilla TypeScript + Vite/Rollup + MapLibre GL JS 5.24 отвечает за интерфейс, карту и редактирование. IndexedDB хранит проекты и кэш наборов данных, Web Workers выполняют неблокирующие клиентские предрасчёты. Серверный Python/FastAPI остаётся авторитетным источником транспортных расчётов.
 
 FastAPI отвечает за транспорт между интерфейсом и доменным ядром.
 
@@ -62,6 +62,11 @@ P7 — экспорт, производительность и развёрты�
 
 Клиентские Worker-ы используются для быстрого предрасчёта и отзывчивости интерфейса. Численные результаты городской модели, назначения спроса, экономики и сравнения сценариев подтверждаются Python backend.
 
-Основные клиентские компоненты: MapView, ControlPanel, NetworkView, EvaluationPanel, stores/network и stores/project, а также workers/evaluation, matrix, demand-choice и assignment.
+Клиентский entry — один `src/app.ts`: ручной DOM через `document.createElement`/`innerHTML`, MapLibre и делегирование событий; отдельные UI-компоненты Svelte не используются.
 
 Источником городских пространственных данных остаётся Overture Maps.
+
+
+### Соответствие референсу
+
+Frontend использует один Vite/Rollup entry без UI-фреймворка, MapLibre GL JS 5.24.0, собственное IndexedDB-хранилище `takt/kv`, gzip через `CompressionStream`, reference Web Worker runtime и бинарный `TKBL`-кэш геометрии. Городские пакеты поддерживают manifest с SHA-256 и размерами файлов.
