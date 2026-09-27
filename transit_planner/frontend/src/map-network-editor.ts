@@ -144,9 +144,46 @@ export class MapNetworkEditor {
     this.setSelection(kind === "node" || kind === "track" ? kind : null, id);
   };
 
+  private onMouseDown = (e: MapMouseEvent): void => {
+    if (this.mode !== "select") return;
+    const hits = this.map.queryRenderedFeatures(e.point, { layers: ["network-nodes"] });
+    const hit = hits[0];
+    const id = String(hit?.properties?.id ?? "");
+    if (!id) return;
+    this.draggingNodeId = id;
+    this.dragStartNetwork = structuredClone(this.options.getNetwork());
+    this.map.dragPan.disable();
+    e.preventDefault();
+  };
+
   private onMove = (e: MapMouseEvent): void => {
-    if (this.mode !== "select" || !this.selectedNodeId) return;
-    if (!e.originalEvent.buttons) return;
+    if (!this.draggingNodeId || !e.originalEvent.buttons) return;
+    const p = this.coordinateToLocal(e);
+    const next = structuredClone(this.options.getNetwork());
+    const node = next.track_nodes.find(n => n.id === this.draggingNodeId);
+    if (!node) return;
+    node.x = p.x; node.y = p.y;
+    const nodes = new Map(next.track_nodes.map(n => [n.id, n]));
+    next.track_sections = next.track_sections.map(section => section.start_node_id === node.id || section.end_node_id === node.id
+      ? normalizeTrackSection(section, nodes) : section);
+    this.options.setNetwork(next);
+    this.refresh();
+  };
+
+  private onMouseUp = (): void => {
+    if (!this.draggingNodeId) return;
+    const id = this.draggingNodeId;
+    const before = this.dragStartNetwork;
+    const after = structuredClone(this.options.getNetwork());
+    this.draggingNodeId = null;
+    this.dragStartNetwork = null;
+    this.map.dragPan.enable();
+    if (before && JSON.stringify(before) !== JSON.stringify(after)) {
+      const command: Command<NetworkPayload> = { label: "Переместить узел " + id, execute: () => after, undo: () => before };
+      this.options.setNetwork(this.history.execute(command, before));
+      this.options.markDirty?.();
+      this.refresh();
+    }
   };
 
   private setSelection(kind: "node" | "track" | null, id: string | null): void {
