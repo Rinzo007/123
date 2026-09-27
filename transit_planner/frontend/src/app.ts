@@ -31,6 +31,10 @@ import {
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runModelPreview } from "./workers/reference-runtime";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
+import { RouteEditor } from "./planning/route-editor";
+import { estimateFleetRequirement } from "./planning/fleet";
+import { generateServiceTimetable } from "./planning/timetable";
+import { validateDemand, assignmentSummary } from "./planning/assignment";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
@@ -1059,7 +1063,21 @@ function renderResults(): void {
       }).join("")}</tbody></table></div>
     </section>
   `;
-  html += renderPhysicalEditor();
+  html += renderPhysicalEditor();  if (network.services.length) {
+    const service = network.services[0];
+    const route = network.routes.find(r => r.id === service.route_id);
+    const lengthKm = route?.track_section_ids?.reduce((sum, id) => sum + (network.track_sections.find(t => t.id === id)?.length_km ?? 0), 0) ?? 0;
+    const speed = Math.max(5, network.track_sections.filter(t => route?.track_section_ids?.includes(t.id)).reduce((sum,t)=>sum+(t.speed_limit_kph ?? 30),0) / Math.max(1, route?.track_section_ids?.length ?? 1));
+    const cycleMinutes = Math.max(10, lengthKm / speed * 60 * 2 + 10);
+    const fleet = estimateFleetRequirement(network, service.id, cycleMinutes);
+    html += `<section class="analytics-panel"><h3>Эксплуатация</h3>${metricGrid([
+      ["Длина линии, км", lengthKm],
+      ["Расчётный оборот, мин", cycleMinutes],
+      ["Парк AM", fleet.find(x=>x.period_id==="am")?.vehicles_required ?? 0],
+      ["Парк PM", fleet.find(x=>x.period_id==="pm")?.vehicles_required ?? 0],
+    ])}<div class="timetable-panel">${generateServiceTimetable(network, service.id).map(p => `<div class="timetable-row"><strong>${p.period_id}</strong><span>${p.departures_minute.length} отправлений</span></div>`).join("")}</div></section>`;
+  }
+
   if (cityAssignmentMeta) {
     html += `<section class="analytics-panel"><h3>Городской расчёт</h3>${metricGrid([
       ["Зоны", cityAssignmentMeta.zones],
@@ -1078,6 +1096,7 @@ function renderResults(): void {
       ["Пересадки", assignmentResult.metrics.average_transfers],
       ["Макс. загрузка", assignmentResult.max_load_ratio * 100],
       ["Неназначенный ОТ", assignmentResult.unserved_transit_demand],
+      ["Транзитная доля", assignmentResult.metrics.transit_share * 100],
     ])}</section>`;
   }
   if (cityAssignmentPeriods.length) {
