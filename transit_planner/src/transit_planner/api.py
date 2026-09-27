@@ -722,9 +722,14 @@ def reference_demand(
             fallback_attraction = zone.jobs if zone.jobs > 0 else zone.population
             purpose_attraction = sum(zone.attractions.values())
             attraction = max(fallback_attraction, purpose_attraction)
+            point = project_local_point_wgs84(
+                Point(zone.centroid_x, zone.centroid_y),
+                origin_lon=lon0,
+                origin_lat=lat0,
+            )
             pts.append([
-                float(zone.centroid_x),
-                float(zone.centroid_y),
+                float(point.x),
+                float(point.y),
                 float(max(0.0, zone.population)),
                 float(max(0.0, attraction)),
             ])
