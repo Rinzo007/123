@@ -51,6 +51,35 @@ export class MapNetworkEditor {
   redo(): void { try { this.options.setNetwork(this.history.redo(this.options.getNetwork())); this.refresh(); } catch {} }
   applyNetwork(next: NetworkPayload, label = "Изменение сети"): void { this.commit(next, label); }
 
+  updateTrack(trackId: string, patch: Partial<NetworkPayload["track_sections"][number]>): void {
+    const next = structuredClone(this.options.getNetwork());
+    const track = next.track_sections.find(item => item.id === trackId);
+    if (!track) throw new Error("Участок не найден: " + trackId);
+    Object.assign(track, patch);
+    const nodes = new Map(next.track_nodes.map(node => [node.id, node]));
+    next.track_sections = next.track_sections.map(item => item.id === trackId ? normalizeTrackSection(track, nodes) : item);
+    this.commit(next, "Изменение участка " + trackId);
+  }
+
+  deleteTrack(trackId: string): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (!next.track_sections.some(item => item.id === trackId)) return;
+    next.track_sections = next.track_sections.filter(item => item.id !== trackId);
+    next.crossovers = next.crossovers.filter(item => item.from_track_id !== trackId && item.to_track_id !== trackId);
+    next.signal_blocks = next.signal_blocks.filter(item => item.track_section_id !== trackId);
+    next.routes = next.routes.map(route => ({ ...route, track_section_ids: route.track_section_ids?.filter(id => id !== trackId) }));
+    this.commit(next, "Удаление участка " + trackId);
+  }
+
+  deleteNode(nodeId: string): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (next.track_sections.some(item => item.start_node_id === nodeId || item.end_node_id === nodeId)) throw new Error("Нельзя удалить узел, связанный с участком");
+    if (!next.track_nodes.some(item => item.id === nodeId)) return;
+    next.track_nodes = next.track_nodes.filter(item => item.id !== nodeId);
+    this.commit(next, "Удаление узла " + nodeId);
+  }
+
+
   private commit(next: NetworkPayload, label: string): void {
     const before = structuredClone(this.options.getNetwork());
     const after = structuredClone(next);
