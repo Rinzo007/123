@@ -572,3 +572,33 @@ export function compareScenarios(
     return response.json() as Promise<ScenarioComparisonResponse>;
   });
 }
+
+
+export function calculateNetworkAnalytics(
+  network: NetworkPayload,
+  demand: ScenarioPayload["demand"],
+  zones: ScenarioPayload["zones"],
+  periodId = "am",
+): Promise<Record<string, unknown>> {
+  return fetch("/api/v1/analytics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ network, demand, zones, config: { period_id: periodId } }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось рассчитать аналитику сети");
+    return response.json() as Promise<Record<string, unknown>>;
+  });
+}
+
+export function validateBlueprint(
+  network: NetworkPayload,
+): Promise<ValidationResult> {
+  return fetch("/api/v1/blueprint/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ network }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(await response.text() || "Не удалось проверить чертёж");
+    return response.json() as Promise<ValidationResult>;
+  });
+}
