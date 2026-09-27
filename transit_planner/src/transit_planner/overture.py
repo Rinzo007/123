@@ -152,7 +152,7 @@ class OverturePlacesProvider:
 
 
 class OvertureUrbanProvider:
-    """Read Overture buildings and water for urban construction context."""
+    """Read Overture buildings and water for urban spatial context."""
 
     def __init__(
         self,
