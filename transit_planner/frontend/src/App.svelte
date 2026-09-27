@@ -344,7 +344,7 @@
   ): Promise<UrbanMultipliersResponse | null> {
     const key =
       datasetCacheKey("overture-urban", bounds) + ":" + network.routes.map((route) =>
-        \`\${route.id}:\${route.stop_ids.join(",")}:\${JSON.stringify(route.geometry)}\`,
+        `${route.id}:${route.stop_ids.join(",")}:${JSON.stringify(route.geometry)}`,
       ).join("|");
     if (urbanMultipliersKey === key) return urbanMultipliers;
 
