@@ -3,11 +3,11 @@ import { planningPreview, probe, keepNetwork, type PlanningPreview, type Scenari
 import { routeWithRaptor, type RaptorJourney } from "./routing";
 
 import {
-  ReferenceEvaluationClient,
+  EvaluationClient,
   solveDemand,
   solveMatrix,
-  type ReferenceDemandBatch,
-  type ReferenceMatrixInput,
+  type DemandBatch,
+  type MatrixInput,
 } from "./reference-runtime";
 
 export type EvaluationSummary = {
@@ -27,27 +27,27 @@ export type ClientPreviewResult = {
   };
 };
 
-export type ReferenceDemandBatchResult = Awaited<ReturnType<typeof solveDemand>>;
+export type DemandBatchResult = Awaited<ReturnType<typeof solveDemand>>;
 export type ReferenceMatrixResult = Awaited<ReturnType<typeof solveMatrix>>;
 
 export function solveDemandStrategy(
-  batch: ReferenceDemandBatch,
-): Promise<ReferenceDemandBatchResult> {
+  batch: DemandBatch,
+): Promise<DemandBatchResult> {
   return solveDemand(batch);
 }
 
 export function solveRoadMatrix(
-  input: ReferenceMatrixInput,
+  input: MatrixInput,
 ): Promise<ReferenceMatrixResult> {
   return solveMatrix(input);
 }
 
-export function createEvaluationClient(workerCount?: number): ReferenceEvaluationClient {
-  return new ReferenceEvaluationClient(workerCount);
+export function createEvaluationClient(workerCount?: number): EvaluationClient {
+  return new EvaluationClient(workerCount);
 }
 
 export function disposeComputationWorkers(): void {
-  // ReferenceEvaluationClient owns the actual evaluation worker pool.
+  // EvaluationClient owns the actual evaluation worker pool.
 }
 
 export function runClientPreview(network: NetworkPayload): Promise<ClientPreviewResult> {
