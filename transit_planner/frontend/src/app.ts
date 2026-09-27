@@ -144,7 +144,7 @@ shell.innerHTML = `
     </div>
     <div class="actions" role="toolbar" aria-label="Действия">
       <button data-action="view-map" class="active-toggle">Карта</button>
-      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button>
+      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button><button data-action="undo" title="Ctrl+Z">↶</button><button data-action="redo" title="Ctrl+Shift+Z">↷</button>
       <button data-action="load-city">Загрузить Overture</button>
       <button data-action="build-road" disabled>Построить по дорогам</button>
       <button data-action="draw" class="primary" aria-pressed="false">Добавить остановки</button>
@@ -317,7 +317,8 @@ function updateSelectedProperty(field: string, raw: string): void {
     const a = next.track_nodes.find(n => n.id === item.start_node_id), b = next.track_nodes.find(n => n.id === item.end_node_id);
     if (a && b) { const d = Math.max(.001, Math.hypot(b.x-a.x,b.y-a.y)); item.length_km=d/1000; item.elevation_delta_m=b.elevation_m-a.elevation_m; item.slope_percent=item.elevation_delta_m/d*100; item.start_elevation_m=a.elevation_m; item.end_elevation_m=b.elevation_m; }
   }
-  network = next; markDirty(); mapNetworkEditor?.refresh(); renderPropertyPanel(); render();
+  if (mapNetworkEditor) mapNetworkEditor.applyNetwork(next, "Изменение свойств"); else { network = next; markDirty(); }
+  renderPropertyPanel(); render();
 }
 function deleteSelectedProperty(): void {
   const next = structuredClone(network);
@@ -326,7 +327,8 @@ function deleteSelectedProperty(): void {
     const id = editorSelection.id; if (next.track_sections.some(t => t.start_node_id === id || t.end_node_id === id)) { setStatus("Нельзя удалить узел: сначала удалите связанные участки"); return; }
     next.track_nodes = next.track_nodes.filter(n => n.id !== id);
   } else return;
-  network = next; editorSelection = { kind: null, id: null }; markDirty(); mapNetworkEditor?.refresh(); renderPropertyPanel(); render();
+  if (mapNetworkEditor) mapNetworkEditor.applyNetwork(next, "Удаление объекта"); else { network = next; markDirty(); }
+  editorSelection = { kind: null, id: null }; renderPropertyPanel(); render();
 }
 function setStatus(next: string): void {
   message = next;
@@ -1260,6 +1262,7 @@ for (const [element, key] of toggleInputs) {
   });
 }
 window.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) mapNetworkEditor?.redo(); else mapNetworkEditor?.undo(); renderPropertyPanel(); render(); return; }
   if (event.key !== "Escape" || !busy) return;
   evaluationClient?.cancel();
   busy = false;
@@ -1311,7 +1314,13 @@ function initializeMap(): void {
   });
   map.on("click", (event) => { if (drawMode) addStop(event); });
 }
-function wireEditorActions(): void { shell.querySelector('[data-action="editor-select"]')?.addEventListener("click", () => setEditorMode("select")); shell.querySelector('[data-action="editor-node"]')?.addEventListener("click", () => setEditorMode("node")); shell.querySelector('[data-action="editor-track"]')?.addEventListener("click", () => setEditorMode("track")); }
+function wireEditorActions(): void {
+  shell.querySelector('[data-action="editor-select"]')?.addEventListener("click", () => setEditorMode("select"));
+  shell.querySelector('[data-action="editor-node"]')?.addEventListener("click", () => setEditorMode("node"));
+  shell.querySelector('[data-action="editor-track"]')?.addEventListener("click", () => setEditorMode("track"));
+  shell.querySelector('[data-action="undo"]')?.addEventListener("click", () => { mapNetworkEditor?.undo(); editorSelection = { kind: null, id: null }; renderPropertyPanel(); render(); });
+  shell.querySelector('[data-action="redo"]')?.addEventListener("click", () => { mapNetworkEditor?.redo(); editorSelection = { kind: null, id: null }; renderPropertyPanel(); render(); });
+}
 
 async function bootstrap(): Promise<void> {
   const settings = loadUiSettings({
