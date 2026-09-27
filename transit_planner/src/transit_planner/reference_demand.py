@@ -230,11 +230,11 @@ def _reference_generator_weights(
                 max(best_importance, importance),
             )
 
-    return {
-        representative: total
-        for total, representative, _best_importance in generators.values()
-        if total > 0
-    }
+    result: dict[int, float] = {}
+    for total, representative, _best_importance in generators.values():
+        if total > 0 and representative >= 0:
+            result[representative] = result.get(representative, 0.0) + total
+    return result
 
 
 def generate_reference_purpose_layer(
