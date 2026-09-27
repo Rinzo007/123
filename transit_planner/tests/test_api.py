@@ -14,6 +14,7 @@ def test_api_has_core_routes():
     assert "/api/v1/scenario/compare" in paths
     assert "/api/v1/economics" in paths
     assert "/api/v1/demand/reference" in paths
+    assert "/api/v1/data/overture/urban-multipliers" in paths
 
 
 def test_scenario_compare_endpoint_runs_two_networks():
@@ -168,3 +169,61 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
     assert all("services" in period for period in result["periods"])
     assert all("riders" in service for period in result["periods"] for service in period["services"])
     assert result["periods"][0]["economics"]["daily_fare_revenue"] > 0
+
+
+def test_overture_urban_multipliers_endpoint(monkeypatch):
+    from transit_planner.api import overture_urban_multipliers
+    from transit_planner.geo import Point
+    from transit_planner.network import Network, Route, Stop, TransitMode
+    from transit_planner.serialization import network_to_dict
+    from transit_planner.urban import BuildingFootprint, UrbanContext
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0.0, 0.0)))
+    network.add_stop(Stop("b", "B", Point(1000.0, 0.0)))
+    network.add_route(
+        Route(
+            "r1",
+            "1",
+            TransitMode.METRO,
+            ("a", "b"),
+            geometry=__import__("transit_planner.geo", fromlist=["LineString"]).LineString(
+                (
+                    Point(0.0, 0.0),
+                    Point(1000.0, 0.0),
+                )
+            ),
+        )
+    )
+
+    class FakeUrbanProvider:
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self):
+            return (
+                (BuildingFootprint(
+                    "b1",
+                    ((Point(39.199, 51.6699), Point(39.201, 51.6699),
+                      Point(39.201, 51.6701), Point(39.199, 51.6701),
+                      Point(39.199, 51.6699)),),
+                    2000.0,
+                ),),
+                (),
+            )
+
+    monkeypatch.setattr("transit_planner.api.OvertureUrbanProvider", FakeUrbanProvider)
+
+    result = overture_urban_multipliers({
+        "network": network_to_dict(network),
+        "south": 51.66,
+        "west": 39.19,
+        "north": 51.68,
+        "east": 39.21,
+        "origin_lon": 39.2,
+        "origin_lat": 51.67,
+    })
+
+    assert result["counts"]["buildings"] == 1
+    assert result["counts"]["segments"] == 1
+    assert result["routes"]["r1"]["segment_multipliers"][0] >= 1.0
