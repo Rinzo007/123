@@ -32,7 +32,7 @@ import {
 } from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runRuntimePreview } from "./workers/reference-runtime";
-import { decodeLines, encodeLines } from "./tkbl";
+import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
   keepNetwork,
