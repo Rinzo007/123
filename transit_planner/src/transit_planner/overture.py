@@ -28,6 +28,8 @@ class OvertureSource:
     connector_glob: str | None = None
     infrastructure_glob: str | None = None
     places_glob: str | None = None
+    buildings_glob: str | None = None
+    water_glob: str | None = None
 
     def transportation_segments(self) -> str:
         if self.transportation_glob:
@@ -59,6 +61,23 @@ class OvertureSource:
         return (
             f"{self.storage_root}/{self.release}/"
             "theme=base/type=infrastructure/*"
+        )
+
+
+    def buildings(self) -> str:
+        if self.buildings_glob:
+            return self.buildings_glob
+        return (
+            f"{self.storage_root}/{self.release}/"
+            "theme=buildings/type=building/*"
+        )
+
+    def water(self) -> str:
+        if self.water_glob:
+            return self.water_glob
+        return (
+            f"{self.storage_root}/{self.release}/"
+            "theme=base/type=water/*"
         )
 
 
@@ -128,6 +147,99 @@ class OverturePlacesProvider:
             WHERE TRUE
               {category_filter}
               {bbox_filter}
+        """
+
+
+class OvertureUrbanProvider:
+    """Read Overture buildings and water for urban construction context."""
+
+    def __init__(
+        self,
+        *,
+        source: OvertureSource = OvertureSource(),
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> None:
+        self.source = source
+        self.bbox = bbox
+
+    def load_buildings(self):
+        from .urban import BuildingFootprint, parse_polygon_geometry, polygon_area_m2
+
+        rows = _query_duckdb(self._buildings_sql())
+        buildings = []
+        for building_id, geojson, subtype, building_class, is_underground, height, num_floors in rows:
+            if not geojson or bool(is_underground):
+                continue
+            polygons = parse_polygon_geometry(json.loads(geojson))
+            if not polygons:
+                continue
+            area_m2 = sum(polygon_area_m2(polygon) for polygon in polygons)
+            if area_m2 <= 0:
+                continue
+            buildings.append(
+                BuildingFootprint(
+                    id=f"overture:building:{building_id}",
+                    polygons=polygons,
+                    area_m2=area_m2,
+                    subtype=None if subtype is None else str(subtype),
+                    building_class=None if building_class is None else str(building_class),
+                    is_underground=bool(is_underground),
+                )
+            )
+        return tuple(buildings)
+
+    def load_water(self):
+        from .urban import WaterFeature, parse_polygon_geometry
+
+        rows = _query_duckdb(self._water_sql())
+        water = []
+        for feature_id, geojson, water_class, subtype in rows:
+            if not geojson or str(subtype or "") == "physical":
+                continue
+            polygons = parse_polygon_geometry(json.loads(geojson))
+            if not polygons:
+                continue
+            water.append(
+                WaterFeature(
+                    id=f"overture:water:{feature_id}",
+                    polygons=polygons,
+                    water_class=None if water_class is None else str(water_class),
+                    subtype=None if subtype is None else str(subtype),
+                )
+            )
+        return tuple(water)
+
+    def load(self):
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="overture-urban") as pool:
+            buildings_future = pool.submit(self.load_buildings)
+            water_future = pool.submit(self.load_water)
+            return buildings_future.result(), water_future.result()
+
+    def _buildings_sql(self) -> str:
+        return f"""
+            SELECT
+                id,
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                subtype,
+                class,
+                is_underground,
+                height,
+                num_floors
+            FROM read_parquet('{_sql_quote(self.source.buildings())}')
+            WHERE TRUE
+              {_bbox_sql(self.bbox)}
+        """
+
+    def _water_sql(self) -> str:
+        return f"""
+            SELECT
+                id,
+                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                class,
+                subtype
+            FROM read_parquet('{_sql_quote(self.source.water())}')
+            WHERE TRUE
+              {_bbox_sql(self.bbox)}
         """
 
 
