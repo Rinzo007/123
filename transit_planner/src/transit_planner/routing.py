@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import hypot, inf, isfinite
 
-from .network import Network, Stop, TransitMode
+from .network import Network, Stop
 from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_TRANSFER
 from .timetable import average_connection_wait_minutes
 
@@ -89,11 +89,6 @@ class TransitRouter:
     consumed upstream through Network.route_segment_run_time_min(), so this
     router never falls back to a graph shortest-path search.
     """
-
-    _SPEEDS = {
-        TransitMode(mode): profile.rows[profile.default_row].speed_kph
-        for mode, profile in REFERENCE_MODE_PROFILES.items()
-    }
 
     def __init__(
         self,
@@ -331,7 +326,6 @@ class TransitRouter:
         legs = self._reconstruct(
             origin_id=origin.id,
             destination_id=destination.id,
-            departure_minute=departure_minute,
             parents=parents,
             round_index=best_destination[1],
         )
@@ -426,7 +420,11 @@ class TransitRouter:
                         service.id,
                         reverse_stops,
                         departures,
-                        tuple(reversed(forward_times)),
+                        (
+                            tuple(reversed(forward_times[:-1])) + (forward_times[-1],)
+                            if route.closed
+                            else tuple(reversed(forward_times))
+                        ),
                         -1,
                     )
                 )
