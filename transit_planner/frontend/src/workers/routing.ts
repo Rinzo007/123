@@ -59,6 +59,8 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
     segmentTimes: number[];
   }> = [];
   const index = new Map(network.stops.map((stop, i) => [stop.id, i]));
+  const period = network.periods.find((item) => item.id === periodId);
+  if (!period) throw new Error(`Period not found in network: ${periodId}`);
 
   for (const service of network.services) {
     const route = network.routes.find((item) => item.id === service.route_id);
@@ -80,8 +82,8 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
       routeId: route.id,
       stops: patternStops,
       departures: departures(
-        network.periods.find((item) => item.id === periodId)?.start_minute ?? 0,
-        network.periods.find((item) => item.id === periodId)?.end_minute ?? 1440,
+        period.start_minute,
+        period.end_minute,
         headway,
         service.departure_offset_by_period?.[periodId] ?? 0,
       ),
@@ -97,8 +99,8 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
         routeId: route.id,
         stops: reverseStops,
         departures: departures(
-          network.periods.find((item) => item.id === periodId)?.start_minute ?? 0,
-          network.periods.find((item) => item.id === periodId)?.end_minute ?? 1440,
+          period.start_minute,
+          period.end_minute,
           headway,
           service.departure_offset_by_period?.[periodId] ?? 0,
         ),

@@ -15,124 +15,32 @@ class RoadGraphBuildResult:
     connector_count: int = 0
 
 
-def build_road_graph(
-    roads: tuple[RoadRecord, ...],
-    *,
-    coordinate_to_metre: float = 1.0,
-    coordinate_precision: int = 6,
-) -> RoadGraphBuildResult:
-    """Build a graph from endpoint geometry.
-
-    Kept as a generic fallback for sources that have no explicit topology.
-    Overture data should use build_topological_road_graph().
-    """
-    if coordinate_to_metre <= 0:
-        raise ValueError("coordinate_to_metre must be positive")
-
-    graph = RoadGraph()
-    node_by_key: dict[tuple[float, float], int] = {}
-    next_node_id = 1
-
-    def node_for(x: float, y: float) -> int:
-        nonlocal next_node_id
-        key = (round(x, coordinate_precision), round(y, coordinate_precision))
-        existing = node_by_key.get(key)
-        if existing is not None:
-            return existing
-        node_id = next_node_id
-        next_node_id += 1
-        node_by_key[key] = node_id
-        graph.add_node(RoadNode(node_id, x, y))
-        return node_id
-
-    for record in roads:
-        start = record.geometry.points[0]
-        end = record.geometry.points[-1]
-        from_node = node_for(start.x, start.y)
-        to_node = node_for(end.x, end.y)
-        length_m = _length_m(record, coordinate_to_metre)
-        if record.forward_allowed:
-            graph.add_edge(
-                RoadEdge(
-                    record.id,
-                    from_node,
-                    to_node,
-                    length_m,
-                    record.speed_kph,
-                    record.road_type,
-                    record.id,
-                    None,
-                    None,
-                    "forward",
-                    tuple(record.geometry.points),
-                )
-            )
-        if record.backward_allowed and not record.oneway:
-            graph.add_edge(
-                RoadEdge(
-                    f"{record.id}:reverse",
-                    to_node,
-                    from_node,
-                    length_m,
-                    record.speed_kph,
-                    record.road_type,
-                    record.id,
-                    None,
-                    None,
-                    "backward",
-                    tuple(reversed(record.geometry.points)),
-                )
-            )
-
-    return RoadGraphBuildResult(
-        graph,
-        len(graph.nodes),
-        len(graph.edges),
-        len(graph.connector_nodes),
-    )
-
-
 def build_topological_road_graph(
     roads: tuple[RoadRecord, ...],
     *,
     coordinate_to_metre: float = 1.0,
-    coordinate_precision: int = 6,
 ) -> RoadGraphBuildResult:
     """Build a graph using Overture connector_id + linear-reference topology.
 
     A shared connector_id always maps to one graph node. A segment is split
     between consecutive connector references. Geometry overlap or coincident
     coordinates are not treated as a connection unless the connector IDs agree.
+    Segments without explicit connector topology are rejected, not degraded.
     """
     if coordinate_to_metre <= 0:
         raise ValueError("coordinate_to_metre must be positive")
 
     graph = RoadGraph()
     next_node_id = 1
-    endpoint_nodes: dict[tuple[float, float], int] = {}
-
-    def endpoint_node(point_x: float, point_y: float) -> int:
-        nonlocal next_node_id
-        key = (round(point_x, coordinate_precision), round(point_y, coordinate_precision))
-        existing = endpoint_nodes.get(key)
-        if existing is not None:
-            return existing
-        node_id = next_node_id
-        next_node_id += 1
-        endpoint_nodes[key] = node_id
-        graph.add_node(RoadNode(node_id, point_x, point_y))
-        return node_id
 
     for record in roads:
         refs = _normalized_refs(record.connectors)
         if len(refs) < 2:
-            _add_fallback_segment(
-                graph,
-                record,
-                endpoint_node,
-                coordinate_to_metre,
+            raise ValueError(
+                f"Segment {record.id} has {len(refs)} connector reference(s); "
+                "Overture topology requires at least two. Fix the source data or "
+                "filter this segment before graph construction."
             )
-            continue
 
         points = record.geometry.points
         for ref in refs:
@@ -214,50 +122,6 @@ def _length_m(record: RoadRecord, coordinate_to_metre: float) -> float:
 
 def _normalized_refs(refs: tuple[ConnectorRef, ...]) -> tuple[ConnectorRef, ...]:
     return tuple(sorted(refs, key=lambda ref: ref.at))
-
-
-def _add_fallback_segment(
-    graph: RoadGraph,
-    record: RoadRecord,
-    endpoint_node,
-    coordinate_to_metre: float,
-) -> None:
-    start = record.geometry.points[0]
-    end = record.geometry.points[-1]
-    from_node = endpoint_node(start.x, start.y)
-    to_node = endpoint_node(end.x, end.y)
-    length_m = _length_m(record, coordinate_to_metre)
-    if record.forward_allowed:
-        graph.add_edge(
-            RoadEdge(
-                record.id,
-                from_node,
-                to_node,
-                length_m,
-                record.speed_kph,
-                record.road_type,
-                record.id,
-                None,
-                None,
-                "forward",
-            )
-        )
-    if record.backward_allowed and not record.oneway:
-        graph.add_edge(
-            RoadEdge(
-                f"{record.id}:reverse",
-                to_node,
-                from_node,
-                length_m,
-                record.speed_kph,
-                record.road_type,
-                record.id,
-                None,
-                None,
-                "backward",
-            )
-        )
-
 
 
 def _slice_geometry(

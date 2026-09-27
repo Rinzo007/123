@@ -269,6 +269,7 @@ class OvertureTransportationProvider:
     def load_roads(self) -> tuple[RoadRecord, ...]:
         rows = _query_duckdb(self._sql())
         roads: list[RoadRecord] = []
+        incomplete_segments: list[tuple[str, int]] = []
 
         for (
             road_id,
@@ -294,6 +295,9 @@ class OvertureTransportationProvider:
                 for x, y, *_ in coordinates
             )
             refs = _parse_connector_refs(connector_refs)
+            if len(refs) < 2:
+                incomplete_segments.append((road_id, len(refs)))
+                continue
             source_id = f"overture:{road_id}"
             forward_allowed, backward_allowed = _access_directions(access_restrictions)
             restrictions = _parse_prohibited_transitions(
@@ -316,6 +320,21 @@ class OvertureTransportationProvider:
                     backward_allowed=backward_allowed,
                     prohibited_transitions=restrictions,
                 )
+            )
+
+        if incomplete_segments:
+            preview = ", ".join(
+                f"{segment_id} ({ref_count} ref(s))"
+                for segment_id, ref_count in incomplete_segments[:10]
+            )
+            suffix = (
+                f" and {len(incomplete_segments) - 10} more"
+                if len(incomplete_segments) > 10
+                else ""
+            )
+            raise ValueError(
+                "Overture segments without full connector topology: "
+                f"{preview}{suffix}; routing graph requires two or more refs per segment"
             )
 
         return tuple(roads)
@@ -658,9 +677,14 @@ def _is_oneway(access_restrictions) -> bool:
     return forward_allowed and not backward_allowed
 
 
-def _effective_speed_kph(speed_limits, fallback: float) -> float:
+def _effective_speed_kph(speed_limits, class_speed_kph: float) -> float:
+    """Explicit posted limit when present, otherwise the road-class planning speed.
+
+    class_speed_kph is mandatory: there is no further default. A row that is
+    neither limit-signed nor class-mapped must be rejected by the caller.
+    """
     if not speed_limits:
-        return fallback
+        return class_speed_kph
     for rule in speed_limits:
         if _field(rule, "between") not in (None, (), []):
             continue
@@ -679,7 +703,7 @@ def _effective_speed_kph(speed_limits, fallback: float) -> float:
             speed *= 3.6
         if speed > 0:
             return speed
-    return fallback
+    return class_speed_kph
 
 
 def _haversine_linestring_m(points: tuple[Point, ...]) -> float:

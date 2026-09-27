@@ -1,4 +1,4 @@
-import type { NetworkPayload } from "../types";
+import type { NetworkPayload, TransitMode } from "../types";
 
 export type PlanningPreview = {
   lines: number;
@@ -23,7 +23,7 @@ export type ScenarioProbe = {
   };
 };
 
-const DEFAULT_ROW_COST: Record<string, number> = {
+const DEFAULT_ROW_COST: Record<TransitMode, number> = {
   bus: 0.4,
   tram: 9,
   metro: 32,
@@ -99,13 +99,7 @@ export function planningPreview(network: NetworkPayload): PlanningPreview {
       fleetEstimate += Math.max(1, Math.ceil(cycleMinutes / Math.min(...activeHeadways)));
     }
 
-    const row = route.mode === "bus" || route.mode === "tram"
-      ? (route.geometry ? "mixed" : "mixed")
-      : route.mode === "metro" || route.mode === "rail"
-        ? "reserved"
-        : "mixed";
-    capitalCost += length * (DEFAULT_ROW_COST[route.mode] ?? 1);
-    if (row === "reserved" && route.mode === "metro") capitalCost += length * 0;
+    capitalCost += length * DEFAULT_ROW_COST[route.mode];
   }
 
   return {

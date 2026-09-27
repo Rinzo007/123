@@ -92,7 +92,6 @@ from .rolling_stock import RollingStockType
 from .fares import FareGroup, FareSystem, FareZone, TransferPolicy
 from .road_builder import (
     RoadGraphBuildResult,
-    build_road_graph,
     build_topological_road_graph,
 )
 from .routing import Journey, JourneyLeg, RouterConfig, TransitRouter
@@ -211,7 +210,6 @@ __all__ = [
     "RoadGraph",
     "RoadNode",
     "RoadGraphBuildResult",
-    "build_road_graph",
     "build_topological_road_graph",
     "Platform",
     "PlatformLayout",

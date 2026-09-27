@@ -13,5 +13,9 @@ export function generateDepartures(period: NetworkPayload["periods"][number], he
 export function generateServiceTimetable(network: NetworkPayload, serviceId: string): DeparturePlan[] {
   const service = network.services.find(s => s.id === serviceId);
   if (!service) throw new Error("Service not found: " + serviceId);
-  return network.periods.map(p => generateDepartures(p, service.headway_by_period[p.id] ?? 20, service.departure_offset_by_period?.[p.id] ?? 0));
+  return network.periods.map(p => {
+    const headway = service.headway_by_period[p.id];
+    if (headway == null || headway <= 0) return { period_id: p.id, departures_minute: [] };
+    return generateDepartures(p, headway, service.departure_offset_by_period?.[p.id] ?? 0);
+  });
 }

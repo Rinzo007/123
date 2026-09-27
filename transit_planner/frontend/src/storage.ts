@@ -130,8 +130,19 @@ export function saveUiSettings(settings: Record<string, unknown>): void {
 
 export function loadUiSettings<T extends Record<string, unknown>>(defaults: T): T {
   const raw = localStorage.getItem(UI_KEY);
-  if (!raw) return defaults;
-  return { ...defaults, ...(JSON.parse(raw) as Partial<T>) };
+  if (raw === null) return defaults;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Сохранённые настройки интерфейса повреждены: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Сохранённые настройки интерфейса имеют неверную форму: ожидался JSON-объект");
+  }
+  return { ...defaults, ...(parsed as Partial<T>) };
 }
 
 export interface CachedDataset<T = unknown> { id: string; data: T; updatedAt: number; expiresAt: number; }

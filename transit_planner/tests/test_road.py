@@ -1,46 +1,62 @@
-from transit_planner.data import ConnectorRef, GeoJSONRoadProvider, ProhibitedTransition, ProhibitedTransitionSequenceEntry, RoadRecord
+from transit_planner.data import ConnectorRef, ProhibitedTransition, ProhibitedTransitionSequenceEntry, RoadRecord
 from transit_planner.geo import LineString, Point
-from transit_planner.road_builder import build_road_graph, build_topological_road_graph
+from transit_planner.road_builder import build_topological_road_graph
 from transit_planner.spatial import GridPointIndex, IndexedPoint
 
 
 def test_one_way_graph_and_shortest_path():
-    roads = GeoJSONRoadProvider(
-        {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "id": "ab",
-                    "properties": {"speed_kph": 30, "highway": "residential", "oneway": True},
-                    "geometry": {"type": "LineString", "coordinates": [[0, 0], [1000, 0]]},
-                },
-                {
-                    "type": "Feature",
-                    "id": "bc",
-                    "properties": {"speed_kph": 30, "highway": "residential", "oneway": False},
-                    "geometry": {"type": "LineString", "coordinates": [[1000, 0], [1000, 1000]]},
-                },
-            ],
-        }
-    ).load_roads()
+    roads = (
+        RoadRecord(
+            "ab",
+            LineString((Point(0, 0), Point(1000, 0))),
+            30,
+            oneway=True,
+            connectors=(ConnectorRef("n0", 0.0), ConnectorRef("n1", 1.0)),
+        ),
+        RoadRecord(
+            "bc",
+            LineString((Point(1000, 0), Point(1000, 1000))),
+            30,
+            connectors=(ConnectorRef("n1", 0.0), ConnectorRef("n2", 1.0)),
+        ),
+    )
 
-    result = build_road_graph(roads)
+    result = build_topological_road_graph(roads)
     graph = result.graph
 
     assert result.node_count == 3
     assert result.edge_count == 3
 
-    start = next(n.id for n in graph.nodes.values() if n.x == 0 and n.y == 0)
-    end = next(n.id for n in graph.nodes.values() if n.x == 1000 and n.y == 1000)
+    start = graph.connector_nodes["n0"]
+    end = graph.connector_nodes["n2"]
 
     time, path = graph.shortest_path(start, end)
     assert round(time, 2) == 4.0
-    assert path == ("ab", "bc")
+    assert path == ("ab:n0:n1", "bc:n1:n2")
 
     reverse_time, reverse_path = graph.shortest_path(end, start)
     assert reverse_time == float("inf")
     assert reverse_path == ()
+
+
+def test_segment_without_connector_topology_raises():
+    roads = (
+        RoadRecord(
+            "orphan",
+            LineString((Point(0, 0), Point(1000, 0))),
+            30,
+            connectors=(),
+        ),
+    )
+
+    try:
+        build_topological_road_graph(roads)
+    except ValueError as error:
+        assert "orphan" in str(error)
+        assert "connector reference" in str(error)
+    else:
+        raise AssertionError("segments without connector refs must raise, not degrade")
+
 
 
 def test_grid_index_nearest():

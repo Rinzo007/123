@@ -1385,11 +1385,18 @@ function wireEditorActions(): void {
 }
 
 async function bootstrap(): Promise<void> {
-  const settings = loadUiSettings({
+  const defaults = {
     showRoads: true, showRoadSpeed: false, showStops: true, showPlaces: true,
     showConnectors: false, showPopulation: false, showDemandStreets: true,
     showPassengerFlow: true, showStationLoads: true,
-  });
+  };
+  let settings: Record<string, unknown>;
+  try {
+    settings = loadUiSettings(defaults);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Ошибка чтения настроек интерфейса");
+    settings = { ...defaults };
+  }
   showRoads = Boolean(settings.showRoads);
   showRoadSpeed = Boolean(settings.showRoadSpeed);
   showStops = Boolean(settings.showStops);
@@ -1410,8 +1417,12 @@ async function bootstrap(): Promise<void> {
   try {
     const saved = await loadProject("current");
     if (saved && typeof saved === "object") applyProject(saved as ProjectFile);
-  } catch {
-    // first launch or blocked IndexedDB
+  } catch (error) {
+    setStatus(
+      error instanceof Error
+        ? `Проект не восстановлен: ${error.message}`
+        : "Проект не восстановлен: хранилище недоступно",
+    );
   }
   network = buildNetworkPayload();
   initialized = true;
