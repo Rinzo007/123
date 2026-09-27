@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -11,6 +12,10 @@ from .geo import Point
 from .overture import OvertureSource, OvertureUrbanProvider
 from .overture_network import OvertureNetworkProvider
 from .projection import project_local_point_wgs84
+
+TKBL_MAGIC = b"TKBL"
+TKBL_VERSION = 1
+TKBL_HEADER_BYTES = 16
 
 
 

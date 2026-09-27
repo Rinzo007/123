@@ -65,6 +65,7 @@ class _RaptorPattern:
     departures: tuple[float, ...]
     segment_times: tuple[float, ...]
     direction: int
+    headway: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,7 @@ class _RaptorParent:
     board_local: int = -1
     alight_local: int = -1
     pattern_size: int = 0
+    boarding_wait_min: float = 0.0
 
 
 class TransitRouter:
@@ -110,6 +112,7 @@ class TransitRouter:
         route_penalties: dict[str, float] | None = None,
         segment_crowding_penalties: dict[tuple[str, str, str], float] | None = None,
         service_headway_factors: dict[str, float] | None = None,
+        banned_route_ids: frozenset[str] = frozenset(),
     ) -> Journey | None:
         if origin.id not in self.network.stops or destination.id not in self.network.stops:
             raise KeyError("Origin or destination stop is not in the network")
@@ -141,6 +144,7 @@ class TransitRouter:
                 max_transfers=self.config.raptor_max_transfers,
                 segment_penalties=segment_penalties,
                 service_headway_factors=headway_factors,
+                banned_route_ids=banned_route_ids,
             )
             if candidate is not None:
                 used_routes = {
@@ -185,6 +189,7 @@ class TransitRouter:
         penalties = dict(base_penalties)
         results: list[Journey] = []
         seen_sequences: set[tuple[str, ...]] = set()
+        seen_route_ids: set[str] = set()
 
         for rank in range(max_alternatives):
             journey = self.shortest(
@@ -194,6 +199,7 @@ class TransitRouter:
                 route_penalties=penalties,
                 segment_crowding_penalties=segment_crowding_penalties,
                 service_headway_factors=service_headway_factors,
+                banned_route_ids=frozenset(seen_route_ids),
             )
             if journey is None:
                 break
@@ -206,6 +212,7 @@ class TransitRouter:
             if sequence in seen_sequences:
                 break
             seen_sequences.add(sequence)
+            seen_route_ids.update(sequence)
             results.append(journey)
 
             increment = diversity_penalty_min * (rank + 1)
@@ -227,11 +234,18 @@ class TransitRouter:
         max_transfers: int,
         segment_penalties: dict[tuple[str, str, str], float],
         service_headway_factors: dict[str, float],
+        banned_route_ids: frozenset[str] = frozenset(),
     ) -> Journey | None:
         patterns = self._patterns(
             period_id,
             service_headway_factors,
         )
+        if banned_route_ids:
+            patterns = tuple(
+                pattern
+                for pattern in patterns
+                if pattern.route_id not in banned_route_ids
+            )
         infinity = float("inf")
         arrival: dict[str, float] = {
             stop_id: infinity for stop_id in self.network.stops
@@ -303,6 +317,7 @@ class TransitRouter:
                         board_local=board_index,
                         alight_local=local_index,
                         pattern_size=len(pattern.stops),
+                        boarding_wait_min=pattern.headway / 2.0,
                     )
 
             self._apply_footpaths(next_arrival, parent)
@@ -328,6 +343,7 @@ class TransitRouter:
             destination_id=destination.id,
             parents=parents,
             round_index=best_destination[1],
+            segment_penalties=segment_penalties,
         )
         if legs is None:
             return None
@@ -406,6 +422,7 @@ class TransitRouter:
                     departures,
                     forward_times,
                     1,
+                    headway,
                 )
             )
 
@@ -426,6 +443,7 @@ class TransitRouter:
                             else tuple(reversed(forward_times))
                         ),
                         -1,
+                        headway,
                     )
                 )
 
@@ -471,7 +489,9 @@ class TransitRouter:
         destination_id: str,
         parents: list[dict[str, _RaptorParent]],
         round_index: int,
+        segment_penalties: dict[tuple[str, str, str], float] | None = None,
     ) -> tuple[JourneyLeg, ...] | None:
+        penalties = segment_penalties or {}
         legs_reversed: list[JourneyLeg] = []
         current = destination_id
         current_round = round_index
@@ -510,36 +530,29 @@ class TransitRouter:
             size = record.pattern_size
             if size < 2 or record.board_local < 0 or record.alight_local < 0:
                 return None
-
-            local_step = 1 if record.direction >= 0 else -1
-            if record.direction >= 0 and record.alight_local < record.board_local:
-                return None
-            if record.direction < 0 and record.alight_local > record.board_local:
+            if record.alight_local < record.board_local:
                 return None
 
+            route_count = len(route.stop_ids)
             local = record.board_local
             first_segment = True
-            route_count = len(route.stop_ids)
             while local != record.alight_local:
-                next_local = local + local_step
+                next_local = local + 1
                 if record.direction >= 0:
                     from_original = local % route_count
                     to_original = next_local % route_count
+                    segment_index = from_original
                 else:
                     from_original = (route_count - 1 - local) % route_count
                     to_original = (route_count - 1 - next_local) % route_count
+                    segment_index = to_original
 
                 from_id = route.stop_ids[from_original]
                 to_id = route.stop_ids[to_original]
-                segment_index = (
-                    from_original
-                    if record.direction >= 0
-                    else (from_original - 1) % route_count
-                )
                 duration = self.network.route_segment_run_time_min(
                     route,
                     segment_index,
-                )
+                ) + max(0.0, penalties.get((route_id, from_id, to_id), 0.0))
                 legs_reversed.append(
                     JourneyLeg(
                         "transit",
@@ -547,11 +560,7 @@ class TransitRouter:
                         to_id,
                         duration,
                         route_id,
-                        wait_min=(
-                            max(0.0, record.board_time - record.ready_time)
-                            if first_segment
-                            else 0.0
-                        ),
+                        wait_min=record.boarding_wait_min if first_segment else 0.0,
                         service_id=record.service_id,
                     )
                 )

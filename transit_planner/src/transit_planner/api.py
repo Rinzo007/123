@@ -106,7 +106,16 @@ def reference_demand(south:float=Query(...),west:float=Query(...),north:float=Qu
         pts=[]
         for x in z:q=project_local_point_wgs84(Point(x.centroid_x,x.centroid_y),origin_lon=lon,origin_lat=lat);pts.append([q.x,q.y,max(0,x.population),max(x.jobs,x.population,sum(x.attractions.values()))])
         rows=[[idx[x.origin_zone_id],idx[x.destination_zone_id],x.trips_per_day,max(120,(x.base_time_min or 0)*60)] for x in od.pairs if x.origin_zone_id in idx and x.destination_zone_id in idx]
-        return {"city":"dynamic","source":"WorldPop + Overture + city demand model","pts":pts,"od":rows,"baselineT":None,"layers":[{"purpose":x.purpose,"label":x.label,"od":[[idx[o],idx[d],t,max(120,base)] for o,d,t,base in x.od_pairs if o in idx and d in idx],"out":list(profiles[x.purpose].outbound_shares),"ret":list(profiles[x.purpose].return_shares)} for x in layers.layers],"meta":{"zones":len(z),"commuter_od_pairs":len(rows),"purpose_layers":len(layers.layers),"purpose_od_pairs":sum(len(x.od_pairs) for x in layers.layers),"baselineT_included":False}}
+        ordered=tuple(z)
+        baseline_t=None
+        if len(ordered)<=2000:
+            baseline_t=[[0.0]*len(ordered) for _ in ordered]
+            for i,a in enumerate(ordered):
+                for j,bz in enumerate(ordered):
+                    if i==j:continue
+                    dx=a.centroid_x-bz.centroid_x; dy=a.centroid_y-bz.centroid_y
+                    baseline_t[i][j]=max(120.0,(dx*dx+dy*dy)**0.5/(cfg.reference_speed_kph/3.6))
+        return {"city":"dynamic","source":"WorldPop + Overture + city demand model","pts":pts,"od":rows,"baselineT":baseline_t,"layers":[{"purpose":x.purpose,"label":x.label,"od":[[idx[o],idx[d],t,max(120,base)] for o,d,t,base in x.od_pairs if o in idx and d in idx],"out":list(profiles[x.purpose].outbound_shares),"ret":list(profiles[x.purpose].return_shares)} for x in layers.layers],"meta":{"zones":len(z),"commuter_od_pairs":len(rows),"purpose_layers":len(layers.layers),"purpose_od_pairs":sum(len(x.od_pairs) for x in layers.layers),"baselineT_included":baseline_t is not None}}
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
 @app.post("/api/v1/demand/streets")
 def demand_streets(p:dict):
@@ -116,9 +125,16 @@ def assignment(p:dict):
     n=network_from_dict(p["network"]); d=DemandMatrix(tuple(ODPairDemand(str(x["origin_zone_id"]),str(x["destination_zone_id"]),float(x["trips_per_day"]),str(x.get("purpose","all"))) for x in p.get("demand",[]))); z={str(x["id"]):DemandZone(str(x["id"]),float(x["centroid_x"]),float(x["centroid_y"]),population=float(x.get("population",0)),jobs=float(x.get("jobs",0))) for x in p.get("zones",[])}; cfg=AssignmentConfig(**p["config"]); r=assign_demand(n,d,zones=z,config=cfg); return {"metrics":asdict(r.metrics),"iterations":r.iterations,"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand,"loss_reasons":[asdict(x) for x in r.loss_reasons],"route_flows":[asdict(x) for x in r.route_flows],"section_loads":[asdict(x) for x in r.section_loads],"stop_flows":[asdict(x) for x in r.stop_flows],"track_capacity":[asdict(x) for x in _track_capacity_analytics(n)]}
 @app.post("/api/v1/economics")
 def economics(p:dict):
+    return calculate_economics_payload(p)
+
+def calculate_economics_payload(p:dict):
     s=scenario(p,"economics"); r=run_scenario(s,economics_config=econ(p,s.assignment_config.period_id)); return {"scenario_id":r.scenario_id,"name":r.name,"economics":result_dict(r.economics)}
+
 @app.post("/api/v1/scenario/compare")
 def scenario_compare(p:dict):
+    return compare_scenario_payload(p)
+
+def compare_scenario_payload(p:dict):
     a=scenario(p["base"],"base"); b=scenario(p["alternative"],"alternative"); ar=run_scenario(a,economics_config=econ(p["base"],a.assignment_config.period_id) if "economics_config" in p["base"] else None); br=run_scenario(b,economics_config=econ(p["alternative"],b.assignment_config.period_id) if "economics_config" in p["alternative"] else None); c=compare_scenarios(ar,br)
     return {"base":{"scenario_id":ar.scenario_id,"name":ar.name,"metrics":{"transit_share":ar.assignment.metrics.transit_share}},"alternative":{"scenario_id":br.scenario_id,"name":br.name,"metrics":{"transit_share":br.assignment.metrics.transit_share}},"comparison":{"base_scenario_id":c.base_scenario_id,"alternative_scenario_id":c.alternative_scenario_id,"metrics":[{"metric":x.metric,"base":x.base,"alternative":x.alternative,"delta":x.delta,"relative_delta":x.relative_delta} for x in c.metrics],"sections":[{"route_id":x.route_id,"from_stop_id":x.from_stop_id,"to_stop_id":x.to_stop_id,"base_passengers":x.base_passengers,"alternative_passengers":x.alternative_passengers,"delta":x.delta} for x in c.sections],"services":[{"service_id":x.service_id,"route_id":x.route_id,"period_id":x.period_id,"base_riders":x.base_riders,"alternative_riders":x.alternative_riders,"riders_delta":x.riders_delta,"base_peak_load_factor":x.base_peak_load_factor,"alternative_peak_load_factor":x.alternative_peak_load_factor,"peak_load_factor_delta":x.peak_load_factor_delta,"base_fleet":x.base_fleet,"alternative_fleet":x.alternative_fleet,"fleet_delta":x.fleet_delta,"base_effective_headway_min":x.base_effective_headway_min,"alternative_effective_headway_min":x.alternative_effective_headway_min,"effective_headway_delta":x.effective_headway_delta,"base_minimum_headway_min":x.base_minimum_headway_min,"alternative_minimum_headway_min":x.alternative_minimum_headway_min,"minimum_headway_delta":x.minimum_headway_delta} for x in c.services]}}
 @app.post("/api/v1/calibration/route-ridership")
@@ -132,9 +148,9 @@ def city_assignment(p:dict):
     raster=os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
     if not raster:raise HTTPException(503,"TRANSIT_PLANNER_POPULATION_RASTER не настроен")
     try:
-        n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); raw=p.get("demand_config",{}); dc=CityDemandConfig(trip_rate=float(raw.get("trip_rate",.12)),decay=float(raw.get("decay",.08)),reference_speed_kph=float(raw.get("reference_speed_kph",30))); td=build_city_temporal_demand(z,pl,origin_lon=lon,origin_lat=lat,config=dc); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); sm,um=urban(n,b,lon,lat,p.get("release")); ec=econ(p,ac.period_id,sm); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
+        n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); raw=p.get("demand_config",{}); dc=CityDemandConfig(trip_rate=float(raw.get("trip_rate",.12)),decay=float(raw.get("decay",.08)),reference_speed_kph=float(raw.get("reference_speed_kph",30))); td=build_city_temporal_demand(z,pl,origin_lon=lon,origin_lat=lat,config=dc); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); ec=econ(p,ac.period_id); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
-    r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"urban_context":um,"assignment":{"metrics":asdict(r.metrics),"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
+    r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"assignment":{"metrics":asdict(r.metrics),"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
 
 
 @app.post("/api/v1/analytics")

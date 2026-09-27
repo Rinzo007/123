@@ -26,24 +26,29 @@ class RollingStockType:
     tph_limit: float = 60.0
 
     def __post_init__(self) -> None:
-        numeric = {
+        physical = {
             "car_capacity": self.car_capacity, "car_length_m": self.car_length_m,
             "train_width_m": self.train_width_m, "max_cars": self.max_cars,
             "max_speed_kph": self.max_speed_kph, "acceleration_mps2": self.acceleration_mps2,
             "deceleration_mps2": self.deceleration_mps2,
             "lateral_acceleration_mps2": self.lateral_acceleration_mps2,
             "minimum_curve_radius_m": self.minimum_curve_radius_m,
-            "dwell_seconds": self.dwell_seconds, "car_cost": self.car_cost,
+            "dwell_seconds": self.dwell_seconds,
+            "tph_limit": self.tph_limit,
+        }
+        optional_costs = {
+            "car_cost": self.car_cost,
             "train_operating_cost_per_hour": self.train_operating_cost_per_hour,
             "car_operating_cost_per_hour": self.car_operating_cost_per_hour,
             "track_maintenance_cost_per_km_year": self.track_maintenance_cost_per_km_year,
             "station_maintenance_cost_per_year": self.station_maintenance_cost_per_year,
-            "tph_limit": self.tph_limit,
         }
         if not self.id.strip() or not self.name.strip() or not self.vehicle_type_id.strip():
             raise ValueError("Rolling stock identifiers cannot be empty")
-        if any(value <= 0 for value in numeric.values()):
-            raise ValueError("Rolling stock physical and cost parameters must be positive")
+        if any(value <= 0 for value in physical.values()):
+            raise ValueError("Rolling stock physical parameters must be positive")
+        if any(value < 0 for value in optional_costs.values()):
+            raise ValueError("Rolling stock cost parameters cannot be negative")
 
     @property
     def capacity(self) -> int:
