@@ -534,25 +534,6 @@ function datasetCacheKey(prefix: string, b: Bounds): string {
   return `${prefix}:${round(b.south)}:${round(b.west)}:${round(b.north)}:${round(b.east)}`;
 }
 
-async function ensureUrbanMultipliers(current: NetworkPayload, b: Bounds): Promise<UrbanMultipliersResponse | null> {
-  const key = datasetCacheKey("overture-urban", b) + ":" + current.routes.map((route) =>
-    `${route.id}:${route.stop_ids.join(",")}:${JSON.stringify(route.geometry)}`,
-  ).join("|");
-  if (urbanMultipliersKey === key) return urbanMultipliers;
-  const cached = await loadDataset<UrbanMultipliersResponse>(key);
-  if (cached) {
-    urbanMultipliers = cached;
-    urbanMultipliersKey = key;
-    return cached;
-  }
-  try {
-return loaded;
-  } catch {
-    urbanMultipliers = null;
-    urbanMultipliersKey = key;
-    return null;
-  }
-}
 
 function previewZones() {
   const origin = stops[0];
@@ -619,9 +600,7 @@ async function loadCityData(): Promise<void> {
     cityConnectors = data.connectors;
     cityStops = data.stops;
     cityPlaces = data.places;
-    urbanMultipliers = null;
-    urbanMultipliersKey = "";
-    const populationKey = datasetCacheKey("population-zones", b);
+      const populationKey = datasetCacheKey("population-zones", b);
     const cachedPopulation = await loadDataset<FeatureCollection>(populationKey);
     if (cachedPopulation) {
       populationZones = cachedPopulation;
@@ -757,8 +736,6 @@ async function runEconomics(): Promise<void> {
   setStatus("Расчёт экономики…");
   try {
     network = buildNetworkPayload();
-    const b = bounds();
-    const urban = b ? await ensureUrbanMultipliers(network, b) : null;
     economicsResult = await calculateEconomics(
       network,
       [{
@@ -771,7 +748,6 @@ async function runEconomics(): Promise<void> {
       "am",
       farePerTransitTrip,
       annualDays,
-      urban,
     );
     setStatus("Экономика рассчитана");
     renderResults();
