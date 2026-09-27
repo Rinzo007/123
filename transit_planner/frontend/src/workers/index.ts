@@ -1,5 +1,6 @@
 import type { NetworkPayload } from "../types";
 import { planningPreview, probe, keepNetwork, type PlanningPreview, type ScenarioProbe } from "../simulation/preview";
+import { routeWithRaptor, type RaptorJourney } from "./routing";
 
 import {
   ReferenceEvaluationClient,
@@ -17,7 +18,6 @@ export type EvaluationSummary = {
 
 export type { PlanningPreview, ScenarioProbe, RaptorJourney };
 export { planningPreview, probe, keepNetwork, routeWithRaptor };
-export type { RaptorJourney };
 
 export type ClientPreviewResult = {
   evaluation: EvaluationSummary;
