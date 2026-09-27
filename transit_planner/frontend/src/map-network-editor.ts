@@ -4,6 +4,7 @@ import type { NetworkPayload } from "./types";
 import { networkToGeoJSON } from "./network-editor";
 import { lonLatToLocalMeters, normalizeTrackSection } from "./core/geometry";
 import { CommandHistory, type Command } from "./core/history";
+import { validateTopology } from "./core/topology";
 
 export type MapEditorMode = "select" | "node" | "track" | "crossover" | "signal";
 
@@ -37,6 +38,7 @@ export class MapNetworkEditor {
     this.map.on("mouseleave", "network-nodes", () => { this.map.getCanvas().style.cursor = ""; });
     this.map.on("click", "network-crossovers", this.onInfrastructureClick);
     this.map.on("click", "network-signal-blocks", this.onInfrastructureClick);
+    this.map.on("click", "network-topology-issues", this.onInfrastructureClick);
     this.map.on("mouseenter", "network-tracks", () => { this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "network-tracks", () => { this.map.getCanvas().style.cursor = ""; });
     this.refresh();
@@ -141,6 +143,8 @@ export class MapNetworkEditor {
   private ensureLayers(): void {
     if (!this.map.getSource("network-infrastructure")) this.map.addSource("network-infrastructure",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
     if (!this.map.getSource("network-signal-blocks")) this.map.addSource("network-signal-blocks",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    if (!this.map.getSource("network-topology-issues")) this.map.addSource("network-topology-issues",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    if (!this.map.getLayer("network-topology-issues")) this.map.addLayer({id:"network-topology-issues",type:"circle",source:"network-topology-issues",paint:{"circle-radius":6,"circle-color":["match",["get","severity"],"error","#dc2626","warning","#f59e0b","#6b7280"],"circle-stroke-width":2,"circle-stroke-color":"#fff"}});
     if (!this.map.getLayer("network-crossovers")) this.map.addLayer({id:"network-crossovers",type:"circle",source:"network-infrastructure",paint:{"circle-radius":7,"circle-color":"#dc2626","circle-stroke-width":2,"circle-stroke-color":"#fff"}});
     if (!this.map.getLayer("network-signal-blocks")) this.map.addLayer({id:"network-signal-blocks",type:"circle",source:"network-signal-blocks",paint:{"circle-radius":6,"circle-color":"#7c3aed","circle-stroke-width":2,"circle-stroke-color":"#fff"}});
     if (!this.map.getSource("network-editor")) {
@@ -203,6 +207,16 @@ export class MapNetworkEditor {
     const blocks = { type:"FeatureCollection", features: network.signal_blocks.flatMap(b => { const p=pointFor(b.track_section_id,(b.start_position+b.end_position)/2); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:b.id,kind:"signal"}}] : []; }) };
     (this.map.getSource("network-infrastructure") as GeoJSONSource)?.setData(crossovers as never);
     (this.map.getSource("network-signal-blocks") as GeoJSONSource)?.setData(blocks as never);
+    const issueFeatures = validateTopology(network).flatMap(issue => {
+      if (!issue.objectId) return [];
+      const track = byId.get(issue.objectId);
+      if (track) { const p=pointFor(track.id,0.5); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:issue.objectId,severity:issue.severity,code:issue.code,message:issue.message}}] : []; }
+      const crossover = network.crossovers.find(c=>c.id===issue.objectId); if (crossover) { const p=pointFor(crossover.from_track_id,crossover.position); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:issue.objectId,severity:issue.severity,code:issue.code,message:issue.message}}] : []; }
+      const block = network.signal_blocks.find(b=>b.id===issue.objectId); if (block) { const p=pointFor(block.track_section_id,(block.start_position+block.end_position)/2); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:issue.objectId,severity:issue.severity,code:issue.code,message:issue.message}}] : []; }
+      const node = network.track_nodes.find(n=>n.id===issue.objectId); if (node) { const cosLat=Math.cos(origin.lat*Math.PI/180), er=6378137; const p:[number,number]=[origin.lon+(n.x/(er*Math.max(1e-9,cosLat)))*180/Math.PI,origin.lat+(n.y/er)*180/Math.PI]; return [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:issue.objectId,severity:issue.severity,code:issue.code,message:issue.message}}]; }
+      return [];
+    });
+    (this.map.getSource("network-topology-issues") as GeoJSONSource)?.setData({type:"FeatureCollection",features:issueFeatures} as never);
   }
 
   private onInfrastructureClick = (e: MapMouseEvent): void => {
@@ -338,6 +352,7 @@ export class MapNetworkEditor {
   dispose(): void {
     this.map.off("click", "network-crossovers", this.onInfrastructureClick);
     this.map.off("click", "network-signal-blocks", this.onInfrastructureClick);
+    this.map.off("click", "network-topology-issues", this.onInfrastructureClick);
     this.map.off("click", this.onClick);
     this.map.off("mousemove", this.onMove);
     this.map.off("mousedown", "network-nodes", this.onMouseDown);
