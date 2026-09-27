@@ -324,6 +324,7 @@ def test_urban_segment_multiplier_affects_aggregate_capital_cost():
     network.add_vehicle_type(VehicleType("metro", "Metro", TransitMode.METRO, 750))
     network.add_period(ServicePeriod("am", 360, 540))
     network.add_route(Route("r1", "1", TransitMode.METRO, ("a", "b")))
+    network.add_service(Service("svc", "r1", "metro", {"am": 10.0}))
 
     empty = AssignmentResult(
         metrics=AssignmentMetrics(0, 0, 0, 0, 0, 0, 0),
