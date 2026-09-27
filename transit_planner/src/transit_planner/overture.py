@@ -168,7 +168,7 @@ class OvertureUrbanProvider:
 
         rows = _query_duckdb(self._buildings_sql())
         buildings = []
-        for building_id, geojson, subtype, building_class, is_underground, _height, _num_floors in rows:
+        for building_id, geojson, subtype, building_class, is_underground in rows:
             if not geojson or bool(is_underground):
                 continue
             polygons = parse_polygon_geometry(json.loads(geojson))
@@ -223,9 +223,7 @@ class OvertureUrbanProvider:
                 ST_AsGeoJSON(geometry) AS geojson,
                 subtype,
                 class,
-                is_underground,
-                height,
-                num_floors
+                is_underground
             FROM read_parquet('{_sql_quote(self.source.buildings())}')
             WHERE TRUE
               {_bbox_sql(self.bbox)}
