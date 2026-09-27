@@ -211,6 +211,7 @@ def aggregate_temporal_economics(
         station_cost=config.station_cost,
         reference_cost_multiplier=config.reference_cost_multiplier,
         reference_row_cost_multipliers=config.reference_row_cost_multipliers,
+        reference_segment_cost_multipliers=config.reference_segment_cost_multipliers,
     )
     transit_trips = temporal_assignment.total_transit_trips
     return EconomicsResult(
