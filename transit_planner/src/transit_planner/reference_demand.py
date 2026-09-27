@@ -28,6 +28,7 @@ class ReferenceDemandLayerResult:
     purpose: str
     label: str
     demand: TemporalDemandMatrix
+    od_pairs: tuple[tuple[str, str, float, float], ...] = ()
 
     @property
     def total_trips(self) -> float:
@@ -66,6 +67,7 @@ def generate_purpose_layer(
     reach_multiplier: float = 8.0,
 ) -> ReferenceDemandLayerResult:
     result: list[PeriodODPairDemand] = []
+    od_pairs: list[tuple[str, str, float, float]] = []
     scale = purpose.attraction_distance_m
     max_distance = reach_multiplier * scale
 
@@ -105,8 +107,10 @@ def generate_purpose_layer(
         if total_weight <= 0:
             continue
 
-        for destination, weight, _distance in selected:
+        for destination, weight, distance in selected:
             base_daily = production * weight / total_weight
+            base_time_s = max(120.0, round(distance * 1.35 / 7.5 + 240.0))
+            od_pairs.append((origin.id, destination.id, base_daily, base_time_s))
             for index, period in enumerate(REFERENCE_PERIODS):
                 outbound = base_daily * purpose.outbound_shares[index]
                 inbound = base_daily * purpose.return_shares[index]
@@ -135,6 +139,7 @@ def generate_purpose_layer(
         purpose=purpose.key,
         label=purpose.label,
         demand=TemporalDemandMatrix(tuple(result)),
+        od_pairs=tuple(od_pairs),
     )
 
 
