@@ -17,7 +17,12 @@ from .infrastructure import TrackType
 from .analytics import _service_analytics, _track_capacity_analytics
 from .temporal_assignment import assign_temporal_demand
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
-from .city_demand import CityDemandConfig, build_city_demand, build_city_temporal_demand
+from .city_demand import (
+    CityDemandConfig,
+    build_city_demand,
+    build_city_demand_layers,
+    build_city_temporal_demand,
+)
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .od import GravityParameters, gravity_od
