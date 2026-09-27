@@ -89,6 +89,39 @@ export class NetworkEditor {
     return this.apply({ label: "delete track " + trackId, execute: () => after, undo: () => before });
   }
 
+  splitTrack(trackId: string, ratio = 0.5): NetworkEditorState {
+    const before = this.snapshot();
+    const after = this.snapshot();
+    const track = after.network.track_sections.find(t => t.id === trackId);
+    if (!track || !track.start_node_id || !track.end_node_id) throw new Error("Track endpoints are required");
+    const a = after.network.track_nodes.find(n => n.id === track.start_node_id);
+    const b = after.network.track_nodes.find(n => n.id === track.end_node_id);
+    if (!a || !b) throw new Error("Track endpoints not found");
+    const r = Math.max(0.05, Math.min(0.95, ratio));
+    const nodeId = trackId + "-split";
+    if (after.network.track_nodes.some(n => n.id === nodeId)) throw new Error("Split node already exists");
+    after.network.track_nodes.push({ id: nodeId, x: a.x + (b.x-a.x)*r, y: a.y + (b.y-a.y)*r, elevation_m: a.elevation_m + (b.elevation_m-a.elevation_m)*r });
+    const first = { ...track, id: trackId + "-a", end_node_id: nodeId };
+    const second = { ...track, id: trackId + "-b", start_node_id: nodeId };
+    const nodes = new Map(after.network.track_nodes.map(n => [n.id, n]));
+    after.network.track_sections = after.network.track_sections.flatMap(t => t.id === trackId ? [normalizeTrackSection(first,nodes), normalizeTrackSection(second,nodes)] : [t]);
+    after.network.routes = after.network.routes.map(route => ({ ...route, track_section_ids: route.track_section_ids?.flatMap(id => id === trackId ? [first.id, second.id] : [id]) }));
+    return this.apply({ label: "split track " + trackId, execute: () => after, undo: () => before });
+  }
+
+  mergeTracks(firstId: string, secondId: string): NetworkEditorState {
+    const before = this.snapshot();
+    const after = this.snapshot();
+    const a = after.network.track_sections.find(t => t.id === firstId);
+    const b = after.network.track_sections.find(t => t.id === secondId);
+    if (!a || !b || a.end_node_id !== b.start_node_id) throw new Error("Tracks must be connected end-to-start");
+    const merged = normalizeTrackSection({ ...a, id: firstId + "-merged", end_node_id: b.end_node_id, length_km: a.length_km + b.length_km }, new Map(after.network.track_nodes.map(n => [n.id,n])));
+    after.network.track_sections = after.network.track_sections.filter(t => t.id !== firstId && t.id !== secondId);
+    after.network.track_sections.push(merged);
+    after.network.routes = after.network.routes.map(route => ({ ...route, track_section_ids: route.track_section_ids?.flatMap(id => id === firstId || id === secondId ? [merged.id] : [id]) }));
+    return this.apply({ label: "merge tracks", execute: () => after, undo: () => before });
+  }
+
   undo(): NetworkEditorState { this.state = this.history.undo(this.state); return this.snapshot(); }
   redo(): NetworkEditorState { this.state = this.history.redo(this.state); return this.snapshot(); }
 }
