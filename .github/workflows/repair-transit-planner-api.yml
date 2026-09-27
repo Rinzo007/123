@@ -1,0 +1,44 @@
+name: Repair Transit Planner API
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.head_commit.message != 'transit_planner: remove API fallback'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore API and remove fallback paths
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          p = pathlib.Path('transit_planner/src/transit_planner/api.py')
+          subprocess.run(['git', 'checkout', 'b67e4e7abac337d58e7cf93a38a217fef0891425', '--', str(p)], check=True)
+          s = p.read_text(encoding='utf-8')
+          old = '''        try:\n            urban_segment_multipliers, urban_meta = _urban_segment_multipliers(\n                network,\n                bounds=bounds,\n                origin_lon=origin_lon,\n                origin_lat=origin_lat,\n                release=payload.get("release"),\n            )\n        except Exception:\n            # Urban layers are an enrichment. A remote data/schema failure must\n            # not make the authoritative city assignment unavailable.\n            urban_segment_multipliers = {}\n            urban_meta = {\n                "release": _overture_source(payload.get("release")).release,\n                "buildings": 0,\n                "water": 0,\n                "segments": 0,\n            }\n'''
+          new = '''        urban_segment_multipliers, urban_meta = _urban_segment_multipliers(\n            network,\n            bounds=bounds,\n            origin_lon=origin_lon,\n            origin_lat=origin_lat,\n            release=payload.get("release"),\n        )\n'''
+          if old not in s:
+              raise SystemExit('urban fallback block not found')
+          s = s.replace(old, new, 1)
+          old_geom = '''            if len(geometry) < 2:\n                geometry = (\n                    network.stops[left_id].location,\n                    network.stops[right_id].location,\n                )\n'''
+          new_geom = '''            if len(geometry) < 2:\n                raise ValueError(f"Route {route.id} segment {index} has no geometry")\n'''
+          if old_geom not in s:
+              raise SystemExit('geometry fallback block not found')
+          s = s.replace(old_geom, new_geom, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit repair
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add transit_planner/src/transit_planner/api.py
+          git rm .github/workflows/repair-transit-planner-api.yml
+          git commit -m "transit_planner: remove API fallback"
+          git push
