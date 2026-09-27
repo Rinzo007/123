@@ -442,7 +442,7 @@
           datasetCacheKey("overture-urban", {
             south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
           }) + ":" + network.routes.map((route) =>
-            \`\${route.id}:\${route.stop_ids.join(",")}:\${JSON.stringify(route.geometry)}\`,
+            `${route.id}:${route.stop_ids.join(",")}:${JSON.stringify(route.geometry)}`,
           ).join("|");
         urbanMultipliers = await loadDataset<UrbanMultipliersResponse>(urbanKey);
         if (!urbanMultipliers) {
