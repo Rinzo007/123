@@ -262,67 +262,23 @@ def overture_urban_multipliers(payload: dict) -> dict:
             float(payload["north"]),
             float(payload["east"]),
         )
-        source = _overture_source(payload.get("release"))
-        origin_lon = float(
-            payload.get("origin_lon", (bounds[1] + bounds[3]) / 2.0)
-        )
-        origin_lat = float(
-            payload.get("origin_lat", (bounds[0] + bounds[2]) / 2.0)
-        )
         network = network_from_dict(payload["network"])
-
-        buildings, water = OvertureUrbanProvider(
-            source=source,
-            bbox=bounds,
-        ).load()
-
-        from .urban import UrbanContext
-
-        context = UrbanContext(buildings, water)
-        routes: dict[str, dict] = {}
-        segment_count = 0
-
-        for route in network.routes.values():
-            multipliers: list[float] = []
-            metrics: list[dict[str, float]] = []
-            for index, (left_id, right_id) in enumerate(route.segment_pairs()):
-                geometry = network.route_segment_geometry_points(route, index)
-                if len(geometry) < 2:
-                    geometry = (
-                        network.stops[left_id].location,
-                        network.stops[right_id].location,
-                    )
-                wgs84 = tuple(
-                    project_local_point_wgs84(
-                        point,
-                        origin_lon=origin_lon,
-                        origin_lat=origin_lat,
-                    )
-                    for point in geometry
-                )
-                multiplier, segment_metrics = context.construction_multiplier(
-                    route.mode.value,
-                    network.route_segment_row(route, index).value,
-                    wgs84,
-                    cost_per_km=network.route_segment_cost_per_km(route, index),
-                )
-                multipliers.append(float(multiplier))
-                metrics.append(segment_metrics)
-                segment_count += 1
-
-            routes[route.id] = {
-                "segment_multipliers": multipliers,
-                "segments": metrics,
-            }
-
+        origin_lon = float(payload.get("origin_lon", (bounds[1] + bounds[3]) / 2.0))
+        origin_lat = float(payload.get("origin_lat", (bounds[0] + bounds[2]) / 2.0))
+        multipliers, meta = _urban_segment_multipliers(
+            network,
+            bounds=bounds,
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+            release=payload.get("release"),
+        )
         return {
-            "release": source.release,
-            "routes": routes,
-            "counts": {
-                "buildings": len(buildings),
-                "water": len(water),
-                "segments": segment_count,
+            "release": meta["release"],
+            "routes": {
+                route_id: {"segment_multipliers": list(values)}
+                for route_id, values in multipliers.items()
             },
+            "counts": meta,
         }
     except HTTPException:
         raise
@@ -1033,9 +989,27 @@ def city_assignment(payload: dict) -> dict:
             config=assignment_config,
         )
         result = temporal_result.aggregate()
+        try:
+            urban_segment_multipliers, urban_meta = _urban_segment_multipliers(
+                network,
+                bounds=bounds,
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+                release=payload.get("release"),
+            )
+        except (OSError, RuntimeError, TimeoutError, ValueError):
+            urban_segment_multipliers = {}
+            urban_meta = {
+                "release": _overture_source(payload.get("release")).release,
+                "buildings": 0,
+                "water": 0,
+                "segments": 0,
+            }
+
         economics_config = _economics_config_from_payload(
             payload,
             default_period_id=assignment_config.period_id,
+            segment_multipliers_override=urban_segment_multipliers,
         )
         temporal_economics = calculate_temporal_economics(
             network,
@@ -1100,6 +1074,7 @@ def city_assignment(payload: dict) -> dict:
                 for item in result.stop_flows
             ],
         },
+        "urban_context": urban_meta,
         "economics": _economics_result_to_dict(economics),
         "periods": [
             {
