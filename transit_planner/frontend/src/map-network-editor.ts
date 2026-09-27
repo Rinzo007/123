@@ -2,7 +2,7 @@ import type { Map as MapLibreMap, MapMouseEvent } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import type { NetworkPayload } from "./types";
 import { networkToGeoJSON } from "./network-editor";
-import { localMetersToLonLat, lonLatToLocalMeters } from "./core/geometry";
+import { lonLatToLocalMeters } from "./core/geometry";
 
 export type MapEditorMode = "select" | "node" | "track";
 
