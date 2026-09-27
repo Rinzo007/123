@@ -168,9 +168,19 @@ export type ReferenceLine = {
   closed?: boolean;
 };
 
+export type ReferenceDemandLayer = {
+  purpose: string;
+  label: string;
+  od: Array<[number, number, number, number]>;
+  out: number[];
+  ret: number[];
+  baseT?: number[][];
+};
+
 export type ReferenceDemand = {
   pts: Array<[number, number, number, number]>;
   od: Array<[number, number, number, number]>;
+  layers?: ReferenceDemandLayer[];
   model?: Record<string, unknown>;
 };
 
@@ -237,9 +247,7 @@ export function toReferenceGeometries(network: NetworkPayload): Array<{
   });
 }
 
-export type ReferenceCityDemand = {
-  pts: Array<[number, number, number, number]>;
-  od: Array<[number, number, number, number]>;
+export type ReferenceCityDemand = ReferenceDemand & {
   baselineT?: number[][];
 };
 
@@ -254,7 +262,7 @@ export async function runReferencePreview(
     Date.now(),
     demand,
     baselineT,
-    [],
+    demand.layers ?? [],
     network.origin_lat ?? 51.67,
   );
   return client.run(toReferenceLines(network), toReferenceGeometries(network), false, 0);
