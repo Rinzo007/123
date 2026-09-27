@@ -31,10 +31,8 @@ import {
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runModelPreview } from "./workers/reference-runtime";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
-import { RouteEditor } from "./planning/route-editor";
 import { estimateFleetRequirement } from "./planning/fleet";
 import { generateServiceTimetable } from "./planning/timetable";
-import { validateDemand, assignmentSummary } from "./planning/assignment";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
