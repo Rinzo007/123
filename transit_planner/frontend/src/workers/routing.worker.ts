@@ -2,10 +2,10 @@ type RouteRequest = {
   type: "route";
   job: number;
   start: number;
-  targets: Int32Array;
+  targetNodes: Int32Array;
   offsets: Int32Array;
+  targets: Int32Array;
   costs: Float64Array;
-  edgeIds: string[];
 };
 
 class QuadHeap {
@@ -13,45 +13,51 @@ class QuadHeap {
   private values = new Float64Array(32);
   private size = 0;
 
-  clear(): void { this.size = 0; }
-
   push(node: number, value: number): void {
     if (this.size >= this.nodes.length) {
-      const nodes = new Int32Array(this.nodes.length * 2); nodes.set(this.nodes); this.nodes = nodes;
-      const values = new Float64Array(this.values.length * 2); values.set(this.values); this.values = values;
+      const nextNodes = new Int32Array(this.nodes.length * 2);
+      nextNodes.set(this.nodes);
+      this.nodes = nextNodes;
+      const nextValues = new Float64Array(this.values.length * 2);
+      nextValues.set(this.values);
+      this.values = nextValues;
     }
-    let i = this.size++;
-    while (i > 0) {
-      const p = Math.floor((i - 1) / 4);
-      if (this.values[p] <= value) break;
-      this.nodes[i] = this.nodes[p];
-      this.values[i] = this.values[p];
-      i = p;
+    let index = this.size++;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 4);
+      if (this.values[parent] <= value) break;
+      this.nodes[index] = this.nodes[parent];
+      this.values[index] = this.values[parent];
+      index = parent;
     }
-    this.nodes[i] = node;
-    this.values[i] = value;
+    this.nodes[index] = node;
+    this.values[index] = value;
   }
 
   pop(): [number, number] | null {
     if (!this.size) return null;
-    const node = this.nodes[0], value = this.values[0];
+    const node = this.nodes[0];
+    const value = this.values[0];
     const last = --this.size;
     if (last > 0) {
-      const lastNode = this.nodes[last], lastValue = this.values[last];
-      let i = 0;
+      const lastNode = this.nodes[last];
+      const lastValue = this.values[last];
+      let index = 0;
       while (true) {
-        const first = i * 4 + 1;
-        if (first >= last) break;
-        let best = first;
-        const end = Math.min(last, first + 4);
-        for (let c = first + 1; c < end; c += 1) if (this.values[c] < this.values[best]) best = c;
+        const firstChild = index * 4 + 1;
+        if (firstChild >= last) break;
+        let best = firstChild;
+        const end = Math.min(last, firstChild + 4);
+        for (let child = firstChild + 1; child < end; child += 1) {
+          if (this.values[child] < this.values[best]) best = child;
+        }
         if (this.values[best] >= lastValue) break;
-        this.nodes[i] = this.nodes[best];
-        this.values[i] = this.values[best];
-        i = best;
+        this.nodes[index] = this.nodes[best];
+        this.values[index] = this.values[best];
+        index = best;
       }
-      this.nodes[i] = lastNode;
-      this.values[i] = lastValue;
+      this.nodes[index] = lastNode;
+      this.values[index] = lastValue;
     }
     return [node, value];
   }
@@ -62,13 +68,18 @@ self.onmessage = (event: MessageEvent<RouteRequest>) => {
   if (message.type !== "route") return;
 
   const nodeCount = message.offsets.length - 1;
+  const distances = new Float64Array(message.targetNodes.length);
+  const previousNode = new Int32Array(nodeCount);
+  const previousEdge = new Int32Array(nodeCount);
+  const targetIndex = new Int32Array(message.targetNodes.length);
+  previousNode.fill(-1);
+  previousEdge.fill(-1);
+
   const dist = new Float64Array(nodeCount);
   dist.fill(Number.POSITIVE_INFINITY);
-  const previousNode = new Int32Array(nodeCount); previousNode.fill(-1);
-  const previousEdge = new Int32Array(nodeCount); previousEdge.fill(-1);
   const settled = new Uint8Array(nodeCount);
   const heap = new QuadHeap();
-  heap.clear();
+
   dist[message.start] = 0;
   heap.push(message.start, 0);
 
@@ -90,24 +101,21 @@ self.onmessage = (event: MessageEvent<RouteRequest>) => {
     }
   }
 
-  const routes = message.edgeIds.map((_, index) => {
-    const edgePath: number[] = [];
-    let current = index;
-    if (!Number.isFinite(dist[current])) return { target: index, cost: Number.POSITIVE_INFINITY, edgePath };
-    while (current !== message.start) {
-      const edge = previousEdge[current];
-      if (edge < 0) break;
-      edgePath.push(edge);
-      current = previousNode[current];
-    }
-    edgePath.reverse();
-    return {
-      target: index,
-      cost: dist[index],
-      edgePath,
-      edgeIds: edgePath.map((edge) => message.edgeIds[edge]),
-    };
-  });
+  for (let index = 0; index < message.targetNodes.length; index += 1) {
+    const target = message.targetNodes[index];
+    targetIndex[index] = target;
+    distances[index] = dist[target];
+  }
 
-  self.postMessage({ type: "routed", job: message.job, routes });
+  self.postMessage(
+    {
+      type: "routed",
+      job: message.job,
+      targetIndex,
+      distances,
+      previousNode,
+      previousEdge,
+    },
+    { transfer: [targetIndex.buffer, distances.buffer, previousNode.buffer, previousEdge.buffer] },
+  );
 };
