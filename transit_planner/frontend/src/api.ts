@@ -505,7 +505,6 @@ export interface EconomicsResult {
   annual_fleet_cost: number;
   annual_operating_cost: number;
   annual_fare_revenue: number;
-  capital_cost: number;
   operating_cost_per_transit_trip: number;
   revenue_per_transit_trip: number;
 }
@@ -590,15 +589,3 @@ export function calculateNetworkAnalytics(
   });
 }
 
-export function validateBlueprint(
-  network: NetworkPayload,
-): Promise<ValidationResult> {
-  return fetch("/api/v1/blueprint/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ network }),
-  }).then(async (response) => {
-    if (!response.ok) throw new Error(await response.text() || "Не удалось проверить чертёж");
-    return response.json() as Promise<ValidationResult>;
-  });
-}
