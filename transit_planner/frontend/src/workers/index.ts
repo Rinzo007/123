@@ -13,6 +13,9 @@ export type EvaluationSummary = {
   dailyDepartures: number;
 };
 
+export type { PlanningPreview, ScenarioProbe };
+export { planningPreview, probe, keepNetwork };
+
 export type ClientPreviewResult = {
   evaluation: EvaluationSummary;
   operations: {
@@ -45,33 +48,16 @@ export function disposeComputationWorkers(): void {
 }
 
 export function runClientPreview(network: NetworkPayload): Promise<ClientPreviewResult> {
-  const dailyDepartures = network.services.reduce((total, service) => {
-    return total + Object.entries(service.headway_by_period).reduce((sum, [periodId, headway]) => {
-      const period = network.periods.find((item) => item.id === periodId);
-      if (!period || headway <= 0) return sum;
-      return sum + Math.ceil((period.end_minute - period.start_minute) / headway);
-    }, 0);
-  }, 0);
-  const fleetEstimate = network.services.reduce((fleet, service) => {
-    const route = network.routes.find((item) => item.id === service.route_id);
-    if (!route) return fleet;
-    const activeHeadways = Object.entries(service.headway_by_period)
-      .map(([periodId, headway]) => ({ period: network.periods.find((item) => item.id === periodId), headway }))
-      .filter((item) => item.period && item.headway > 0);
-    if (!activeHeadways.length) return fleet;
-    const cycleMinutes = activeHeadways.reduce(
-      (max, item) => Math.max(max, route.stop_ids.length * 2 + 4),
-      0,
-    );
-    return fleet + Math.max(1, Math.ceil(cycleMinutes / Math.min(...activeHeadways.map((item) => item.headway))));
-  }, 0);
-
+  const preview: PlanningPreview = planningPreview(network);
   return Promise.resolve({
     evaluation: {
-      lines: network.routes.length,
-      stops: network.stops.length,
-      dailyDepartures,
+      lines: preview.lines,
+      stops: preview.stops,
+      dailyDepartures: preview.dailyDepartures,
     },
-    operations: { dailyDepartures, fleetEstimate },
+    operations: {
+      dailyDepartures: preview.dailyDepartures,
+      fleetEstimate: preview.fleetEstimate,
+    },
   });
 }
