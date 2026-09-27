@@ -148,3 +148,40 @@ def city_assignment(p:dict):
         n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); raw=p.get("demand_config",{}); dc=CityDemandConfig(trip_rate=float(raw.get("trip_rate",.12)),decay=float(raw.get("decay",.08)),reference_speed_kph=float(raw.get("reference_speed_kph",30))); td=build_city_temporal_demand(z,pl,origin_lon=lon,origin_lat=lat,config=dc); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); sm,um=urban(n,b,lon,lat,p.get("release")); ec=econ(p,ac.period_id,sm); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
     r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"urban_context":um,"assignment":{"metrics":asdict(r.metrics),"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
+
+
+@app.post("/api/v1/analytics")
+def network_analytics(p: dict):
+    from .analytics import analyze_network
+    n = network_from_dict(p["network"])
+    d = DemandMatrix(tuple(
+        ODPairDemand(
+            str(x["origin_zone_id"]), str(x["destination_zone_id"]),
+            float(x["trips_per_day"]), str(x.get("purpose", "all"))
+        ) for x in p.get("demand", [])
+    ))
+    zones = {
+        str(x["id"]): DemandZone(
+            str(x["id"]), float(x["centroid_x"]), float(x["centroid_y"]),
+            population=float(x.get("population", 0)),
+            jobs=float(x.get("jobs", 0)),
+        ) for x in p.get("zones", [])
+    }
+    result = assign_demand(n, d, zones=zones, config=AssignmentConfig(**p["config"]))
+    analytics = analyze_network(n, result, zones=tuple(zones.values()))
+    return asdict(analytics)
+
+
+@app.post("/api/v1/blueprint/validate")
+def validate_blueprint(p: dict):
+    n = network_from_dict(p["network"])
+    errors = list(n.validate())
+    for section in n.track_sections.values():
+        if section.max_slope_percent is not None and section.slope_percent > section.max_slope_percent:
+            errors.append(
+                f"Track {section.id} slope {section.slope_percent:.2f}% exceeds "
+                f"{section.max_slope_percent:.2f}%"
+            )
+        if section.curve_radius_m is not None and section.curve_radius_m < 1:
+            errors.append(f"Track {section.id} has invalid curve radius")
+    return {"valid": not errors, "errors": errors}
