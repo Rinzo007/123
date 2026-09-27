@@ -1,4 +1,4 @@
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection } from "./geojson";
 import type { NetworkPayload, ValidationResult } from "./types";
 
 export async function validateNetwork(
