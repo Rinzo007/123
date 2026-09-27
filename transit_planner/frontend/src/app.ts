@@ -148,7 +148,7 @@ shell.innerHTML = `
     </div>
     <div class="actions" role="toolbar" aria-label="Действия">
       <button data-action="view-map" class="active-toggle">Карта</button>
-      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button><button data-action="undo" title="Ctrl+Z">↶</button><button data-action="redo" title="Ctrl+Shift+Z">↷</button>
+      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button><button data-action="split-track">Разделить</button><button data-action="merge-track">Объединить</button><button data-action="undo" title="Ctrl+Z">↶</button><button data-action="redo" title="Ctrl+Shift+Z">↷</button>
       <button data-action="load-city">Загрузить Overture</button>
       <button data-action="build-road" disabled>Построить по дорогам</button>
       <button data-action="draw" class="primary" aria-pressed="false">Добавить остановки</button>
@@ -1218,6 +1218,14 @@ shell.addEventListener("click", (event) => {
   const selectedTrack = target.closest<HTMLElement>("[data-track-select]")?.dataset.trackSelect;
   if (selectedTrack) { selectedTrackId = selectedTrack; render(); return; }
   switch (action) {
+    case "split-track":
+      try { mapNetworkEditor?.splitSelectedTrack(); renderPropertyPanel(); render(); setStatus("Участок разделён"); }
+      catch (error) { setStatus(error instanceof Error ? error.message : "Не удалось разделить участок"); }
+      break;
+    case "merge-track":
+      try { mapNetworkEditor?.mergeSelectedTracks(); renderPropertyPanel(); render(); setStatus("Выберите второй участок и повторите «Объединить»"); }
+      catch (error) { setStatus(error instanceof Error ? error.message : "Не удалось объединить участки"); }
+      break;
     case "view-map": viewMode = "map"; render(); break;
     case "view-network": viewMode = "network"; render(); break;
     case "load-city": void loadCityData(); break;
