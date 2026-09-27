@@ -44,6 +44,7 @@ from .zones import generate_zones_from_population_raster
 from .network import TransitMode
 from .reference_model import REFERENCE_MOBILITY, REFERENCE_PURPOSE_LAYERS, TrackRow
 from .reference_demand import build_reference_demand_layers
+from .urban import UrbanContext
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 
@@ -997,7 +998,9 @@ def city_assignment(payload: dict) -> dict:
                 origin_lat=origin_lat,
                 release=payload.get("release"),
             )
-        except (OSError, RuntimeError, TimeoutError, ValueError):
+        except Exception:
+            # Urban layers are an enrichment. A remote data/schema failure must
+            # not make the authoritative city assignment unavailable.
             urban_segment_multipliers = {}
             urban_meta = {
                 "release": _overture_source(payload.get("release")).release,
