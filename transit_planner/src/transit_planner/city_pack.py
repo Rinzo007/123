@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from .binary_pack import encode_buildings_bin, encode_streets_bin
+from .overture import OvertureSource, OvertureUrbanProvider
 from .overture_network import OvertureNetworkProvider
-from .overture import OvertureSource
+from .projection import project_local_point_wgs84
 
 
-TKBL_MAGIC = b"TKBL"
-TKBL_VERSION = 1
-TKBL_HEADER_BYTES = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,33 +137,35 @@ def build_overture_city_pack(
         include_stops=True,
         include_places=True,
     )
+    buildings, water = OvertureUrbanProvider(
+        source=source,
+        bbox=bbox,
+    ).load()
 
-    street_lines = [
-        [
-            (float(point.x), float(point.y))
-            for point in road.geometry.points
-        ]
-        for road in network.roads
-    ]
+    nodes = tuple(
+        (
+            node_id,
+            project_local_point_wgs84(
+                Point(node.x, node.y),
+                origin_lon=network.origin_lon,
+                origin_lat=network.origin_lat,
+            ),
+        )
+        for node_id, node in sorted(network.graph.nodes.items())
+    )
+    edges = tuple(
+        network.graph.edges[edge_id]
+        for edge_id in sorted(network.graph.edges)
+    )
+    names = tuple(edge.id for edge in edges)
     streets = {
         "version": 1,
         "crs": "OGC:CRS84",
-        "nodes": [
-            {"id": node.id, "x": node.x, "y": node.y}
-            for node in network.graph.nodes.values()
-        ],
-        "edges": [
-            {
-                "id": edge.id,
-                "from": edge.from_node,
-                "to": edge.to_node,
-                "length_m": edge.length_m,
-                "speed_kph": edge.speed_kph,
-                "road_type": edge.road_type,
-            }
-            for edge in network.graph.edges.values()
-        ],
+        "binary": "TKST",
+        "nodes": len(nodes),
+        "edges": len(edges),
     }
+
     stops = [
         {
             "id": stop.id,
@@ -188,11 +188,36 @@ def build_overture_city_pack(
         }
         for place in network.places
     ]
+    building_rows = [
+        {
+            "id": building.id,
+            "area_m2": building.area_m2,
+            "subtype": building.subtype,
+            "building_class": building.building_class,
+        }
+        for building in buildings
+    ]
+    water_rows = [
+        {
+            "id": feature.id,
+            "water_class": feature.water_class,
+            "subtype": feature.subtype,
+        }
+        for feature in water
+    ]
 
     model_path = Path(__file__).with_name("model.json")
+    street_binary = encode_streets_bin(
+        nodes=nodes,
+        edges=edges,
+        names=names,
+    )
     files = {
         "streets.json": json.dumps(streets, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
-        "streets.bin": encode_tkbl(street_lines),
+        "streets.bin": street_binary,
+        "buildings.json": json.dumps(building_rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+        "buildings.bin": encode_buildings_bin(buildings),
+        "water.json": json.dumps(water_rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         "stops.json": json.dumps(stops, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         "places.json": json.dumps(places, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         "model.json": model_path.read_bytes(),
