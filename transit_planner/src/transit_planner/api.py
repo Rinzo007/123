@@ -77,7 +77,10 @@ def _bbox(
 
 
 def _overture_source(release: str | None) -> OvertureSource:
-    return OvertureSource(release=(release or DEFAULT_OVERTURE_RELEASE).strip())
+    raw_release = release if isinstance(release, str) else None
+    return OvertureSource(
+        release=(raw_release or DEFAULT_OVERTURE_RELEASE).strip(),
+    )
 
 
 @app.get("/health")
