@@ -20,9 +20,19 @@ import {
   type UrbanMultipliersResponse,
 } from "./api";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
-import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
+import {
+  loadBinaryDataset,
+  loadDataset,
+  loadProject,
+  loadUiSettings,
+  saveBinaryDataset,
+  saveDataset,
+  saveProject,
+  saveUiSettings,
+} from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runRuntimePreview } from "./workers/reference-runtime";
+import { decodeLines, encodeLines } from "./tkbl";
 
 const DEFAULT_CENTER: [number, number] = [39.2, 51.67];
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
@@ -445,9 +455,50 @@ async function loadCityData(): Promise<void> {
     const b = bounds();
     if (!b) throw new Error("Карта ещё не готова");
     const key = datasetCacheKey("overture-network", b);
-    const cached = await loadDataset<OvertureNetworkResponse>(key);
-    const data = cached ?? await loadOvertureNetwork(b.south, b.west, b.north, b.east);
-    if (!cached) await saveDataset(key, data);
+    const metaKey = key + ":meta";
+    const roadsKey = key + ":roads-bin";
+    const cachedMeta = await loadDataset<Omit<OvertureNetworkResponse, "roads"> & {
+      roadProperties: Array<Record<string, unknown> | null>;
+    }>(metaKey);
+    const cachedRoads = await loadBinaryDataset(roadsKey);
+
+    let data: OvertureNetworkResponse;
+    if (cachedMeta && cachedRoads) {
+      const decoded = decodeLines(cachedRoads);
+      data = {
+        roads: {
+          type: "FeatureCollection",
+          features: decoded.lines.map((line, index) => ({
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: line.coordinates },
+            properties: cachedMeta.roadProperties[index] ?? {},
+          })),
+        },
+        connectors: cachedMeta.connectors,
+        stops: cachedMeta.stops,
+        places: cachedMeta.places,
+        release: cachedMeta.release,
+        counts: cachedMeta.counts,
+      };
+    } else {
+      data = await loadOvertureNetwork(b.south, b.west, b.north, b.east);
+      await Promise.all([
+        saveDataset(metaKey, {
+          connectors: data.connectors,
+          stops: data.stops,
+          places: data.places,
+          release: data.release,
+          counts: data.counts,
+          roadProperties: data.roads.features.map((feature) => feature.properties ?? {}),
+        }),
+        saveBinaryDataset(
+          roadsKey,
+          encodeLines(data.roads.features.map((feature) => ({
+            coordinates: feature.geometry.coordinates.map(([lon, lat]) => [lon, lat] as [number, number]),
+          }))),
+        ),
+      ]);
+    }
     cityRoads = data.roads;
     cityConnectors = data.connectors;
     cityStops = data.stops;
