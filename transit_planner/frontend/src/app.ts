@@ -200,6 +200,7 @@ shell.innerHTML = `
       <div id="map-hint" class="map-hint" hidden>Кликайте по карте, чтобы добавлять остановки</div>
       <button data-action="clear" class="clear-button">Очистить маршрут</button>
     </main>
+    <aside id="property-panel" class="property-panel" aria-label="Свойства объекта"></aside>
     <main class="network-area" id="network-area" hidden>
       <div id="network-content" class="network-view"></div>
     </main>
@@ -213,6 +214,8 @@ const saveStateElement = shell.querySelector<HTMLElement>("#save-state")!;
 const networkArea = shell.querySelector<HTMLElement>("#network-area")!;
 const mapArea = shell.querySelector<HTMLElement>("#map-area")!;
 const networkContent = shell.querySelector<HTMLElement>("#network-content")!;
+const propertyPanel = shell.querySelector<HTMLElement>("#property-panel")!;
+let editorSelection: { kind: "node" | "track" | null; id: string | null } = { kind: null, id: null };
 const fileInput = shell.querySelector<HTMLInputElement>("#file-input")!;
 const routeNameInput = shell.querySelector<HTMLInputElement>("#route-name")!;
 const modeInput = shell.querySelector<HTMLSelectElement>("#mode")!;
@@ -259,6 +262,72 @@ const initialSettings = {
   showStationLoads,
 };
 
+function renderPropertyPanel(): void {
+  const { kind, id } = editorSelection;
+  if (!kind || !id) {
+    propertyPanel.innerHTML = '<div class="property-empty"><strong>Свойства</strong><p>Выберите узел или участок сети на карте.</p></div>';
+    return;
+  }
+  const current = network;
+  const node = kind === "node" ? current.track_nodes.find(n => n.id === id) : undefined;
+  const track = kind === "track" ? current.track_sections.find(t => t.id === id) : undefined;
+  if (!node && !track) {
+    propertyPanel.innerHTML = '<div class="property-empty"><strong>Свойства</strong><p>Объект больше не существует.</p></div>';
+    return;
+  }
+  if (node) {
+    propertyPanel.innerHTML = `
+      <div class="property-head"><div><span class="property-kind">УЗЕЛ</span><h3>${node.id}</h3></div><button data-property-action="delete" class="danger">Удалить</button></div>
+      <label>ID<input value="${node.id}" disabled></label>
+      <label>X, м<input data-field="x" type="number" step="0.01" value="${node.x}"></label>
+      <label>Y, м<input data-field="y" type="number" step="0.01" value="${node.y}"></label>
+      <label>Отметка, м<input data-field="elevation_m" type="number" step="0.1" value="${node.elevation_m}"></label>
+      <div class="property-meta">Связанных участков: ${current.track_sections.filter(t => t.start_node_id === id || t.end_node_id === id).length}</div>`;
+  } else if (track) {
+    propertyPanel.innerHTML = `
+      <div class="property-head"><div><span class="property-kind">УЧАСТОК</span><h3>${track.id}</h3></div><button data-property-action="delete" class="danger">Удалить</button></div>
+      <label>ID<input value="${track.id}" disabled></label>
+      <label>Тип пути<select data-field="track_type"><option value="surface">Поверхность</option><option value="elevated">Эстакада</option><option value="tunnel">Тоннель</option><option value="trenched">Выемка</option><option value="ramp">Рампа</option></select></label>
+      <label>Направление<select data-field="direction"><option value="forward">Прямое</option><option value="reverse">Обратное</option><option value="both">Оба</option></select></label>
+      <label>Скорость, км/ч<input data-field="speed_limit_kph" type="number" min="1" step="1" value="${track.speed_limit_kph}"></label>
+      <label>Путей<input data-field="track_count" type="number" min="1" step="1" value="${track.track_count}"></label>
+      <label>Макс. уклон, %<input data-field="max_slope_percent" type="number" min="0" step="0.1" value="${track.max_slope_percent}"></label>
+      <label>Радиус кривой, м<input data-field="curve_radius_m" type="number" min="0" step="1" value="${track.curve_radius_m ?? ""}"></label>
+      <label>Переездов<input data-field="grade_crossing_count" type="number" min="0" step="1" value="${track.grade_crossing_count}"></label>
+      <label>Группа параллельности<input data-field="parallel_group" value="${track.parallel_group ?? ""}"></label>
+      <div class="property-grid"><div><span>Длина</span><b>${track.length_km.toFixed(3)} км</b></div><div><span>Уклон</span><b>${track.slope_percent.toFixed(2)}%</b></div><div><span>Перепад</span><b>${track.elevation_delta_m.toFixed(1)} м</b></div><div><span>Пропускная способность</span><b>${track.capacity_departures_per_hour} отп./ч</b></div></div>`;
+    const type = propertyPanel.querySelector<HTMLSelectElement>('[data-field="track_type"]'); if (type) type.value = track.track_type;
+    const direction = propertyPanel.querySelector<HTMLSelectElement>('[data-field="direction"]'); if (direction) direction.value = track.direction;
+  }
+  propertyPanel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-field]").forEach(input => {
+    input.addEventListener("change", () => updateSelectedProperty(input.dataset.field!, input.value));
+  });
+  propertyPanel.querySelector('[data-property-action="delete"]')?.addEventListener("click", deleteSelectedProperty);
+}
+function updateSelectedProperty(field: string, raw: string): void {
+  const next = structuredClone(network);
+  if (editorSelection.kind === "node") {
+    const item = next.track_nodes.find(n => n.id === editorSelection.id); if (!item) return;
+    const value = field === "elevation_m" || field === "x" || field === "y" ? Number(raw) : raw;
+    (item as any)[field] = value;
+  } else if (editorSelection.kind === "track") {
+    const item = next.track_sections.find(t => t.id === editorSelection.id); if (!item) return;
+    const numeric = ["speed_limit_kph","track_count","max_slope_percent","grade_crossing_count","curve_radius_m"].includes(field);
+    (item as any)[field] = numeric ? (raw === "" && field === "curve_radius_m" ? null : Number(raw)) : raw;
+    const a = next.track_nodes.find(n => n.id === item.start_node_id), b = next.track_nodes.find(n => n.id === item.end_node_id);
+    if (a && b) { const d = Math.max(.001, Math.hypot(b.x-a.x,b.y-a.y)); item.length_km=d/1000; item.elevation_delta_m=b.elevation_m-a.elevation_m; item.slope_percent=item.elevation_delta_m/d*100; item.start_elevation_m=a.elevation_m; item.end_elevation_m=b.elevation_m; }
+  }
+  network = next; markDirty(); mapNetworkEditor?.refresh(); renderPropertyPanel(); render();
+}
+function deleteSelectedProperty(): void {
+  const next = structuredClone(network);
+  if (editorSelection.kind === "track") next.track_sections = next.track_sections.filter(t => t.id !== editorSelection.id);
+  else if (editorSelection.kind === "node") {
+    const id = editorSelection.id; if (next.track_sections.some(t => t.start_node_id === id || t.end_node_id === id)) { setStatus("Нельзя удалить узел: сначала удалите связанные участки"); return; }
+    next.track_nodes = next.track_nodes.filter(n => n.id !== id);
+  } else return;
+  network = next; editorSelection = { kind: null, id: null }; markDirty(); mapNetworkEditor?.refresh(); renderPropertyPanel(); render();
+}
 function setStatus(next: string): void {
   message = next;
   statusElement.textContent = next;
@@ -1236,7 +1305,7 @@ function initializeMap(): void {
     map!.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
     map!.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     mapReady = true;
-    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); render(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; render(); } });
+    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); render(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; editorSelection = { kind, id }; renderPropertyPanel(); render(); } });
     mapNetworkEditor.setMode(editorMode);
     syncMapGeoJson();
   });
@@ -1297,4 +1366,5 @@ window.addEventListener("beforeunload", () => {
 });
 
 wireEditorActions();
+renderPropertyPanel();
 void bootstrap();
