@@ -97,7 +97,7 @@ export class ReferenceEvaluationClient {
   }
 }
 
-export function solveReferenceDemand(batch: ReferenceDemandBatch): Promise<ReferenceDemandOutput> {
+export function solveDemand(batch: ReferenceDemandBatch): Promise<ReferenceDemandOutput> {
   return new Promise((resolve, reject) => {
     const worker = new Worker("/assets/demand-choice.worker-DAUlrAj6.js", { type: "module" });
     const id = `demand-${Date.now()}-${referenceRequestId++}`;
@@ -122,7 +122,7 @@ export function solveReferenceDemand(batch: ReferenceDemandBatch): Promise<Refer
   });
 }
 
-export async function solveReferenceMatrix(input: ReferenceMatrixInput): Promise<ReferenceMatrixOutput> {
+export async function solveMatrix(input: ReferenceMatrixInput): Promise<ReferenceMatrixOutput> {
   const workerCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 2, input.stops));
   const workers = Array.from({ length: workerCount }, () => new Worker("/assets/matrix.worker-E0A0h2Wn.js", { type: "module" }));
   const times = new Float64Array(input.stops * input.stops);
@@ -150,11 +150,11 @@ export async function solveReferenceMatrix(input: ReferenceMatrixInput): Promise
   return { times, previous };
 }
 
-export function closeReferenceEvaluation(client: ReferenceEvaluationClient | null): void {
+export function closeEvaluation(client: ReferenceEvaluationClient | null): void {
   client?.close();
 }
 
-export function networkForReference(network: NetworkPayload): NetworkPayload {
+export function networkForRuntime(network: NetworkPayload): NetworkPayload {
   return network;
 }
 
@@ -251,7 +251,7 @@ export type ReferenceCityDemand = ReferenceDemand & {
   baselineT?: number[][];
 };
 
-export async function runReferencePreview(
+export async function runRuntimePreview(
   client: ReferenceEvaluationClient,
   network: NetworkPayload,
   demandInput?: ReferenceCityDemand,
