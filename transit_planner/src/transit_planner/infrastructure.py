@@ -10,6 +10,60 @@ class TrackType(StrEnum):
     TUNNEL = "tunnel"
 
 
+
+class SignalDirection(StrEnum):
+    FORWARD = "forward"
+    REVERSE = "reverse"
+    BOTH = "both"
+
+
+@dataclass(frozen=True, slots=True)
+class TrackNode:
+    id: str
+    x: float
+    y: float
+    elevation_m: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Track node id cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class Crossover:
+    id: str
+    from_track_id: str
+    to_track_id: str
+    position: float
+    automatic: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Crossover id cannot be empty")
+        if not 0.0 <= self.position <= 1.0:
+            raise ValueError("Crossover position must be between 0 and 1")
+        if self.from_track_id == self.to_track_id:
+            raise ValueError("Crossover needs two different tracks")
+
+
+@dataclass(frozen=True, slots=True)
+class SignalBlock:
+    id: str
+    track_section_id: str
+    start_position: float = 0.0
+    end_position: float = 1.0
+    direction: SignalDirection = SignalDirection.BOTH
+    minimum_headway_seconds: float = 90.0
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Signal block id cannot be empty")
+        if not 0.0 <= self.start_position < self.end_position <= 1.0:
+            raise ValueError("Invalid signal block positions")
+        if self.minimum_headway_seconds <= 0:
+            raise ValueError("Signal headway must be positive")
+
+
 @dataclass(frozen=True, slots=True)
 class ConstructionRates:
     cost_per_km: dict[TrackType, float]
@@ -34,6 +88,16 @@ class TrackSection:
     shared_group: str | None = None
     station_ids: tuple[str, ...] = ()
     speed_limit_kph: float | None = None
+    start_node_id: str | None = None
+    end_node_id: str | None = None
+    start_elevation_m: float = 0.0
+    end_elevation_m: float = 0.0
+    max_slope_percent: float | None = None
+    curve_radius_m: float | None = None
+    track_count: int = 1
+    direction: SignalDirection = SignalDirection.BOTH
+    parallel_group: str | None = None
+    grade_crossing_count: int = 0
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -44,6 +108,14 @@ class TrackSection:
             raise ValueError("Track capacity must be positive")
         if self.speed_limit_kph is not None and self.speed_limit_kph <= 0:
             raise ValueError("Track speed limit must be positive")
+        if self.max_slope_percent is not None and self.max_slope_percent < 0:
+            raise ValueError("max_slope_percent cannot be negative")
+        if self.curve_radius_m is not None and self.curve_radius_m <= 0:
+            raise ValueError("curve_radius_m must be positive")
+        if self.track_count <= 0:
+            raise ValueError("track_count must be positive")
+        if self.grade_crossing_count < 0:
+            raise ValueError("grade_crossing_count cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
