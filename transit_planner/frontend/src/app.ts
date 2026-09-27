@@ -33,6 +33,14 @@ import {
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runRuntimePreview } from "./workers/reference-runtime";
 import { decodeLines, encodeLines } from "./tkbl";
+import {
+  changedSegments,
+  keepNetwork,
+  planningPreview,
+  probe,
+  segmentSignatures,
+  type PlanningPreview,
+} from "./simulation/preview";
 
 const DEFAULT_CENTER: [number, number] = [39.2, 51.67];
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
@@ -109,6 +117,10 @@ let evaluationSummary = { lines: 0, stops: 0, dailyDepartures: 0 };
 let message = "Готово к редактированию";
 let projectRevision = 0;
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let previousSegmentSignatures: Map<string, string> | null = null;
+let lastPlanningPreview: PlanningPreview | null = null;
+let lastProbeDelta: ReturnType<typeof probe>["delta"] | null = null;
+const cpVariant = new URLSearchParams(location.search).get("cp-variant") || "control";
 let referenceEvaluationClient: ReturnType<typeof createEvaluationClient> | null = null;
 let showRoads = true;
 let showRoadSpeed = false;
@@ -119,6 +131,8 @@ let showPassengerFlow = true;
 let showStationLoads = true;
 let showDemandStreets = true;
 let showPopulation = false;
+
+document.documentElement.dataset.cpVariant = cpVariant;
 
 const shell = document.createElement("div");
 shell.className = "app-shell";
@@ -152,7 +166,8 @@ shell.innerHTML = `
         <div class="preview-demand">
           <div class="section-title">Проверочный расчёт</div>
           <label>Спрос, поездок/сутки<input id="preview-trips" type="number" min="1" max="100000" /></label>
-          <button data-action="preview" class="primary" disabled>Рассчитать пассажиропоток</button>
+          <button data-action="planning-preview" disabled>Быстрый расчёт</button>
+      <button data-action="preview" class="primary" disabled>Рассчитать пассажиропоток</button>
           <button data-action="economics" disabled>Рассчитать экономику</button>
           <button data-action="city-assignment" disabled>Рассчитать городскую сеть</button>
           <label>Тариф за поездку<input id="fare" type="number" min="0" step="0.01" /></label>
