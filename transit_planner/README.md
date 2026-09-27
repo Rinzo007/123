@@ -242,7 +242,22 @@ Python:
 
 ### Этап 2 — City Pack v1
 
-Статус: 🔜
+Статус: ✅ завершён
+
+Реализовано (Python):
+
+- `city_pack.py`: манифест v1 строго по спеке (`city, version, sha256, files, totalBytes, schemaVersion, source, release`); `release` фиксирует Overture release источника; `source` зафиксирован как `overture`;
+- состав pack закрыт: `pack_city_files` принимает ровно 8 обязательных файлов (манифест не входит), лишние файлы и недостающие — явная `CityPackError`, fallback-артефактов нет;
+- атомарная запись: `write_city_pack` пишет в staging-каталог рядом с целью, вызывает `verify_city_pack` на staging и только потом подменяет цель (`Path.replace`); частично записанный pack под целевым путём не появляется;
+- строгая загрузка: `read_city_pack` — отсутствие манифеста/поля, чужой `schemaVersion`, расходится набор файлов на диске, размер, SHA-256 файла или payload-хеш = `CityPackLoadError` (`partial=True` — недостаёт/лишние файлы, перепакуется; `partial=False` — повреждено содержимое);
+- новые бинарные слои в `binary_pack.py`: TKSP `stops.bin` (id, lon/lat×1e6, is_station), TKZN `zones.bin` (центроиды m, population/jobs + purpose-аттракции), TKDM `demand.bin` (OD-строки float64 с purpose-таблицей), TKWR `water.bin` (дельта-полигоны как TKBL); все — little-endian magic+version+offsets, roundtrip-тесты;
+- `build_city_zones`: адаптивная TAZ-сетка (≈24 ячеек, 200–2000 м) по places+stops в локальных метрах; population/jobs — place-importance proxy (work = jobs, остальные = residential), работа с точной калибровкой — Этап 6-7;
+- `build_overture_city_pack` собирает все слои: streets (TKST, обратная проекция узлов в WGS84), stops/zones/demand/buildings/water (TK*), `streets.json` несёт origin проекции.
+
+Не сделано (сознательно, дальше по карте):
+
+- фронтенд-загрузка pack в IndexedDB под новый формат (Этап 3 — там же street graph worker);
+- строгая провязка demand к reference-периодам вместо daily-матрицы (Этап 7).
 
 Формат:
 

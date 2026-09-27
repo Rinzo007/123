@@ -44,7 +44,8 @@ def main() -> None:
     )
     print(
         f"City pack готов: {manifest.city} {manifest.version}; "
-        f"{len(manifest.files)} файлов; {manifest.total} байт"
+        f"release {manifest.release}; {len(manifest.files)} файлов; "
+        f"{manifest.total_bytes} байт"
     )
 
 
