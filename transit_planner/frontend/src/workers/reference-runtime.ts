@@ -62,7 +62,7 @@ export class ReferenceEvaluationClient {
 
   constructor(workerCount = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 4) - 1))) {
     for (let index = 0; index < workerCount; index += 1) {
-      const worker = new Worker("/assets/evaluation.worker-jRuvxHc_.js", { type: "module" });
+      const worker = new Worker(new URL("./evaluation.worker.ts", import.meta.url), { type: "module" });
       worker.onmessage = (event: MessageEvent) => {
         const data = event.data as { type?: string; id?: number; result?: unknown; wallMs?: number; detail?: string };
         if (data.type === "ready" || data.id == null) return;
@@ -116,7 +116,7 @@ export class ReferenceEvaluationClient {
 
 export function solveDemand(batch: ReferenceDemandBatch): Promise<ReferenceDemandOutput> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker("/assets/demand-choice.worker-DAUlrAj6.js", { type: "module" });
+    const worker = new Worker(new URL("./demand-choice.worker.ts", import.meta.url), { type: "module" });
     const id = `demand-${Date.now()}-${referenceRequestId++}`;
       worker.onmessage = (event: MessageEvent<{ id: string; output: Omit<ReferenceDemandOutput, "computeMs">; computeMs: number }>) => {
       if (event.data.id !== id) return;
@@ -141,7 +141,7 @@ export function solveDemand(batch: ReferenceDemandBatch): Promise<ReferenceDeman
 
 export async function solveMatrix(input: ReferenceMatrixInput): Promise<ReferenceMatrixOutput> {
   const workerCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 2, input.stops));
-  const workers = Array.from({ length: workerCount }, () => new Worker("/assets/matrix.worker-E0A0h2Wn.js", { type: "module" }));
+  const workers = Array.from({ length: workerCount }, () => new Worker(new URL("./matrix.worker.ts", import.meta.url), { type: "module" }));
   const times = new Float64Array(input.stops * input.stops);
   times.fill(Number.POSITIVE_INFINITY);
   const previous = new Int32Array(input.stops * input.stops * 2);
