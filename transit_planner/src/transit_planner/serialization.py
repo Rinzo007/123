@@ -96,6 +96,10 @@ def network_from_dict(data: dict) -> Network:
     for raw in data.get("periods", []):
         network.add_period(ServicePeriod(**raw))
     from .infrastructure import TrackSection, TrackType
+
+    for raw in data.get("track_nodes", []):
+        network.add_track_node(TrackNode(**raw))
+
     for raw in data.get("track_sections", []):
         network.add_track_section(
             TrackSection(
@@ -105,41 +109,32 @@ def network_from_dict(data: dict) -> Network:
                 capacity_departures_per_hour=float(raw.get("capacity_departures_per_hour", 30.0)),
                 shared_group=raw.get("shared_group"),
                 station_ids=tuple(raw.get("station_ids", ())),
-                speed_limit_kph=(
-                    None
-                    if raw.get("speed_limit_kph") is None
-                    else float(raw["speed_limit_kph"])
-                ),
+                speed_limit_kph=None if raw.get("speed_limit_kph") is None else float(raw["speed_limit_kph"]),
                 start_node_id=raw.get("start_node_id"),
                 end_node_id=raw.get("end_node_id"),
                 start_elevation_m=float(raw.get("start_elevation_m", 0.0)),
                 end_elevation_m=float(raw.get("end_elevation_m", 0.0)),
-                max_slope_percent=(
-                    None if raw.get("max_slope_percent") is None
-                    else float(raw["max_slope_percent"])
-                ),
-                curve_radius_m=(
-                    None if raw.get("curve_radius_m") is None
-                    else float(raw["curve_radius_m"])
-                ),
+                max_slope_percent=None if raw.get("max_slope_percent") is None else float(raw["max_slope_percent"]),
+                curve_radius_m=None if raw.get("curve_radius_m") is None else float(raw["curve_radius_m"]),
                 track_count=int(raw.get("track_count", 1)),
+                direction=SignalDirection(raw.get("direction", "both")),
                 parallel_group=raw.get("parallel_group"),
                 grade_crossing_count=int(raw.get("grade_crossing_count", 0)),
             )
         )
 
-    for raw in data.get("track_nodes", []):
-        network.add_track_node(TrackNode(**raw))
     for raw in data.get("crossovers", []):
         network.add_crossover(Crossover(**raw))
     for raw in data.get("signal_blocks", []):
-        network.add_signal_block(SignalBlock(
-            raw["id"], raw["track_section_id"],
-            float(raw.get("start_position", 0.0)),
-            float(raw.get("end_position", 1.0)),
-            SignalDirection(raw.get("direction", "both")),
-            float(raw.get("minimum_headway_seconds", 90.0)),
-        ))
+        network.add_signal_block(
+            SignalBlock(
+                raw["id"], raw["track_section_id"],
+                float(raw.get("start_position", 0.0)),
+                float(raw.get("end_position", 1.0)),
+                SignalDirection(raw.get("direction", "both")),
+                float(raw.get("minimum_headway_seconds", 90.0)),
+            )
+        )
 
 
     for raw in data.get("stations", []):
