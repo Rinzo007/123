@@ -306,10 +306,12 @@ function buildNetworkPayload(): NetworkPayload {
     location: toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat),
     is_station: false,
   }));
+
   const coordinates = roadRoute?.features[0]?.geometry.coordinates ?? [];
   const geometry = coordinates.length >= 2
     ? { points: coordinates.map(([lon, lat]) => toLocalMeters(lon, lat, origin.lon, origin.lat)) }
     : metricStops.length >= 2 ? { points: metricStops.map((stop) => stop.location) } : null;
+
   const vehicleType = {
     id: `vehicle-${mode}`,
     name: MODE_LABELS[mode],
@@ -317,6 +319,33 @@ function buildNetworkPayload(): NetworkPayload {
     capacity: MODE_CAPACITY[mode],
     operating_cost_per_km: 0,
   };
+
+  const segmentPairs = stops.slice(0, -1).map((stop, index) => ({
+    from: stop,
+    to: stops[index + 1],
+  }));
+
+  const trackSections = segmentPairs.map(({ from, to }, index) => {
+    const distanceKm = Math.hypot(
+      toLocalMeters(to.lon, to.lat, origin.lon, origin.lat).x -
+        toLocalMeters(from.lon, from.lat, origin.lon, origin.lat).x,
+      toLocalMeters(to.lon, to.lat, origin.lon, origin.lat).y -
+        toLocalMeters(from.lon, from.lat, origin.lon, origin.lat).y,
+    ) / 1000;
+
+    return {
+      id: `track-${index + 1}`,
+      length_km: Math.max(0.001, distanceKm),
+      track_type: mode === "metro" ? "tunnel" : "surface",
+      capacity_departures_per_hour: mode === "bus" ? 60 : 30,
+      shared_group: null,
+      station_ids: [from.id, to.id],
+      speed_limit_kph: mode === "bus" ? 50 : mode === "tram" ? 50 : mode === "metro" ? 80 : 120,
+    };
+  });
+
+  const trackSectionIds = trackSections.map((section) => section.id);
+
   return {
     origin_lon: origin.lon,
     origin_lat: origin.lat,
@@ -327,6 +356,9 @@ function buildNetworkPayload(): NetworkPayload {
       mode,
       stop_ids: stops.map((stop) => stop.id),
       geometry,
+      track_section_ids: trackSectionIds,
+      both_ways: true,
+      closed: false,
     }] : [],
     vehicle_types: [vehicleType],
     periods: PERIODS.map((period) => ({ ...period })),
@@ -335,7 +367,10 @@ function buildNetworkPayload(): NetworkPayload {
       route_id: "draft-route",
       vehicle_type_id: vehicleType.id,
       headway_by_period: { ...headways },
+      departure_offset_by_period: Object.fromEntries(PERIODS.map((period) => [period.id, 0])),
+      phase_by_period: Object.fromEntries(PERIODS.map((period) => [period.id, 0])),
     }] : [],
+    track_sections: trackSections,
   };
 }
 let network = buildNetworkPayload();
