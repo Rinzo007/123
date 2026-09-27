@@ -904,6 +904,7 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
 }
 function render(): void {
+  shell.setAttribute("aria-busy", String(busy));
   network = buildNetworkPayload();
   routeNameInput.value = routeName;
   modeInput.value = mode;
@@ -1030,6 +1031,14 @@ for (const [element, key] of toggleInputs) {
     }
   });
 }
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !busy) return;
+  referenceEvaluationClient?.cancel();
+  busy = false;
+  setStatus("Расчёт отменён");
+  render();
+});
+
 fileInput.addEventListener("change", () => {
   const file = fileInput.files?.[0];
   if (!file) return;
