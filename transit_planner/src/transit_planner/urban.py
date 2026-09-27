@@ -67,7 +67,6 @@ class UrbanContext:
     BUILT_MULTIPLIER = {
         "reserved": 3.0,
         "elevated": 1.0,
-        "grade": 1.0,
     }
     WATER_MULTIPLIER = {
         "reserved": 8.0,
@@ -146,11 +145,15 @@ class UrbanContext:
 
         building_factor = self.BUILDING_MULTIPLIER.get(row, 0.0)
         if building_factor and building_count > 0:
-            denominator = max(1.0, points_area_km(points)) * max(1.0, cost_per_km)
-            # Keep the term dimensionless while retaining the reference's
-            # preference for affected building area over count alone.
-            normalized_area = building_area / max(1.0, denominator)
-            multiplier += building_factor * min(10.0, max(building_count / 10.0, normalized_area))
+            segment_length_km = max(1.0, line_length_m(points) / 1000.0)
+            denominator = segment_length_km * max(1.0, cost_per_km)
+            area_term = (
+                building_area
+                * 0.004
+                * (building_factor / 10.0)
+                / denominator
+            )
+            multiplier += max(0.0, area_term)
         elif building_factor:
             multiplier += building_factor * metrics["roof_share"]
 
@@ -258,9 +261,6 @@ class UrbanContext:
     def _cell(cls, x: float, y: float) -> tuple[int, int]:
         return floor(x / cls.CELL_DEG), floor(y / (cls.CELL_DEG * 0.62))
 
-
-def points_area_km(points: tuple[Point, ...]) -> float:
-    return max(1e-6, line_length_m(points) / 1000.0 * 0.02)
 
 
 def _polygon_rings(coordinates) -> tuple[tuple[Point, ...], ...]:
