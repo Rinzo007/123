@@ -96,20 +96,6 @@ def network_from_dict(data: dict) -> Network:
     for raw in data.get("periods", []):
         network.add_period(ServicePeriod(**raw))
     from .infrastructure import TrackSection, TrackType
-    for raw in data.get("track_nodes", []):
-        network.add_track_node(TrackNode(**raw))
-    for raw in data.get("crossovers", []):
-        network.add_crossover(Crossover(**raw))
-    for raw in data.get("signal_blocks", []):
-        network.add_signal_block(SignalBlock(
-            raw["id"], raw["track_section_id"],
-            float(raw.get("start_position", 0.0)),
-            float(raw.get("end_position", 1.0)),
-            SignalDirection(raw.get("direction", "both")),
-            float(raw.get("minimum_headway_seconds", 90.0)),
-        ))
-
-
     for raw in data.get("track_sections", []):
         network.add_track_section(
             TrackSection(
@@ -141,6 +127,20 @@ def network_from_dict(data: dict) -> Network:
                 grade_crossing_count=int(raw.get("grade_crossing_count", 0)),
             )
         )
+
+    for raw in data.get("track_nodes", []):
+        network.add_track_node(TrackNode(**raw))
+    for raw in data.get("crossovers", []):
+        network.add_crossover(Crossover(**raw))
+    for raw in data.get("signal_blocks", []):
+        network.add_signal_block(SignalBlock(
+            raw["id"], raw["track_section_id"],
+            float(raw.get("start_position", 0.0)),
+            float(raw.get("end_position", 1.0)),
+            SignalDirection(raw.get("direction", "both")),
+            float(raw.get("minimum_headway_seconds", 90.0)),
+        ))
+
 
     for raw in data.get("stations", []):
         network.add_station(
