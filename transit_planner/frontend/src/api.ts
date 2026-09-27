@@ -348,6 +348,12 @@ export function loadPopulationZones(
 }
 export interface CityAssignmentResponse {
   data: { zones: number; places: number; od_pairs: number; total_demand_trips: number };
+  urban_context?: {
+    release: string;
+    buildings: number;
+    water: number;
+    segments: number;
+  };
   assignment: AssignmentResponse;
   economics: EconomicsResult;
   periods: Array<{
