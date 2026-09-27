@@ -6,6 +6,9 @@ from math import ceil, hypot, isfinite
 
 from .geo import LineString, Point, minimum_curve_radius_m
 from .infrastructure import TrackSection
+from .stations import Platform, Station, StationGroup
+from .rolling_stock import RollingStockType
+from .fares import FareGroup
 from .reference_model import (
     REFERENCE_MODE_PROFILES,
     REFERENCE_PERIODS,
@@ -134,6 +137,11 @@ class Network:
     periods: dict[str, ServicePeriod] = field(default_factory=dict)
     services: dict[str, Service] = field(default_factory=dict)
     track_sections: dict[str, TrackSection] = field(default_factory=dict)
+    stations: dict[str, Station] = field(default_factory=dict)
+    platforms: dict[str, Platform] = field(default_factory=dict)
+    station_groups: dict[str, StationGroup] = field(default_factory=dict)
+    rolling_stock: dict[str, RollingStockType] = field(default_factory=dict)
+    fare_groups: dict[str, FareGroup] = field(default_factory=dict)
 
     def add_stop(self, stop: Stop) -> None:
         self._add_unique(self.stops, stop.id, "stop")
@@ -160,6 +168,38 @@ class Network:
     def add_track_section(self, section: TrackSection) -> None:
         self._add_unique(self.track_sections, section.id, "track section")
         self.track_sections[section.id] = section
+
+    def add_station(self, station: Station) -> None:
+        self._add_unique(self.stations, station.id, "station")
+        if station.stop_id not in self.stops:
+            raise ValueError(f"Station {station.id} references unknown stop: {station.stop_id}")
+        self.stations[station.id] = station
+
+    def add_platform(self, platform: Platform) -> None:
+        self._add_unique(self.platforms, platform.id, "platform")
+        if platform.station_id not in self.stations:
+            raise ValueError(f"Platform {platform.id} references unknown station: {platform.station_id}")
+        missing_tracks = [track_id for track_id in platform.track_ids if track_id not in self.track_sections]
+        if missing_tracks:
+            raise ValueError(f"Platform {platform.id} references unknown tracks: {missing_tracks}")
+        self.platforms[platform.id] = platform
+
+    def add_station_group(self, group: StationGroup) -> None:
+        self._add_unique(self.station_groups, group.id, "station group")
+        missing = [station_id for station_id in group.station_ids if station_id not in self.stations]
+        if missing:
+            raise ValueError(f"Station group {group.id} references unknown stations: {missing}")
+        self.station_groups[group.id] = group
+
+    def add_rolling_stock(self, stock: RollingStockType) -> None:
+        self._add_unique(self.rolling_stock, stock.id, "rolling stock")
+        if stock.vehicle_type_id not in self.vehicle_types:
+            raise ValueError(f"Rolling stock {stock.id} references unknown vehicle type: {stock.vehicle_type_id}")
+        self.rolling_stock[stock.id] = stock
+
+    def add_fare_group(self, group: FareGroup) -> None:
+        self._add_unique(self.fare_groups, group.id, "fare group")
+        self.fare_groups[group.id] = group
 
     def add_service(self, service: Service) -> None:
         self._add_unique(self.services, service.id, "service")
