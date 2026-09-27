@@ -5,7 +5,7 @@ from enum import StrEnum
 from math import ceil, hypot, isfinite
 
 from .geo import LineString, Point, minimum_curve_radius_m
-from .infrastructure import TrackSection
+from .infrastructure import Crossover, SignalBlock, TrackNode, TrackSection
 from .stations import Platform, Station, StationGroup
 from .rolling_stock import RollingStockType
 from .fares import FareGroup
@@ -142,6 +142,9 @@ class Network:
     station_groups: dict[str, StationGroup] = field(default_factory=dict)
     rolling_stock: dict[str, RollingStockType] = field(default_factory=dict)
     fare_groups: dict[str, FareGroup] = field(default_factory=dict)
+    track_nodes: dict[str, TrackNode] = field(default_factory=dict)
+    crossovers: dict[str, Crossover] = field(default_factory=dict)
+    signal_blocks: dict[str, SignalBlock] = field(default_factory=dict)
 
     def add_stop(self, stop: Stop) -> None:
         self._add_unique(self.stops, stop.id, "stop")
@@ -164,6 +167,22 @@ class Network:
     def add_period(self, period: ServicePeriod) -> None:
         self._add_unique(self.periods, period.id, "service period")
         self.periods[period.id] = period
+
+    def add_track_node(self, node: TrackNode) -> None:
+        self._add_unique(self.track_nodes, node.id, "track node")
+        self.track_nodes[node.id] = node
+
+    def add_crossover(self, crossover: Crossover) -> None:
+        self._add_unique(self.crossovers, crossover.id, "crossover")
+        if crossover.from_track_id not in self.track_sections or crossover.to_track_id not in self.track_sections:
+            raise ValueError(f"Crossover {crossover.id} references unknown tracks")
+        self.crossovers[crossover.id] = crossover
+
+    def add_signal_block(self, block: SignalBlock) -> None:
+        self._add_unique(self.signal_blocks, block.id, "signal block")
+        if block.track_section_id not in self.track_sections:
+            raise ValueError(f"Signal block {block.id} references unknown track")
+        self.signal_blocks[block.id] = block
 
     def add_track_section(self, section: TrackSection) -> None:
         self._add_unique(self.track_sections, section.id, "track section")
