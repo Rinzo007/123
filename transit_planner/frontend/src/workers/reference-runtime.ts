@@ -80,10 +80,10 @@ export class EvaluationClient {
         if (!task) return;
         this.tasks.delete(data.id);
         if (data.type === "result") task.resolve({ result: data.result, wallMs: data.wallMs ?? 0 });
-        else task.reject(new Error(data.detail ?? "reference evaluation worker failed"));
+        else task.reject(new Error(data.detail ?? "model evaluation worker failed"));
       };
       worker.onerror = (event) => {
-        const error = new Error(event.message || "reference evaluation worker crashed");
+        const error = new Error(event.message || "model evaluation worker crashed");
         for (const task of this.tasks.values()) task.reject(error);
         this.tasks.clear();
       };
@@ -103,7 +103,7 @@ export class EvaluationClient {
   private cachedRunResult: EvaluationResult | null = null;
 
   run(lines: unknown, geoms: unknown, useBaseline = false, fare = 0): Promise<EvaluationResult> {
-    if (!this.workers.length) return Promise.reject(new Error("reference evaluation worker unavailable"));
+    if (!this.workers.length) return Promise.reject(new Error("model evaluation worker unavailable"));
     const key = fingerprint({ epoch: this.epoch, lines, geoms, useBaseline, fare });
     if (key === this.cachedRunKey && this.cachedRunResult) return Promise.resolve(this.cachedRunResult);
 
@@ -125,7 +125,7 @@ export class EvaluationClient {
   cancel(): void {
     const before = this.nextId;
     for (const worker of this.workers) worker.postMessage({ type: "cancel", before });
-    const error = new Error("reference evaluation superseded");
+    const error = new Error("model evaluation superseded");
     for (const task of this.tasks.values()) task.reject(error);
     this.tasks.clear();
   }
@@ -148,7 +148,7 @@ export function solveDemand(batch: DemandBatch): Promise<DemandOutput> {
     };
     worker.onerror = (event) => {
       worker.terminate();
-      reject(new Error(event.message || "reference demand-choice worker failed"));
+      reject(new Error(event.message || "model demand-choice worker failed"));
     };
     worker.postMessage({ id, batch }, [
       batch.counts.buffer,
@@ -181,7 +181,7 @@ export async function solveMatrix(input: MatrixInput): Promise<MatrixOutput> {
       worker.terminate();
       resolve();
     };
-    worker.onerror = (event) => { worker.terminate(); reject(new Error(event.message || "reference matrix worker failed")); };
+    worker.onerror = (event) => { worker.terminate(); reject(new Error(event.message || "model matrix worker failed")); };
     worker.postMessage({
       type: "solve", job, start, end, stops: input.stops,
       offsets: input.offsets, targets: input.targets, costs: input.costs,
