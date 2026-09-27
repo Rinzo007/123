@@ -50,7 +50,7 @@ export function decodeLines(buffer: ArrayBuffer): { header: TkblHeader; lines: T
 
   const view = new DataView(buffer);
   const version = view.getUint16(4, true);
-  if (version !== VERSION) throw new Error(\`Неподдерживаемая версия TKBL: \${version}\`);
+  if (version !== VERSION) throw new Error(`Неподдерживаемая версия TKBL: ${version}`);
   const lineCount = view.getUint32(8, true);
   const pointCount = view.getUint32(12, true);
   const offsetsStart = HEADER_BYTES;
