@@ -92,7 +92,7 @@ Service хранит headway по каждому периоду и может д
 
 Frontend построен на Vanilla TypeScript + Vite/Rollup + MapLibre GL JS 5.24.0. Состояние сети и проекта хранится непосредственно в runtime, проекты и кэш Overture хранятся в IndexedDB, настройки интерфейса — в localStorage.
 
-Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/app.ts`, ручной DOM, MapLibre, model worker runtime, TKBL-кэш геометрии и манифесты city packs с SHA-256.
+Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/main.ts` → `src/app.ts`, ручной DOM, MapLibre, reference worker runtime (matrix/routing/demand-choice/evaluation) и бинарный TLC1-кэш дорожной геометрии. Манифесты city packs с SHA-256 и TKBL-контейнеры — цель Этапа 2; битые заглушки предыдущих попыток удалены на Этапе 1.
 
 
 ## Полноценное приложение
@@ -148,30 +148,35 @@ Demand и assignment используют единый поток расчёта
 
 ### Архитектура frontend
 
-Новые функции размещаются по feature/domain-модулям:
-
 ```
 frontend/src/
 ├── core/
-│   ├── application.ts
-│   ├── cache.ts
 │   ├── geometry.ts
 │   ├── history.ts
-│   ├── jobs.ts
-│   ├── network-editor.ts
-│   └── project.ts
+│   └── topology.ts
 ├── planning/
 │   ├── route-editor.ts
 │   ├── timetable.ts
-│   ├── fleet.ts
-│   └── assignment.ts
+│   └── fleet.ts
+├── simulation/
+│   └── preview.ts
+├── workers/
+│   ├── reference-runtime.ts
+│   ├── evaluation-runtime.js
+│   ├── evaluation.worker.ts
+│   ├── matrix.worker.ts
+│   ├── demand-choice.worker.ts
+│   ├── routing.ts
+│   └── routing.worker.ts
 ├── map-network-editor.ts
 ├── network-editor.ts
+├── line-cache.ts
+├── storage.ts
 ├── api.ts
-├── workers/
 └── app.ts
 ```
 
+Дублирующие реализации удалены на Этапе 1; каждая функция имеет ровно один авторитетный модуль.
 `app.ts` остаётся composition/bootstrap-слоем и постепенно разгружается по мере миграции UI.
 
 ### Что не входит в приложение
@@ -186,30 +191,238 @@ Transit Planner не моделирует жизненный цикл строи
 
 Физическая инфраструктура моделируется только как существующая или эксплуатационно доступная сеть с ограничениями скорости, уклона, пропускной способности, сигнализации и топологии.
 
-## Roadmap
+## Дорожная карта transit_planner
 
-### Завершено
-- базовая доменная модель сети;
-- Overture как основной GIS-провайдер;
-- физическая инфраструктура;
-- MapLibre network editor;
-- панель свойств;
-- Command History и Undo/Redo;
-- базовые операции split/merge;
-- Route Editor;
-- timetable generator;
-- fleet requirement calculation;
-- demand/assignment integration;
-- проектная модель и кэш вычислений.
+### Этап 0 — Архитектурная фиксация
 
-### Следующий этап
-1. полноценный визуальный split/merge;
-2. редактирование маршрута мышью;
-3. визуальное редактирование crossovers и signal blocks;
-4. автоматическая проверка топологии и конфликтов;
-5. полноценный timetable editor;
-6. интерактивное управление парком;
-7. интеграция единого Takt/P6 assignment pipeline;
-8. аналитическая панель сети;
-9. постепенный вывод legacy-логики из `app.ts`;
-10. frontend/backend regression и parity tests.
+Статус: ✅
+
+- Overture — единственный источник геоданных;
+- Reference/Takt — основной архитектурный эталон;
+- Python — подготовка данных и эталонная/offline-модель;
+- браузер — основной интерактивный вычислительный клиент;
+- Vanilla TypeScript + Vite + MapLibre;
+- Web Workers для всех тяжёлых расчётов;
+- typed arrays вместо больших объектных структур;
+- IndexedDB для city packs и проектов.
+
+### Этап 1 — Полное удаление fallback
+
+Статус: 🔄 завершается
+
+Правило после этапа: если обязательный источник/расчёт недоступен — выдаётся явная ошибка. Никакого молчаливого перехода на упрощённую модель.
+
+Удалено в frontend (commit `8ad8352`):
+
+- fallback маршрутизации: подмена Overture-маршрута прямой линией (`routeGeoJSON` → `emptyRouteGeoJSON`, ошибка при недоступности расчёта);
+- synthetic demand: стаб `toDemandInput` (плоские 1000 поездок) удалён, `runRuntimePreview` требует authoritative OD и бросает явную ошибку;
+- fallback evaluation: `runClientPreview` без воркера переименован в честный `networkCounts`, reference-модель `/data/model.json` больше не декоgraded в `{}`;
+- fallback сборки: хеш-бандл `/assets/evaluation.worker-jRuvxHc_.js` заменён статическим импортом `evaluation-runtime.js` (Vite переименовывает чанк сам);
+- дублирующие TS-реализации: удалены 15 мёртвых модулей (~1000 строк), включая `rraptor.ts` с битым импортом, дубли валидаторов, редакторов и кэшей;
+- worker-контракты: `matrix/routing/demand-choice` workers изолированы (`export {}`), устранены глобальные коллизии;
+- резервные артефакты: удалены осиротевшие бандлы из `public/` и второй `model.json` (эталон в `reference/` сохранён).
+
+Осталось:
+
+- Python: `_add_fallback_segment` в `road_builder.py` (деградация топологии при <2 connector refs), параметр `fallback` в `_effective_speed_kph` (overture.py);
+- Overture release discovery: зафиксированный `DEFAULT_RELEASE = "2026-09-23.1"` должен приходить в manifest city pack (Этап 2), а не подменяться константой runtime;
+- storage: молчаливый возврат UI-settings к defaults при отсутствующем значении; повреждённый JSON должен давать явную ошибку;
+- mode choice/cost: `DEFAULT_ROW_COST[route.mode] ?? 1` и мёртвые ветки row-классификации в `simulation/preview.ts`;
+- старые profiles/modes и дублирующие Python/TS расчёты — финальная ревизия после Этапов 2–8.
+
+### Этап 2 — City Pack v1
+
+Статус: 🔜
+
+Формат:
+
+```
+pack/
+├── manifest.json   city, version, sha256, files, totalBytes, schemaVersion, source, release
+├── model.json
+├── streets.json
+├── streets.bin
+├── stops.bin
+├── zones.bin
+├── demand.bin
+├── buildings.bin
+└── water.bin
+```
+
+Реализовать: бинарный TKBL; typed-array геометрию; offsets; SHA-256 проверку; версионирование; атомарную загрузку pack; запрет частично загруженного pack; фиксацию Overture release в manifest; никаких fallback-файлов.
+
+Заметка: удалённый на Этапе 1 `city-pack.ts` был битым скелетом; загрузка pack перестроится заново под этот формат.
+
+### Этап 3 — Уличный граф
+
+Статус: 🔜
+
+Overture streets → street graph → compressed binary graph → routing worker.
+
+Сделать: узлы; рёбра; классы дорог; ограничения скорости; направления; длины; геометрию; snapping остановок; snapping маршрутов; disconnected-component detection.
+
+### Этап 4 — Matrix Worker
+
+Статус: 🔄 начат
+
+Ядро уже есть: `matrix.worker.ts` — Dijkstra на typed arrays, 4-ary heap, пакет `[start,end)`, transferable ArrayBuffer, отмена по job-номеру.
+
+Осталось: кэширование матриц; инвалидация по версии street graph; вход матрицы строго через ArrayBuffer (без post-структур); transferable-возврат previous-массива в main.
+
+### Этап 5 — Routing Worker
+
+Статус: 🔄 начат
+
+Ядро уже есть: `routing.worker.ts` — RAPTOR поверх packed typed arrays (route patterns, departures, transfers, access/egress), transferable buffers.
+
+Осталось: stop→stop поверх уличного графа Этапа 3; transit path и route geometry в результатах; time-dependent routing; route cache; incremental invalidation.
+
+### Этап 6 — Demand Worker
+
+Статус: 🔄 частично готов
+
+Уже перенесено: commuter demand; purpose layers; Overture places; purpose generators; периоды; WGS84 точки; reference generator En().
+
+Осталось: полностью перенести typed-array представление; убрать Python demand как runtime dependency; передавать OD через ArrayBuffer; реализовать полный reference demand pipeline в worker; synthetic/резервные demand paths удалены на Этапе 1.
+
+### Этап 7 — Mode Choice
+
+Статус: 🔜
+
+Перенести основной nested logit: car; transit; walk; bike / two-wheel.
+
+Сделать: инкрементальный nested logit; frequency-based insertion (референс: `demand-choice.worker.ts`); per-mode generalized cost; mobility constraints; typed-array output; incremental recalculation.
+
+### Этап 8 — Network Evaluation Worker
+
+Статус: 🔄 частично готов
+
+Reference evaluation живёт в `evaluation-runtime.js` (init/run/cancel, epoch, baseline T, layers) и вызывается только через `EvaluationClient` — worker недоступен/не готов → явная ошибка.
+
+Добавить: reuseError; trackId + segment invalidation; incremental evaluation; planningPreview поверх worker-результатов; полный расчёт network → segment loads → PLF → fleet → headway → CAPEX/OPEX → city result; probe(base, candidate).
+
+### Этап 9 — Urban Context
+
+Статус: 🔄 начат
+
+Уже сделано: Overture buildings; Overture water; UrbanContext; segment multipliers; подключение к CAPEX; city assignment metadata.
+
+Дальше: builtUp; waterShare; roofShare; buildingsHit; buildingRings; влияние на travel time; влияние на construction cost; сохранение в city pack; убрать runtime-загрузку urban data для уже собранного pack.
+
+### Этап 10 — IndexedDB
+
+Статус: 🔄 частично готов
+
+Есть: база `takt/kv`, gzip через CompressionStream, writer-лок на localStorage, TTL-записи, atomic save/delete.
+
+Сделать: writer queue; begin()/commit(); active promise pool; ABA-safe writes; reconciliation; version prefixes; size limit; atomic restore; cross-tab invalidation.
+
+### Этап 11 — Editor
+
+Статус: 🔄 частично готов
+
+Есть: карта; выбор объекта; панель свойств; узлы/участки/nodes; crossovers и signal blocks; split/merge; undo/redo; пересчёт только затронутых сегментов (segment signatures).
+
+Сделать: создание маршрута и изменение трассы мышью; добавление/удаление остановок в каноническом редакторе; изменение режима и пути; snapping к уличному графу (после Этапа 3).
+
+### Этап 12 — Производительность
+
+Статус: 🔄 начат
+
+Принцип: NO JSON→Worker→JSON; YES ArrayBuffer→Worker→ArrayBuffer. already выполнено для matrix/routing/demand/evaluation.
+
+Добавить: worker pool для routing; memory accounting; GC profiling; route cache; matrix cache; demand cache; evaluation cache (есть одно-slot кэш run); сквозная incremental invalidation.
+
+### Этап 13 — UI
+
+Статус: 🔄 частично готов
+
+Есть: Vanilla TS, один entry, ручной DOM, MapLibre 5.24, inline SVG-иконки, responsive layout, быстрый preview.
+
+Сделать: keyboard navigation; ARIA; Escape cancellation; финальный отказ от Svelte как архитектурной зависимости.
+
+### Этап 14 — Сервер
+
+Статус: 🔜
+
+Backend перестаёт быть обязательным для интерактивной симуляции.
+
+Python: Overture → pack builder → city pack.
+Браузер: city pack → simulation → editor → evaluation.
+
+API остаётся для: подготовки данных; импорта; batch processing; диагностики; share API.
+
+### Этап 15 — Share / Import / Export
+
+Статус: 🔜
+
+Формат `.takt`: header; version; city; model; network; scenario; simulation state; compressed payload; sha256.
+
+Сделать: gzip; checksum; version migration; import validation; export; share endpoint.
+
+### Этап 16 — Production city packs
+
+Статус: 🔜
+
+Первый полноценный: Voronezh. Затем: Berlin; Amsterdam; Hong Kong; другие города.
+
+Каждый город проходит: Overture → pack builder → validation → hash → browser → matrix → demand → mode choice → assignment → evaluation.
+
+### Этап 17 — Полное удаление старого кода
+
+Статус: 🔜
+
+После миграции удалить: старые frontend profiles; старые modes; duplicate demand model; duplicate choice model; duplicate matrix; старые runtime adapters; fallback paths; synthetic fallback demand (frontend-часть удалена на Этапе 1); старые API-only расчёты; Svelte-компоненты; устаревшие storage adapters.
+
+### Итоговая архитектура
+
+```
+                    OVERTURE
+                       │
+                       ▼
+                ┌──────────────┐
+                │  Pack Builder│
+                └──────┬───────┘
+                       │
+             ┌─────────▼─────────┐
+             │     CITY PACK     │
+             │ JSON + TKBL/bin   │
+             └─────────┬─────────┘
+                       │
+                       ▼
+                ┌──────────────┐
+                │  IndexedDB   │
+                └──────┬───────┘
+                       │
+          ┌────────────▼────────────┐
+          │     VANILLA TS APP      │
+          │                          │
+          │       MapLibre           │
+          │          │               │
+          │      Network Editor      │
+          └──────────┬───────────────┘
+                     │
+       ┌─────────────┼──────────────┐
+       ▼             ▼              ▼
+   Matrix         Routing        Demand
+   Worker         Worker         Worker
+       │             │              │
+       └─────────────┼──────────────┘
+                     ▼
+                Mode Choice
+                   Worker
+                     │
+                     ▼
+              Evaluation Worker
+                     │
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+        Load       Fleet      Economics
+          │          │          │
+          └──────────┼──────────┘
+                     ▼
+                CITY RESULT
+```
+
+Ключевое изменение: система строится без «основного пути + fallback». Один авторитетный вычислительный слой на каждую функцию; недоступные данные или worker — ошибка с понятным состоянием.
+
