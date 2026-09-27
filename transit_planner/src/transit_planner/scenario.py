@@ -7,7 +7,6 @@ from .assignment import AssignmentConfig, AssignmentResult, assign_demand
 from .city import DemandZone
 from .demand import DemandMatrix
 from .economics import EconomicsConfig, EconomicsResult, calculate_economics
-from .infrastructure import ConstructionRates, YearPlan, total_reserved_capital
 from .network import Network
 
 
@@ -19,8 +18,6 @@ class ScenarioDefinition:
     demand: DemandMatrix
     assignment_config: AssignmentConfig
     zones: tuple[DemandZone, ...] = ()
-    year_plan: YearPlan | None = None
-    construction_rates: ConstructionRates | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +27,6 @@ class ScenarioRun:
     assignment: AssignmentResult
     analytics: NetworkAnalytics
     economics: EconomicsResult | None = None
-    reserved_capital: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,12 +126,7 @@ def run_scenario(
             assignment,
             config=economics_config,
         )
-    reserved_capital = 0.0
-    if definition.year_plan is not None and definition.construction_rates is not None:
-        reserved_capital = total_reserved_capital(
-            definition.year_plan,
-            rates=definition.construction_rates,
-        )
+
 
     return ScenarioRun(
         scenario_id=definition.id,
@@ -143,7 +134,6 @@ def run_scenario(
         assignment=assignment,
         analytics=analytics,
         economics=economics,
-        reserved_capital=reserved_capital,
     )
 
 
@@ -163,7 +153,6 @@ def compare_scenarios(
         ("average_transfers", base_metrics.average_transfers, alternative_metrics.average_transfers),
         ("max_load_ratio", base.assignment.max_load_ratio, alternative.assignment.max_load_ratio),
         ("passenger_km", base.analytics.passenger_km, alternative.analytics.passenger_km),
-        ("reserved_capital", base.reserved_capital, alternative.reserved_capital),
         ("bike_trips", base_metrics.bike_trips, alternative_metrics.bike_trips),
     )
     if base.economics is not None and alternative.economics is not None:
@@ -204,11 +193,6 @@ def compare_scenarios(
                 "annual_fare_revenue",
                 base_economics.annual_fare_revenue,
                 alternative_economics.annual_fare_revenue,
-            ),
-            (
-                "capital_cost",
-                base_economics.capital_cost,
-                alternative_economics.capital_cost,
             ),
             (
                 "operating_cost_per_transit_trip",
