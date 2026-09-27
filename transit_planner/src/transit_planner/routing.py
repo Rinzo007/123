@@ -39,6 +39,8 @@ class RouterConfig:
     transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
     transfer_penalty_per_m_s: float = REFERENCE_TRANSFER.per_m_s
     transfer_walk_multiplier: float = REFERENCE_TRANSFER.walk_multiplier
+    raptor_range_window_min: float = 30.0
+    raptor_max_transfers: int = 4
 
     def __post_init__(self) -> None:
         if self.walking_speed_kph <= 0 or self.default_transit_speed_kph <= 0:
@@ -51,6 +53,10 @@ class RouterConfig:
             raise ValueError("transfer_penalty_per_m_s cannot be negative")
         if self.transfer_walk_multiplier < 0:
             raise ValueError("transfer_walk_multiplier cannot be negative")
+        if self.raptor_range_window_min < 0:
+            raise ValueError("raptor_range_window_min cannot be negative")
+        if self.raptor_max_transfers < 0:
+            raise ValueError("raptor_max_transfers cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +116,7 @@ class TransitRouter:
             stop_road_nodes=stop_road_nodes,
         )
 
-    def shortest(
+    def _shortest_graph(
         self,
         origin: Stop,
         destination: Stop,
@@ -272,6 +278,36 @@ class TransitRouter:
             legs=adjusted_legs,
         )
 
+
+    def shortest(
+        self,
+        origin: Stop,
+        destination: Stop,
+        *,
+        period_id: str,
+        route_penalties: dict[str, float] | None = None,
+        segment_crowding_penalties: dict[tuple[str, str, str], float] | None = None,
+        service_headway_factors: dict[str, float] | None = None,
+    ) -> Journey | None:
+        """Primary schedule-aware range-rRAPTOR router with safe graph fallback."""
+        try:
+            return self._shortest_raptor(
+                origin,
+                destination,
+                period_id=period_id,
+                route_penalties=route_penalties,
+                segment_crowding_penalties=segment_crowding_penalties,
+                service_headway_factors=service_headway_factors,
+            )
+        except (KeyError, IndexError, ValueError, OverflowError):
+            return self._shortest_graph(
+                origin,
+                destination,
+                period_id=period_id,
+                route_penalties=route_penalties,
+                segment_crowding_penalties=segment_crowding_penalties,
+                service_headway_factors=service_headway_factors,
+            )
 
     def shortest_alternatives(
         self,
