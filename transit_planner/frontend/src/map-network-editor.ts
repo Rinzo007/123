@@ -38,7 +38,6 @@ export class MapNetworkEditor {
     this.map.on("mouseleave", "network-nodes", () => { this.map.getCanvas().style.cursor = ""; });
     this.map.on("click", "network-crossovers", this.onInfrastructureClick);
     this.map.on("click", "network-signal-blocks", this.onInfrastructureClick);
-    this.map.on("click", "network-topology-issues", this.onInfrastructureClick);
     this.map.on("mouseenter", "network-tracks", () => { this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "network-tracks", () => { this.map.getCanvas().style.cursor = ""; });
     this.refresh();
@@ -352,7 +351,6 @@ export class MapNetworkEditor {
   dispose(): void {
     this.map.off("click", "network-crossovers", this.onInfrastructureClick);
     this.map.off("click", "network-signal-blocks", this.onInfrastructureClick);
-    this.map.off("click", "network-topology-issues", this.onInfrastructureClick);
     this.map.off("click", this.onClick);
     this.map.off("mousemove", this.onMove);
     this.map.off("mousedown", "network-nodes", this.onMouseDown);
