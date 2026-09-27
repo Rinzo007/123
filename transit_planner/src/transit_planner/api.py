@@ -386,6 +386,7 @@ def _economics_config_from_payload(
     mode_costs = raw.get("infrastructure_cost_per_km")
     track_costs = raw.get("infrastructure_cost_per_track_km")
     row_multipliers = raw.get("reference_row_cost_multipliers")
+    segment_multipliers = raw.get("reference_segment_cost_multipliers")
 
     return EconomicsConfig(
         period_id=str(raw.get("period_id", default_period_id)),
@@ -407,6 +408,14 @@ def _economics_config_from_payload(
             None
             if row_multipliers is None
             else {TrackRow(str(key)): float(value) for key, value in row_multipliers.items()}
+        ),
+        reference_segment_cost_multipliers=(
+            None
+            if segment_multipliers is None
+            else {
+                str(route_id): tuple(float(value) for value in values)
+                for route_id, values in segment_multipliers.items()
+            }
         ),
     )
 
