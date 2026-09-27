@@ -8,6 +8,7 @@ from .network import Network, Route, Service, ServicePeriod, Stop, TrackRow, Tra
 from .stations import Platform, PlatformLayout, Station, StationGroup
 from .rolling_stock import RollingStockType
 from .fares import FareGroup, FareSystem, FareZone, TransferPolicy
+from .infrastructure import Crossover, SignalBlock, SignalDirection, TrackNode
 
 
 def network_to_dict(network: Network) -> dict:
@@ -46,6 +47,9 @@ def network_to_dict(network: Network) -> dict:
         ],
         "periods": [asdict(period) for period in network.periods.values()],
         "services": [asdict(service) for service in network.services.values()],
+        "track_nodes": [asdict(node) for node in network.track_nodes.values()],
+        "crossovers": [asdict(c) for c in network.crossovers.values()],
+        "signal_blocks": [asdict(b) | {"direction": b.direction.value} for b in network.signal_blocks.values()],
         "track_sections": [
             asdict(section) | {"track_type": section.track_type.value}
             for section in network.track_sections.values()
@@ -92,6 +96,19 @@ def network_from_dict(data: dict) -> Network:
     for raw in data.get("periods", []):
         network.add_period(ServicePeriod(**raw))
     from .infrastructure import TrackSection, TrackType
+    for raw in data.get("track_nodes", []):
+        network.add_track_node(TrackNode(**raw))
+    for raw in data.get("crossovers", []):
+        network.add_crossover(Crossover(**raw))
+    for raw in data.get("signal_blocks", []):
+        network.add_signal_block(SignalBlock(
+            raw["id"], raw["track_section_id"],
+            float(raw.get("start_position", 0.0)),
+            float(raw.get("end_position", 1.0)),
+            SignalDirection(raw.get("direction", "both")),
+            float(raw.get("minimum_headway_seconds", 90.0)),
+        ))
+
 
     for raw in data.get("track_sections", []):
         network.add_track_section(
