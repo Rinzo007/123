@@ -19,7 +19,13 @@ export type TkblHeader = {
 export function encodeBuildings(buildings: readonly TkblBuilding[]): ArrayBuffer {
   const polygons = buildings.filter((building) => building.points.length >= 3);
   const pointCount = polygons.reduce((sum, building) => sum + building.points.length, 0);
-  if (!pointCount) return new Uint8Array(MAGIC_BYTES).buffer;
+  if (!pointCount) {
+    const empty = new ArrayBuffer(HEADER_BYTES);
+    const emptyView = new DataView(empty);
+    emptyView.setUint32(0, 0x4c424b54, true);
+    emptyView.setUint32(4, VERSION, true);
+    return empty;
+  }
 
   let originX = Math.round(Math.min(...polygons.flatMap((building) => building.points.map(([x]) => x))) * 1e6);
   let originY = Math.round(Math.min(...polygons.flatMap((building) => building.points.map(([, y]) => y))) * 1e6);
