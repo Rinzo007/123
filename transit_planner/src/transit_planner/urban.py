@@ -59,25 +59,9 @@ def line_length_m(points: tuple[Point, ...]) -> float:
 
 
 class UrbanContext:
-    """Coarse spatial model for the reference urban construction multipliers."""
+    """Coarse spatial context derived from Overture buildings and water."""
 
     CELL_DEG = 0.002
-
-    # Values mirror the reference bundle's reserved/elevated/grade additions.
-    BUILT_MULTIPLIER = {
-        "reserved": 3.0,
-        "elevated": 1.0,
-    }
-    WATER_MULTIPLIER = {
-        "reserved": 8.0,
-        "elevated": 1.5,
-        "grade": 2.5,
-    }
-    BUILDING_MULTIPLIER = {
-        "reserved": 10.0,
-        "elevated": 4.0,
-        "grade": 0.0,
-    }
 
     def __init__(
         self,
@@ -122,42 +106,6 @@ class UrbanContext:
             ),
         }
 
-    def construction_multiplier(
-        self,
-        mode: str,
-        row: str,
-        points: tuple[Point, ...],
-        *,
-        cost_per_km: float = 1.0,
-    ) -> tuple[float, dict[str, float]]:
-        metrics = self.segment_metrics(points)
-        if mode in {"bus", "tram"}:
-            return 1.0, metrics
-
-        built = metrics["built_up"]
-        water = metrics["water_share"]
-        building_count = metrics["building_count"]
-        building_area = metrics["building_area_m2"]
-
-        multiplier = 1.0
-        multiplier += self.BUILT_MULTIPLIER.get(row, 0.0) * built ** 1.5
-        multiplier += self.WATER_MULTIPLIER.get(row, 0.0) * water
-
-        building_factor = self.BUILDING_MULTIPLIER.get(row, 0.0)
-        if building_factor and building_count > 0:
-            segment_length_km = max(1.0, line_length_m(points) / 1000.0)
-            denominator = segment_length_km * max(1.0, cost_per_km)
-            area_term = (
-                building_area
-                * 0.004
-                * (building_factor / 10.0)
-                / denominator
-            )
-            multiplier += max(0.0, area_term)
-        elif building_factor:
-            multiplier += building_factor * metrics["roof_share"]
-
-        return max(1.0, multiplier), metrics
 
     def _intersecting_building_ids(self, points: tuple[Point, ...]) -> set[str]:
         result: set[str] = set()
