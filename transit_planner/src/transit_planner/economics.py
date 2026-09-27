@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from math import ceil
 
 from .assignment import AssignmentResult
-from .reference_model import REFERENCE_MODE_PROFILES
 from .network import Network, TransitMode
 
 
@@ -56,15 +55,16 @@ def calculate_economics(
         active_routes.add(route.id)
         length_km = network.route_length_km(route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
-        profile = REFERENCE_MODE_PROFILES[route.mode.value]
+        profile = None
         required_vehicles = max(1, ceil(network.route_cycle_time_min(route) / headway))
-        daily_fleet_cost += required_vehicles * profile.vehicle_cost_day
+        stock = next((item for item in network.rolling_stock.values() if item.vehicle_type_id == vehicle.id), None)
+        daily_fleet_cost += required_vehicles * (stock.car_cost if stock is not None else 0.0)
 
         # Service is represented per direction in this engine slice.
         direction_factor = 1.0 if not route.both_ways else 2.0
         vehicle_km = departures * length_km * direction_factor
         daily_vehicle_km += vehicle_km
-        operating_cost_per_km = vehicle.operating_cost_per_km or profile.opex_per_vehicle_km
+        operating_cost_per_km = vehicle.operating_cost_per_km
         daily_operating_cost += vehicle_km * operating_cost_per_km
 
     transit_trips = assignment.metrics.transit_trips
