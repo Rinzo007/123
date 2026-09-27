@@ -108,7 +108,7 @@ class UrbanContext:
                 "building_area_m2": 0.0,
             }
 
-        built_up = self._sample_polygon_share(points, self._buildings_index, self._buildings_by_id)
+        built_up = self._sample_polygon_share(points, self._building_index, self._buildings_by_id)
         water_share = self._sample_polygon_share(points, self._water_index, self._water_by_id)
 
         building_ids = self._intersecting_building_ids(points)
