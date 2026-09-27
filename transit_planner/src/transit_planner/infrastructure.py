@@ -8,6 +8,8 @@ class TrackType(StrEnum):
     SURFACE = "surface"
     ELEVATED = "elevated"
     TUNNEL = "tunnel"
+    TRENCHED = "trenched"
+    RAMP = "ramp"
 
 
 
@@ -98,6 +100,14 @@ class TrackSection:
     direction: SignalDirection = SignalDirection.BOTH
     parallel_group: str | None = None
     grade_crossing_count: int = 0
+
+    @property
+    def elevation_delta_m(self) -> float:
+        return self.end_elevation_m - self.start_elevation_m
+
+    @property
+    def slope_percent(self) -> float:
+        return 0.0 if self.length_km <= 0 else abs(self.elevation_delta_m) / (self.length_km * 1000.0) * 100.0
 
     def __post_init__(self) -> None:
         if not self.id.strip():
