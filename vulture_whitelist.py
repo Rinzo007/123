@@ -10,9 +10,8 @@ from transit_planner.analytics import AccessibilityResult, NetworkAnalytics, Sto
 from transit_planner.city import City
 from transit_planner.demand import TemporalDemandMatrix
 from transit_planner.economics import EconomicsResult
-from transit_planner.infrastructure import TrackSection, YearPlan
+from transit_planner.infrastructure import TrackSection
 from transit_planner.providers import CityDataset
-from transit_planner.reference_model import ReferenceModeProfile, TrackRow
 from transit_planner.city_pack import CityPackFile, build_and_write_overture_city_pack
 from transit_planner.road import RoadEdge
 from transit_planner.routing import TransitRouter
@@ -34,22 +33,7 @@ EconomicsResult.operating_cost_per_transit_trip
 EconomicsResult.revenue_per_transit_trip
 
 TrackSection.station_ids
-YearPlan.remove_project
-
 CityDataset.metadata
-
-ReferenceModeProfile.vehicle_cost_day
-ReferenceModeProfile.dwell_s
-ReferenceModeProfile.jitter_s
-ReferenceModeProfile.turnback_s
-ReferenceModeProfile.track_capacity_per_hour
-ReferenceModeProfile.access_m
-ReferenceModeProfile.max_class
-ReferenceModeProfile.passenger_per_square_m
-ReferenceModeProfile.platform_cost_per_m
-ReferenceModeProfile.acceleration_mps2
-ReferenceModeProfile.comfortable_radius_m
-ReferenceModeProfile.minimum_radius_m
 
 RoadEdge.to_connector_id
 
@@ -58,8 +42,6 @@ TransitRouter.from_overture_network
 MetricDelta.relative_delta
 ScenarioComparison.base_scenario_id
 ScenarioComparison.alternative_scenario_id
-
-TrackRow.MIXED
 
 CityPackFile
 build_and_write_overture_city_pack
