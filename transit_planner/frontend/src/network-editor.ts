@@ -1,5 +1,6 @@
 import type { FeatureCollection, LineString, Point, Feature } from "./geojson";
-import type { NetworkPayload, TrackNodePayload, TrackSectionPayload } from "./types";
+import type { NetworkPayload, TrackSectionPayload } from "./types";
+import { localMetersToLonLat } from "./core/geometry";
 
 export type EditorTool = "select" | "node" | "track";
 
@@ -22,7 +23,7 @@ export function networkToGeoJSON(network: NetworkPayload): FeatureCollection<Lin
     if (!a || !b) continue;
     features.push({
       type: "Feature",
-      geometry: { type: "LineString", coordinates: [[a.x, a.y], [b.x, b.y]] },
+      geometry: { type: "LineString", coordinates: [localMetersToLonLat(a.x, a.y, network.origin_lon, network.origin_lat), localMetersToLonLat(b.x, b.y, network.origin_lon, network.origin_lat)] },
       properties: {
         id: section.id, kind: "track", track_type: section.track_type,
         direction: section.direction, track_count: section.track_count,
@@ -34,7 +35,7 @@ export function networkToGeoJSON(network: NetworkPayload): FeatureCollection<Lin
   for (const node of network.track_nodes) {
     features.push({
       type: "Feature",
-      geometry: { type: "Point", coordinates: [node.x, node.y] },
+      geometry: { type: "Point", coordinates: localMetersToLonLat(node.x, node.y, network.origin_lon, network.origin_lat) },
       properties: { id: node.id, kind: "node" },
     });
   }
