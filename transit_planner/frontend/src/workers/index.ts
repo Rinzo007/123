@@ -1,64 +1,77 @@
-import type {NetworkPayload} from "../types";
-import { solveDemand, solveMatrix, ReferenceEvaluationClient, type ReferenceDemandBatch, type ReferenceMatrixInput } from "./reference-runtime";
+import type { NetworkPayload } from "../types";
+import {
+  ReferenceEvaluationClient,
+  solveDemand,
+  solveMatrix,
+  type ReferenceDemandBatch,
+  type ReferenceMatrixInput,
+} from "./reference-runtime";
 
-export type EvaluationSummary={lines:number;stops:number;dailyDepartures:number};
-export type ClientPreviewResult={
-  evaluation: EvaluationSummary;
-  operations: {dailyDepartures:number; fleetEstimate:number};
+export type EvaluationSummary = {
+  lines: number;
+  stops: number;
+  dailyDepartures: number;
 };
-export type ReferenceDemandBatchResult=Awaited<ReturnType<typeof solveDemand>>;
-export type ReferenceMatrixResult=Awaited<ReturnType<typeof solveMatrix>>;
 
-type WorkerKind="evaluation"|"assignment";
-const workers:Partial<Record<WorkerKind,Worker>>={};
-
-function getWorker(kind:WorkerKind):Worker{
-  const existing=workers[kind]; if(existing) return existing;
-  const urls:Record<WorkerKind,URL>={
-    evaluation:new URL("./evaluation.worker.ts",import.meta.url),
-    assignment:new URL("./assignment.worker.ts",import.meta.url),
+export type ClientPreviewResult = {
+  evaluation: EvaluationSummary;
+  operations: {
+    dailyDepartures: number;
+    fleetEstimate: number;
   };
-  const worker=new Worker(urls[kind],{type:"module"});
-  workers[kind]=worker;
-  return worker;
-}
+};
 
-function request<T>(kind:WorkerKind,payload:unknown):Promise<T>{
-  return new Promise((resolve,reject)=>{
-    const worker=getWorker(kind);
-    const onMessage=(event:MessageEvent<T>)=>{cleanup();resolve(event.data)};
-    const onError=(event:ErrorEvent)=>{cleanup();reject(event.error??new Error(event.message))};
-    const cleanup=()=>{worker.removeEventListener("message",onMessage);worker.removeEventListener("error",onError)};
-    worker.addEventListener("message",onMessage);
-    worker.addEventListener("error",onError);
-    worker.postMessage(payload);
-  });
-}
+export type ReferenceDemandBatchResult = Awaited<ReturnType<typeof solveDemand>>;
+export type ReferenceMatrixResult = Awaited<ReturnType<typeof solveMatrix>>;
 
-export function evaluateNetwork(network:NetworkPayload){return request<EvaluationSummary>("evaluation",{kind:"summary",network});}
-export function estimateDepartures(network:NetworkPayload){return request<{kind:"departures";dailyDepartures:number;fleetEstimate:number}>("assignment",{kind:"departures",network});}
-
-export function solveDemandStrategy(batch:ReferenceDemandBatch):Promise<ReferenceDemandBatchResult>{
+export function solveDemandStrategy(
+  batch: ReferenceDemandBatch,
+): Promise<ReferenceDemandBatchResult> {
   return solveDemand(batch);
 }
 
-export function solveRoadMatrix(input:ReferenceMatrixInput):Promise<ReferenceMatrixResult>{
+export function solveRoadMatrix(
+  input: ReferenceMatrixInput,
+): Promise<ReferenceMatrixResult> {
   return solveMatrix(input);
 }
 
-export function createEvaluationClient(workerCount?:number):ReferenceEvaluationClient{
+export function createEvaluationClient(workerCount?: number): ReferenceEvaluationClient {
   return new ReferenceEvaluationClient(workerCount);
 }
 
-export function disposeComputationWorkers(){
-  for(const worker of Object.values(workers)) worker?.terminate();
-  for(const key of Object.keys(workers) as WorkerKind[]) delete workers[key];
+export function disposeComputationWorkers(): void {
+  // ReferenceEvaluationClient owns the actual evaluation worker pool.
 }
 
-export async function runClientPreview(network:NetworkPayload):Promise<ClientPreviewResult>{
-  const [evaluation, operations] = await Promise.all([
-    evaluateNetwork(network),
-    estimateDepartures(network),
-  ]);
-  return {evaluation, operations};
+export function runClientPreview(network: NetworkPayload): Promise<ClientPreviewResult> {
+  const dailyDepartures = network.services.reduce((total, service) => {
+    return total + Object.entries(service.headway_by_period).reduce((sum, [periodId, headway]) => {
+      const period = network.periods.find((item) => item.id === periodId);
+      if (!period || headway <= 0) return sum;
+      return sum + Math.ceil((period.end_minute - period.start_minute) / headway);
+    }, 0);
+  }, 0);
+  const fleetEstimate = network.services.reduce((fleet, service) => {
+    const route = network.routes.find((item) => item.id === service.route_id);
+    if (!route) return fleet;
+    const activeHeadways = Object.entries(service.headway_by_period)
+      .map(([periodId, headway]) => ({ period: network.periods.find((item) => item.id === periodId), headway }))
+      .filter((item) => item.period && item.headway > 0);
+    if (!activeHeadways.length) return fleet;
+    const cycleMinutes = activeHeadways.reduce(
+      (max, item) => Math.max(max, route.stop_ids.length * 2 + 4),
+      0,
+    );
+    return fleet + Math.max(1, Math.ceil(cycleMinutes / Math.min(...activeHeadways.map((item) => item.headway))));
+  }, 0);
+
+  return Promise.resolve({
+    evaluation: {
+      lines: network.routes.length,
+      stops: network.stops.length,
+      dailyDepartures,
+    },
+    operations: { dailyDepartures, fleetEstimate },
+  });
 }
