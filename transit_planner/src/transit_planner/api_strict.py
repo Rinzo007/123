@@ -40,9 +40,13 @@ def bounds(s,w,n,e):
 
 def src(r): return OvertureSource(release=r.strip() if isinstance(r,str) and r.strip() else RELEASE)
 
-def econ(p,period,segments=None):
-    r=p.get("economics_config",{}); rows=r.get("reference_row_cost_multipliers"); modes=r.get("infrastructure_cost_per_km"); tracks=r.get("infrastructure_cost_per_track_km"); seg=segments if segments is not None else r.get("reference_segment_cost_multipliers")
-    return EconomicsConfig(period_id=str(r.get("period_id",period)),fare_per_transit_trip=float(r.get("fare_per_transit_trip",0)),annual_days=int(r.get("annual_days",365)),infrastructure_cost_per_km=None if modes is None else {TransitMode(str(k)):float(v) for k,v in modes.items()},infrastructure_cost_per_track_km=None if tracks is None else {TrackType(str(k)):float(v) for k,v in tracks.items()},station_cost=float(r.get("station_cost",0)),reference_cost_multiplier=float(r.get("reference_cost_multiplier",1)),reference_row_cost_multipliers=None if rows is None else {TrackRow(str(k)):float(v) for k,v in rows.items()},reference_segment_cost_multipliers=None if seg is None else {str(k):tuple(float(v) for v in x) for k,x in seg.items()})
+def econ(p, period, segments=None):
+    r = p.get("economics_config", {})
+    return EconomicsConfig(
+        period_id=str(r.get("period_id", period)),
+        fare_per_transit_trip=float(r.get("fare_per_transit_trip", 0)),
+        annual_days=int(r.get("annual_days", 365)),
+    )
 
 def ed(x): return asdict(x)
 def scenario(p,d):
@@ -172,8 +176,8 @@ def network_analytics(p: dict):
     return asdict(analytics)
 
 
-@app.post("/api/v1/blueprint/validate")
-def validate_blueprint(p: dict):
+@app.post("/api/v1/network/validate/physical")
+def validate_network(p: dict):
     n = network_from_dict(p["network"])
     errors = list(n.validate())
     for section in n.track_sections.values():
