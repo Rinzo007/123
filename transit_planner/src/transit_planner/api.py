@@ -20,6 +20,7 @@ from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city_demand import CityDemandConfig, build_city_demand, build_city_temporal_demand
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
+from .od import GravityParameters, gravity_od
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson, zones_to_geojson
 from .projection import project_local_point_wgs84
@@ -35,7 +36,7 @@ from .places import CityPlace
 from .timetable import generate_service_timetable
 from .zones import generate_zones_from_population_raster
 from .network import TransitMode
-from .reference_model import REFERENCE_MOBILITY, TrackRow
+from .reference_model import REFERENCE_MOBILITY, REFERENCE_PURPOSE_LAYERS, TrackRow
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 
@@ -668,61 +669,131 @@ def reference_demand(
     """Возвращает demand.json-совместимый набор для клиентской модели."""
     raster_path = os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
     if not raster_path:
-        raise HTTPException(status_code=503, detail="TRANSIT_PLANNER_POPULATION_RASTER не настроен")
+        raise HTTPException(
+            status_code=503,
+            detail="TRANSIT_PLANNER_POPULATION_RASTER не настроен",
+        )
     try:
         bounds = _bbox(south, west, north, east)
         lon0 = (west + east) / 2.0 if origin_lon is None else float(origin_lon)
         lat0 = (south + north) / 2.0 if origin_lat is None else float(origin_lat)
+
         zones = generate_zones_from_population_raster(
-            raster_path, bbox=bounds, origin_lon=lon0, origin_lat=lat0,
+            raster_path,
+            bbox=bounds,
+            origin_lon=lon0,
+            origin_lat=lat0,
         )
         places = OverturePlacesProvider(
-            source=_overture_source(release), bbox=bounds,
+            source=_overture_source(release),
+            bbox=bounds,
         ).load_places()
-        temporal = build_city_temporal_demand(
-            zones, places, origin_lon=lon0, origin_lat=lat0,
+
+        demand_config = CityDemandConfig()
+        commuter = gravity_od(
+            zones,
+            parameters=GravityParameters(
+                speed_kph=demand_config.reference_speed_kph,
+                decay=demand_config.decay,
+            ),
+            trip_rate=demand_config.trip_rate,
         )
+        purpose_layers = build_city_demand_layers(
+            zones,
+            places,
+            origin_lon=lon0,
+            origin_lat=lat0,
+        )
+        purpose_profiles = {purpose.key: purpose for purpose in REFERENCE_PURPOSE_LAYERS}
+
         ordered = tuple(zones)
         index = {zone.id: i for i, zone in enumerate(ordered)}
-        production = {zone.id: 0.0 for zone in ordered}
-        attraction = {zone.id: 0.0 for zone in ordered}
-        for pair in temporal.pairs:
-            production[pair.origin_zone_id] += pair.trips
-            attraction[pair.destination_zone_id] += pair.trips
-        pts = [
-            [float(zone.centroid_x), float(zone.centroid_y),
-             float(production[zone.id]), float(attraction[zone.id])]
-            for zone in ordered
-        ]
+
+        pts = []
+        for zone in ordered:
+            fallback_attraction = zone.jobs if zone.jobs > 0 else zone.population
+            purpose_attraction = sum(zone.attractions.values())
+            attraction = max(fallback_attraction, purpose_attraction)
+            pts.append([
+                float(zone.centroid_x),
+                float(zone.centroid_y),
+                float(max(0.0, zone.population)),
+                float(max(0.0, attraction)),
+            ])
+
         od = []
-        for pair in temporal.pairs:
-            i, j = index.get(pair.origin_zone_id), index.get(pair.destination_zone_id)
-            if i is None or j is None or pair.trips <= 0:
+        for pair in commuter.pairs:
+            i = index.get(pair.origin_zone_id)
+            j = index.get(pair.destination_zone_id)
+            if i is None or j is None or pair.trips_per_day <= 0:
                 continue
-            base_s = max(120.0, float(pair.base_time_min or 0.0) * 60.0)
-            if not pair.base_time_min:
-                dx = ordered[i].centroid_x - ordered[j].centroid_x
-                dy = ordered[i].centroid_y - ordered[j].centroid_y
-                base_s = max(120.0, (dx * dx + dy * dy) ** 0.5 / 8.333333)
-            od.append([i, j, float(pair.trips), base_s])
-        n = len(ordered)
-        baseline_t = [[0.0] * n for _ in range(n)]
-        for i, a in enumerate(ordered):
-            for j, b in enumerate(ordered):
-                if i == j:
+            base_s = max(
+                120.0,
+                float(pair.base_time_min or 0.0) * 60.0,
+            )
+            od.append([i, j, float(pair.trips_per_day), base_s])
+
+        layers = []
+        for layer in purpose_layers.layers:
+            profile = purpose_profiles[layer.purpose]
+            layer_od = []
+            for origin_id, destination_id, trips, base_s in layer.od_pairs:
+                i = index.get(origin_id)
+                j = index.get(destination_id)
+                if i is None or j is None or trips <= 0:
                     continue
-                dx = a.centroid_x - b.centroid_x
-                dy = a.centroid_y - b.centroid_y
-                baseline_t[i][j] = max(120.0, (dx * dx + dy * dy) ** 0.5 / 8.333333)
+                layer_od.append([
+                    i,
+                    j,
+                    float(trips),
+                    float(max(120.0, base_s)),
+                ])
+            layers.append({
+                "purpose": layer.purpose,
+                "label": layer.label,
+                "od": layer_od,
+                "out": [float(value) for value in profile.outbound_shares],
+                "ret": [float(value) for value in profile.return_shares],
+            })
+
+        baseline_t = None
+        # The browser reference accepts a full baseline matrix. Avoid building
+        # multi-million-cell JSON payloads for wide map extents; OD rows still
+        # carry their own reference time, so evaluation remains functional.
+        max_baseline_nodes = 2000
+        if len(ordered) <= max_baseline_nodes:
+            baseline_t = [[0.0] * len(ordered) for _ in ordered]
+            for i, a in enumerate(ordered):
+                for j, b in enumerate(ordered):
+                    if i == j:
+                        continue
+                    dx = a.centroid_x - b.centroid_x
+                    dy = a.centroid_y - b.centroid_y
+                    baseline_t[i][j] = max(
+                        120.0,
+                        (dx * dx + dy * dy) ** 0.5 / 8.333333,
+                    )
+
         return {
             "city": "dynamic",
             "source": "WorldPop + Overture + city demand model",
             "pts": pts,
             "od": od,
             "baselineT": baseline_t,
+            "layers": layers,
+            "meta": {
+                "zones": len(ordered),
+                "commuter_od_pairs": len(od),
+                "purpose_layers": len(layers),
+                "purpose_od_pairs": sum(len(item["od"]) for item in layers),
+                "baselineT_included": baseline_t is not None,
+            },
         }
     except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
-        raise HTTPException(status_code=502, detail=f"Не удалось подготовить reference demand: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Не удалось подготовить reference demand: {exc}",
+        ) from exc
 
 @app.post("/api/v1/demand/streets")
 def demand_streets(payload: dict) -> dict:
