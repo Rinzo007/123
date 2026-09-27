@@ -107,6 +107,21 @@ def network_from_dict(data: dict) -> Network:
                     if raw.get("speed_limit_kph") is None
                     else float(raw["speed_limit_kph"])
                 ),
+                start_node_id=raw.get("start_node_id"),
+                end_node_id=raw.get("end_node_id"),
+                start_elevation_m=float(raw.get("start_elevation_m", 0.0)),
+                end_elevation_m=float(raw.get("end_elevation_m", 0.0)),
+                max_slope_percent=(
+                    None if raw.get("max_slope_percent") is None
+                    else float(raw["max_slope_percent"])
+                ),
+                curve_radius_m=(
+                    None if raw.get("curve_radius_m") is None
+                    else float(raw["curve_radius_m"])
+                ),
+                track_count=int(raw.get("track_count", 1)),
+                parallel_group=raw.get("parallel_group"),
+                grade_crossing_count=int(raw.get("grade_crossing_count", 0)),
             )
         )
 
