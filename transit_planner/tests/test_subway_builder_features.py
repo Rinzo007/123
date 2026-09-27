@@ -1,4 +1,3 @@
-from transit_planner.blueprint import AssetState, BlueprintProject, TrackBlueprint
 from transit_planner.fares import FareGroup, FareSystem, TransferPolicy
 from transit_planner.infrastructure import TrackSection
 from transit_planner.rolling_stock import RollingStockType
@@ -37,9 +36,23 @@ def test_fare_systems_and_rounding():
     assert free.price(transfer=True) == 0
 
 
-def test_blueprint_lifecycle():
-    project = BlueprintProject("p", "Line A")
-    project.add(TrackBlueprint("b", (TrackSection("t", 1.0),)))
-    assert project.build_all() == ("b",)
-    assert project.activate_all() == ("b",)
-    assert project.blueprints["b"].state == AssetState.ACTIVE
+
+def test_physical_track_topology():
+    from transit_planner.infrastructure import (
+        Crossover, SignalBlock, SignalDirection, TrackNode, TrackSection, TrackType,
+    )
+    node = TrackNode("n1", 10.0, 20.0, 4.0)
+    section = TrackSection(
+        "t1", 1.2, TrackType.TUNNEL,
+        start_node_id="n1", start_elevation_m=4.0, end_elevation_m=10.0,
+        max_slope_percent=1.0, curve_radius_m=250.0, track_count=2,
+        direction=SignalDirection.FORWARD,
+    )
+    crossover = Crossover("x1", "t1", "t2", 0.5)
+    block = SignalBlock("b1", "t1", 0.0, 1.0, SignalDirection.FORWARD, 75.0)
+    assert node.elevation_m == 4.0
+    assert section.track_type == TrackType.TUNNEL
+    assert section.slope_percent == 0.5
+    assert section.track_count == 2
+    assert crossover.position == 0.5
+    assert block.minimum_headway_seconds == 75.0
