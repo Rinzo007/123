@@ -383,11 +383,11 @@ function buildNetworkPayload(): NetworkPayload {
     }] : [],
     track_nodes: trackNodes,
     track_sections: trackSections.map((section) => {
-      const old = network?.track_sections?.find((item) => item.id === section.id);
+      const old = previousNetwork?.track_sections?.find((item) => item.id === section.id);
       return old ? { ...section, ...old } : section;
     }),
-    crossovers: network?.crossovers ?? [],
-    signal_blocks: network?.signal_blocks ?? [],
+    crossovers: previousNetwork?.crossovers ?? [],
+    signal_blocks: previousNetwork?.signal_blocks ?? [],
     stations: stops.map((stop) => ({
       id: `station-${stop.id}`,
       name: stop.name,
@@ -444,7 +444,9 @@ function buildNetworkPayload(): NetworkPayload {
     }],
   };
 }
+let previousNetwork: NetworkPayload | null = null;
 let network = buildNetworkPayload();
+previousNetwork = network;
 let selectedTrackId: string | null = null;
 
 function syncMapGeoJson(): void {
@@ -661,7 +663,8 @@ async function buildRoadRoute(): Promise<void> {
       type: "FeatureCollection",
       features: [{ type: "Feature", geometry: data.geometry, properties: data.properties }],
     };
-    network = buildNetworkPayload();
+    previousNetwork = network;
+  network = buildNetworkPayload();
     setStatus(`${cached ? "Кэш Overture" : "Overture"} маршрут: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`);
     syncMapGeoJson();
     markDirty();
