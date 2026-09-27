@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp, hypot
+from math import asin, cos, exp, floor, hypot, radians, sin, sqrt
 
 from .city import DemandZone
+from .geo import Point
+from .places import CityPlace, PlacePurposeMapper
+from .projection import project_local_point_wgs84
 from .demand import DemandMatrix, ODPairDemand, PeriodODPairDemand, TemporalDemandMatrix
 from .od import GravityParameters, gravity_od
 from .reference_model import REFERENCE_PERIODS, REFERENCE_PURPOSE_LAYERS, ReferencePurposeLayer
@@ -141,6 +144,230 @@ def generate_purpose_layer(
         demand=TemporalDemandMatrix(tuple(result)),
         od_pairs=tuple(od_pairs),
     )
+
+
+
+
+def _js_round(value: float) -> int:
+    return int(floor(value + 0.5))
+
+
+def _haversine_m(a_lon: float, a_lat: float, b_lon: float, b_lat: float) -> float:
+    radius = 6_371_000.0
+    lat1 = radians(a_lat)
+    lat2 = radians(b_lat)
+    dlat = radians(b_lat - a_lat)
+    dlon = radians(b_lon - a_lon)
+    h = sin(dlat / 2.0) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2.0) ** 2
+    return 2.0 * radius * asin(min(1.0, sqrt(max(0.0, h))))
+
+
+def _reference_generator_weights(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...],
+    *,
+    purpose: str,
+    origin_lon: float,
+    origin_lat: float,
+    mapper: PlacePurposeMapper | None = None,
+) -> dict[int, float]:
+    mapper = mapper or PlacePurposeMapper()
+    demand_points = [
+        project_local_point_wgs84(
+            Point(zone.centroid_x, zone.centroid_y),
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+        )
+        for zone in zones
+    ]
+    point_cells: dict[tuple[int, int], list[int]] = {}
+    for index, point in enumerate(demand_points):
+        key = (
+            floor(point.x / 111_320.0 / 0.01),
+            floor(point.y / 111_000.0 / (0.01 * 0.62)),
+        )
+        point_cells.setdefault(key, []).append(index)
+
+    generators: dict[tuple[int, int], tuple[float, int, float]] = {}
+    for place in places:
+        place_purpose = mapper.purpose_for(place)
+        if place_purpose is None or place_purpose.value != purpose:
+            continue
+        cell = (
+            floor(place.location.x / 0.01),
+            floor(place.location.y / (0.01 * 0.62)),
+        )
+        best_index = -1
+        best_distance = 900.0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for index in point_cells.get((cell[0] + dx, cell[1] + dy), ()):
+                    point = project_local_point_wgs84(
+                        Point(zones[index].centroid_x, zones[index].centroid_y),
+                        origin_lon=origin_lon,
+                        origin_lat=origin_lat,
+                    )
+                    distance = _haversine_m(
+                        place.location.x,
+                        place.location.y,
+                        point.x,
+                        point.y,
+                    )
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_index = index
+        if best_index < 0:
+            continue
+        current = generators.get(cell)
+        importance = max(0.0, float(place.importance))
+        if current is None:
+            generators[cell] = (importance, best_index, importance)
+        else:
+            total, representative, best_importance = current
+            generators[cell] = (
+                total + importance,
+                best_index if importance > best_importance else representative,
+                max(best_importance, importance),
+            )
+
+    return {
+        representative: total
+        for total, representative, _best_importance in generators.values()
+        if total > 0
+    }
+
+
+def generate_reference_purpose_layer(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...],
+    *,
+    purpose: ReferencePurposeLayer,
+    origin_lon: float,
+    origin_lat: float,
+) -> ReferenceDemandLayerResult:
+    points = [
+        project_local_point_wgs84(
+            Point(zone.centroid_x, zone.centroid_y),
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+        )
+        for zone in zones
+    ]
+    attractions = _reference_generator_weights(
+        zones,
+        places,
+        purpose=purpose.key,
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    bands = (
+        0.0,
+        purpose.attraction_distance_m,
+        2.5 * purpose.attraction_distance_m,
+        6.0 * purpose.attraction_distance_m,
+        float("inf"),
+    )
+    max_distance = 8.0 * purpose.attraction_distance_m
+    per_band = max(1, _js_round(purpose.max_destinations / 4.0))
+    result: list[tuple[str, str, float, float]] = []
+
+    for origin_index, origin_zone in enumerate(zones):
+        if origin_zone.population < 40.0:
+            continue
+        production = origin_zone.population * purpose.trips_per_resource
+        if production <= 0:
+            continue
+
+        candidates: list[list[tuple[int, float, float]]] = [[], [], [], []]
+        band_weight = [0.0] * 4
+        total_weight = 0.0
+        origin = points[origin_index]
+        for destination_index, attraction in attractions.items():
+            if destination_index == origin_index:
+                continue
+            destination = points[destination_index]
+            distance = _haversine_m(origin.x, origin.y, destination.x, destination.y)
+            if distance < 50.0 or distance > max_distance:
+                continue
+            weight = attraction * exp(-distance / purpose.attraction_distance_m)
+            if weight <= 0:
+                continue
+            band = 0
+            while band < 3 and distance >= bands[band + 1]:
+                band += 1
+            candidates[band].append((destination_index, weight, distance))
+            band_weight[band] += weight
+            total_weight += weight
+
+        if total_weight <= 0:
+            continue
+
+        rounding_carry = 0.0
+        for band in range(4):
+            if band_weight[band] <= 0:
+                continue
+            selected = sorted(
+                candidates[band],
+                key=lambda item: (-item[1], item[2], item[0]),
+            )[:per_band]
+            selected_weight = sum(item[1] for item in selected)
+            if selected_weight <= 0:
+                continue
+            band_trips = production * band_weight[band] / total_weight
+            for destination_index, weight, distance in selected:
+                exact = band_trips * weight / selected_weight + rounding_carry
+                trips = _js_round(exact)
+                rounding_carry = exact - trips
+                if trips > 0:
+                    result.append((
+                        origin_zone.id,
+                        zones[destination_index].id,
+                        float(trips),
+                        float(_js_round(distance * 1.35 / 7.5 + 240.0)),
+                    ))
+
+    return ReferenceDemandLayerResult(
+        purpose=purpose.key,
+        label=purpose.label,
+        demand=TemporalDemandMatrix(
+            tuple(
+                PeriodODPairDemand(
+                    origin_id,
+                    destination_id,
+                    period.key,
+                    trips * (
+                        purpose.outbound_shares[index]
+                        + purpose.return_shares[index]
+                    ) / 2.0,
+                    purpose.key,
+                    base_s / 60.0,
+                )
+                for origin_id, destination_id, trips, base_s in result
+                for index, period in enumerate(REFERENCE_PERIODS)
+                if purpose.outbound_shares[index] + purpose.return_shares[index] > 0
+            )
+        ),
+        od_pairs=tuple(result),
+    )
+
+
+def build_reference_demand_layers(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...],
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> ReferenceDemandLayers:
+    return ReferenceDemandLayers(tuple(
+        generate_reference_purpose_layer(
+            zones,
+            places,
+            purpose=purpose,
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+        )
+        for purpose in REFERENCE_PURPOSE_LAYERS
+    ))
 
 
 def build_demand_layers(
