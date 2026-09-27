@@ -308,3 +308,49 @@ def test_temporal_economics_sums_operations_and_counts_capital_once():
     assert result.daily_operating_cost == 144.0
     assert result.capital_cost == 0.4
     assert result.daily_fleet_cost == 250.0
+
+
+def test_urban_segment_multiplier_affects_aggregate_capital_cost():
+    from transit_planner.assignment import AssignmentMetrics, AssignmentResult
+    from transit_planner.demand import DemandMatrix
+    from transit_planner.economics import aggregate_temporal_economics
+    from transit_planner.network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
+    from transit_planner.temporal_assignment import PeriodAssignment, TemporalAssignmentResult
+    from transit_planner.geo import Point
+
+    network = Network()
+    network.add_stop(Stop("a", "A", Point(0.0, 0.0)))
+    network.add_stop(Stop("b", "B", Point(1000.0, 0.0)))
+    network.add_vehicle_type(VehicleType("metro", "Metro", TransitMode.METRO, 750))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("r1", "1", TransitMode.METRO, ("a", "b")))
+
+    empty = AssignmentResult(
+        metrics=AssignmentMetrics(0, 0, 0, 0, 0, 0, 0),
+        route_flows=(),
+        section_loads=(),
+        stop_flows=(),
+        unserved_transit_demand=0,
+        iterations=1,
+        max_load_ratio=0,
+    )
+    temporal = TemporalAssignmentResult((
+        PeriodAssignment("am", 0, empty),
+    ))
+
+    from transit_planner.economics import EconomicsConfig, calculate_economics
+    base = calculate_economics(
+        network,
+        empty,
+        config=EconomicsConfig("am"),
+    )
+    urban = aggregate_temporal_economics(
+        network,
+        temporal,
+        config=EconomicsConfig(
+            "am",
+            reference_segment_cost_multipliers={"r1": (2.0,)},
+        ),
+    )
+
+    assert urban.capital_cost == base.capital_cost * 2.0
