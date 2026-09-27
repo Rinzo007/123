@@ -66,6 +66,20 @@ export class MapNetworkEditor {
     this.commit(next, "Изменение участка " + trackId);
   }
 
+  deleteCrossover(crossoverId: string): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (!next.crossovers.some(item => item.id === crossoverId)) return;
+    next.crossovers = next.crossovers.filter(item => item.id !== crossoverId);
+    this.commit(next, "Удаление стрелочного перевода " + crossoverId);
+  }
+
+  deleteSignalBlock(blockId: string): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (!next.signal_blocks.some(item => item.id === blockId)) return;
+    next.signal_blocks = next.signal_blocks.filter(item => item.id !== blockId);
+    this.commit(next, "Удаление сигнального блока " + blockId);
+  }
+
   deleteTrack(trackId: string): void {
     const next = structuredClone(this.options.getNetwork());
     if (!next.track_sections.some(item => item.id === trackId)) return;
