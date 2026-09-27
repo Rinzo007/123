@@ -1,8 +1,11 @@
 import { defineConfig } from "vite";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 export default defineConfig({
-  plugins: [svelte()],
+  build: {
+    rollupOptions: {
+      input: "src/main.ts",
+    },
+  },
   server: {
     port: 5173,
     proxy: {
