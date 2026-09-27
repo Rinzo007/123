@@ -5,6 +5,9 @@ from dataclasses import asdict
 
 from .geo import LineString, Point
 from .network import Network, Route, Service, ServicePeriod, Stop, TrackRow, TransitMode, VehicleType
+from .stations import Platform, PlatformLayout, Station, StationGroup
+from .rolling_stock import RollingStockType
+from .fares import FareGroup, FareSystem, FareZone, TransferPolicy
 
 
 def network_to_dict(network: Network) -> dict:
@@ -43,7 +46,25 @@ def network_to_dict(network: Network) -> dict:
         ],
         "periods": [asdict(period) for period in network.periods.values()],
         "services": [asdict(service) for service in network.services.values()],
-        "track_sections": [asdict(section) for section in network.track_sections.values()],
+        "track_sections": [
+            asdict(section) | {"track_type": section.track_type.value}
+            for section in network.track_sections.values()
+        ],
+        "stations": [asdict(station) for station in network.stations.values()],
+        "platforms": [
+            asdict(platform) | {"layout": platform.layout.value}
+            for platform in network.platforms.values()
+        ],
+        "station_groups": [asdict(group) for group in network.station_groups.values()],
+        "rolling_stock": [asdict(stock) for stock in network.rolling_stock.values()],
+        "fare_groups": [
+            asdict(group) | {
+                "fare_system": group.fare_system.value,
+                "transfer_policy": group.transfer_policy.value,
+                "zones": [asdict(zone) for zone in group.zones],
+            }
+            for group in network.fare_groups.values()
+        ],
     }
 
 
@@ -86,6 +107,52 @@ def network_from_dict(data: dict) -> Network:
                     if raw.get("speed_limit_kph") is None
                     else float(raw["speed_limit_kph"])
                 ),
+            )
+        )
+
+    for raw in data.get("stations", []):
+        network.add_station(
+            Station(
+                raw["id"], raw["name"], raw["stop_id"],
+                tuple(raw.get("platform_ids", ())),
+                raw.get("group_id"),
+                bool(raw.get("interchange", False)),
+                raw.get("platform_length_m"),
+            )
+        )
+    for raw in data.get("platforms", []):
+        network.add_platform(
+            Platform(
+                raw["id"], raw["station_id"], float(raw["length_m"]),
+                tuple(raw.get("track_ids", ())),
+                PlatformLayout(raw.get("layout", "side")),
+                int(raw.get("number", 1)),
+            )
+        )
+    for raw in data.get("station_groups", []):
+        network.add_station_group(
+            StationGroup(
+                raw["id"], raw["name"], tuple(raw["station_ids"]),
+                float(raw.get("transfer_walk_min", 0.0)),
+            )
+        )
+    for raw in data.get("rolling_stock", []):
+        network.add_rolling_stock(RollingStockType(**raw))
+    for raw in data.get("fare_groups", []):
+        network.add_fare_group(
+            FareGroup(
+                id=raw["id"], name=raw["name"],
+                fare_system=FareSystem(raw.get("fare_system", "flat")),
+                flat_fare=float(raw.get("flat_fare", 0.0)),
+                route_fares=dict(raw.get("route_fares", {})),
+                transfer_policy=TransferPolicy(raw.get("transfer_policy", "none")),
+                transfer_window_min=float(raw.get("transfer_window_min", 0.0)),
+                boarding_charge=float(raw.get("boarding_charge", 0.0)),
+                per_km_rate=float(raw.get("per_km_rate", 0.0)),
+                fare_cap=raw.get("fare_cap"),
+                zones=tuple(FareZone(**zone) for zone in raw.get("zones", ())),
+                zone_base_fare=float(raw.get("zone_base_fare", 0.0)),
+                zone_per_zone_fare=float(raw.get("zone_per_zone_fare", 0.0)),
             )
         )
 
