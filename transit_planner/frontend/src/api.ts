@@ -232,12 +232,28 @@ export function calculateAssignment(
     return response.json() as Promise<AssignmentResponse>;
   });
 }
+export interface ReferenceDemandLayer {
+  purpose: string;
+  label: string;
+  od: Array<[number, number, number, number]>;
+  out: number[];
+  ret: number[];
+}
+
 export interface ReferenceDemandResponse {
   city: string;
   source: string;
   pts: Array<[number, number, number, number]>;
   od: Array<[number, number, number, number]>;
-  baselineT: number[][];
+  baselineT?: number[][] | null;
+  layers: ReferenceDemandLayer[];
+  meta?: {
+    zones: number;
+    commuter_od_pairs: number;
+    purpose_layers: number;
+    purpose_od_pairs: number;
+    baselineT_included: boolean;
+  };
 }
 
 export function loadReferenceDemand(
