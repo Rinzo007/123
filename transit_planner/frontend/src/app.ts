@@ -29,7 +29,7 @@ import {
   saveUiSettings,
 } from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
-import { runRuntimePreview } from "./workers/reference-runtime";
+import { runModelPreview } from "./workers/reference-runtime";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
@@ -117,7 +117,7 @@ let previousSegmentSignatures: Map<string, string> | null = null;
 let lastPlanningPreview: PlanningPreview | null = null;
 let lastProbeDelta: ReturnType<typeof probe>["delta"] | null = null;
 const cpVariant = new URLSearchParams(location.search).get("cp-variant") || "control";
-let referenceEvaluationClient: ReturnType<typeof createEvaluationClient> | null = null;
+let evaluationClient: ReturnType<typeof createEvaluationClient> | null = null;
 let showRoads = true;
 let showRoadSpeed = false;
 let showStops = true;
@@ -676,13 +676,13 @@ async function runPreview(): Promise<void> {
     lastPlanningPreview = planningPreview(network);
     const clientPreview = await runClientPreview(network);
     evaluationSummary = clientPreview.evaluation;
-    if (!referenceEvaluationClient) referenceEvaluationClient = createEvaluationClient();
+    if (!evaluationClient) evaluationClient = createEvaluationClient();
     const b = bounds();
-    const referenceDemand = b ? await loadReferenceDemand(
+    const demandInput = b ? await loadReferenceDemand(
       b.south, b.west, b.north, b.east, network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
     ) : undefined;
-    const urban = b && referenceDemand ? await ensureUrbanMultipliers(network, b) : null;
-    await runRuntimePreview(referenceEvaluationClient, network, referenceDemand, urban);
+    const urban = b && demandInput ? await ensureUrbanMultipliers(network, b) : null;
+    await runModelPreview(evaluationClient, network, demandInput, urban);
     const demand = [{
       origin_zone_id: stops[0].id,
       destination_zone_id: stops[stops.length - 1].id,
@@ -1187,7 +1187,7 @@ for (const [element, key] of toggleInputs) {
 }
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !busy) return;
-  referenceEvaluationClient?.cancel();
+  evaluationClient?.cancel();
   busy = false;
   setStatus("Расчёт отменён");
   render();
@@ -1281,8 +1281,8 @@ async function refreshEvaluation(): Promise<void> {
 
 window.addEventListener("beforeunload", () => {
   if (autosaveTimer) clearTimeout(autosaveTimer);
-  referenceEvaluationClient?.close();
-  referenceEvaluationClient = null;
+  evaluationClient?.close();
+  evaluationClient = null;
   disposeComputationWorkers();
   map?.remove();
 });
