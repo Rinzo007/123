@@ -13,6 +13,7 @@ def test_api_has_core_routes():
     assert "/api/v1/data/overture/connectors" in paths
     assert "/api/v1/scenario/compare" in paths
     assert "/api/v1/economics" in paths
+    assert "/api/v1/demand/reference" in paths
 
 
 def test_scenario_compare_endpoint_runs_two_networks():
