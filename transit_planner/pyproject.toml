@@ -38,3 +38,6 @@ pythonpath = ["src"]
 
 [tool.vulture]
 ignore_decorators = ["@app.get", "@app.post"]
+
+[tool.setuptools.package-data]
+transit_planner = ["*.json"]
