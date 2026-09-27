@@ -19,11 +19,15 @@ export class MapNetworkEditor {
   private pendingNodeId: string | null = null;
   private selectedNodeId: string | null = null;
   private selectedTrackId: string | null = null;
+  private draggingNodeId: string | null = null;
 
   constructor(private readonly map: MapLibreMap, private readonly options: MapNetworkEditorOptions) {
     this.ensureLayers();
     this.map.on("click", this.onClick);
     this.map.on("mousemove", this.onMove);
+    this.map.on("mousedown", "network-nodes", this.onMouseDown);
+    this.map.on("mouseup", this.onMouseUp);
+    this.map.on("mouseleave", this.onMouseUp);
     this.map.on("mouseenter", "network-nodes", () => { this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "network-nodes", () => { this.map.getCanvas().style.cursor = ""; });
     this.map.on("mouseenter", "network-tracks", () => { this.map.getCanvas().style.cursor = "pointer"; });
@@ -150,5 +154,8 @@ export class MapNetworkEditor {
   dispose(): void {
     this.map.off("click", this.onClick);
     this.map.off("mousemove", this.onMove);
+    this.map.off("mousedown", "network-nodes", this.onMouseDown);
+    this.map.off("mouseup", this.onMouseUp);
+    this.map.off("mouseleave", this.onMouseUp);
   }
 }
