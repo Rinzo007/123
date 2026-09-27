@@ -131,52 +131,6 @@ export interface OvertureRouteResponse {
   };
 }
 
-export interface UrbanMultipliersResponse {
-  release: string;
-  routes: Record<string, {
-    segment_multipliers: number[];
-    segments: Array<{
-      built_up: number;
-      water_share: number;
-      roof_share: number;
-      building_count: number;
-      building_area_m2: number;
-    }>;
-  }>;
-  counts: {
-    buildings: number;
-    water: number;
-    segments: number;
-  };
-}
-
-export function loadOvertureUrbanMultipliers(
-  network: NetworkPayload,
-  south: number,
-  west: number,
-  north: number,
-  east: number,
-): Promise<UrbanMultipliersResponse> {
-  return fetch("/api/v1/data/overture/urban-multipliers", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      network,
-      south,
-      west,
-      north,
-      east,
-      origin_lon: network.origin_lon,
-      origin_lat: network.origin_lat,
-    }),
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw new Error(await response.text() || "Не удалось рассчитать городской контекст Overture");
-    }
-    return response.json() as Promise<UrbanMultipliersResponse>;
-  });
-}
-
 export function loadOvertureRoute(
   points: Array<{ lon: number; lat: number }>,
   south: number,
@@ -522,7 +476,6 @@ export function calculateEconomics(
   periodId = "am",
   farePerTransitTrip = 0,
   annualDays = 365,
-  urbanMultipliers: UrbanMultipliersResponse | null = null,
 ): Promise<EconomicsResponse> {
   return fetch("/api/v1/economics", {
     method: "POST",
@@ -538,14 +491,6 @@ export function calculateEconomics(
         period_id: periodId,
         fare_per_transit_trip: farePerTransitTrip,
         annual_days: annualDays,
-        reference_segment_cost_multipliers: urbanMultipliers
-          ? Object.fromEntries(
-              Object.entries(urbanMultipliers.routes).map(([routeId, value]) => [
-                routeId,
-                value.segment_multipliers,
-              ]),
-            )
-          : null,
       },
     }),
   }).then(async (response) => {
