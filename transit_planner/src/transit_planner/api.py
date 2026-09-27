@@ -29,6 +29,7 @@ from .od import GravityParameters, gravity_od
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
 from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson, stops_to_geojson, zones_to_geojson
 from .projection import project_local_point_wgs84
+from .geo import Point
 from .overture import (
     OvertureConnectorProvider,
     OverturePlacesProvider,
