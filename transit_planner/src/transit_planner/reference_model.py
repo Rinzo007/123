@@ -137,6 +137,51 @@ class ReferenceMobilityProfile:
             raise ValueError("two_wheel_per_km_eur cannot be negative")
 
 
+@dataclass(frozen=True, slots=True)
+class ReferenceJourneyChoiceProfile:
+    ride_weight: float = 1.0
+    walk_weight: float = 1.65
+    wait_weight: float = 1.72
+    departure_shift_weight: float = 0.4
+    driving_congestion_weight: float = 1.33
+    parking_weight: float = 1.6
+
+    def __post_init__(self) -> None:
+        if self.walk_weight <= 0 or self.wait_weight <= 0 or self.ride_weight <= 0:
+            raise ValueError("Journey choice time weights must be positive")
+        if self.departure_shift_weight < 0:
+            raise ValueError("departure_shift_weight cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceTransitBurdenProfile:
+    stage_access_weight: float = 1.65
+    stage_egress_weight: float = 6.723
+    stage_transfer_walk_weight: float = 9.906
+    first_transfer_burden_min: float = 1.724
+    multiple_transfer_burden_min: float = 8.165
+
+    def __post_init__(self) -> None:
+        if min(
+            self.stage_access_weight,
+            self.stage_egress_weight,
+            self.stage_transfer_walk_weight,
+        ) <= 0:
+            raise ValueError("Walking stage weights must be positive")
+        if (
+            self.first_transfer_burden_min < 0
+            or self.multiple_transfer_burden_min < self.first_transfer_burden_min
+        ):
+            raise ValueError("Multiple-transfer burden must be at least the first-transfer burden")
+
+    def transfer_burden_minutes(self, transfers: int) -> float:
+        if transfers <= 0:
+            return 0.0
+        if transfers == 1:
+            return self.first_transfer_burden_min
+        return self.multiple_transfer_burden_min
+
+
 REFERENCE_VOT_S_PER_EUR = float(_MODEL_DATA["vot_s_per_eur"])
 _modes = _MODEL_DATA["modes"]
 
@@ -149,7 +194,20 @@ REFERENCE_CAR = ReferenceCarProfile(
 )
 REFERENCE_MOBILITY = ReferenceMobilityProfile(**_MODEL_DATA["mobility"])
 REFERENCE_NO_CAR_EFFECTIVENESS = float(_MODEL_DATA["no_car_effectiveness"])
-
+REFERENCE_JOURNEY_CHOICE = ReferenceJourneyChoiceProfile(
+    **{
+        key: value
+        for key, value in _MODEL_DATA.get("journey_choice", {}).items()
+        if key != "source"
+    }
+)
+REFERENCE_TRANSIT_BURDENS = ReferenceTransitBurdenProfile(
+    **{
+        key: value
+        for key, value in _MODEL_DATA.get("transit_burdens", {}).items()
+        if key != "source"
+    }
+)
 
 
 def headway_unevenness_factor(

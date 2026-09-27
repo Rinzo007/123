@@ -82,7 +82,7 @@ def test_assignment_includes_bike_in_mode_split():
 def test_alternative_probabilities_favor_lower_generalized_cost():
     from transit_planner.choice import alternative_probabilities
 
-    shares = alternative_probabilities(((10.0, 5.0), (14.0, 8.0)))
+    shares = alternative_probabilities((15.0, 22.0))
     assert abs(sum(shares) - 1.0) < 1e-12
     assert shares[0] > shares[1] > 0.0
 

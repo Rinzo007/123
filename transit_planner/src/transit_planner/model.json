@@ -337,16 +337,24 @@
   },
   "journey_choice": {
     "ride_weight": 1,
-    "walk_weight": 1.39,
-    "wait_weight": 1.37,
+    "walk_weight": 1.65,
+    "wait_weight": 1.72,
     "departure_shift_weight": 0.4,
     "driving_congestion_weight": 1.33,
     "parking_weight": 1.6,
-    "source": "Wardman et al. (2026), as cited by Subway Builder simulation documentation"
+    "source": "Wardman et al. (2026) TR-A meta-analysis Table 5 means: walk 1.65, wait 1.72 (vs legacy 2.0 convention); departure shift consistent with displacement-time evidence; parking_search per same meta-analysis."
   },
   "city_simulation": {
     "income_dependent_mode_choice": true,
     "real_home_workplace_pairing": false,
     "notes": "For countries without public workplace OD microdata, retain population/attraction gravity model and calibrate city-specific commute distances when data becomes available."
+  },
+  "transit_burdens": {
+    "source": "Mode-choice transit burdens. Walking-stage multipliers: base walk disutility x1.65 of in-vehicle time (Wardman et al. 2026 TR-A meta-analysis, Table 5 mean), scaled per stage by the odds-of-driving ratios of Ha, Lee & Ko (2020 TR-A 141): access ln(1.008), egress ln(1.033), transfer-walk ln(1.049) per 100 m -> ratios 1.0 : 4.075 : 6.004, giving stage weights 1.65 / 6.723 / 9.906. Transfer burden in minutes of in-vehicle-equivalent disutility via ln(OR)/ln(1.027) (the article's travel-time-gap coefficient): one transfer = ln(1.047)/ln(1.027) = 1.724, two or more transfers = ln(1.243)/ln(1.027) = 8.165 (flat category, transfers coded 0/1/2+).",
+    "stage_access_weight": 1.65,
+    "stage_egress_weight": 6.723,
+    "stage_transfer_walk_weight": 9.906,
+    "first_transfer_burden_min": 1.724,
+    "multiple_transfer_burden_min": 8.165
   }
 }

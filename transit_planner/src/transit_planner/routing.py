@@ -72,6 +72,7 @@ class _RaptorPattern:
 class _RaptorParent:
     kind: str
     previous_stop: str
+    previous_round: int
     route_id: str | None
     service_id: str | None
     board_time: float
@@ -82,7 +83,6 @@ class _RaptorParent:
     alight_local: int = -1
     pattern_size: int = 0
     boarding_wait_min: float = 0.0
-
 
 class TransitRouter:
     """Schedule-aware range-rRAPTOR router.
@@ -247,93 +247,98 @@ class TransitRouter:
                 if pattern.route_id not in banned_route_ids
             )
         infinity = float("inf")
-        arrival: dict[str, float] = {
-            stop_id: infinity for stop_id in self.network.stops
-        }
-        arrival[origin.id] = departure_minute
-
-        parents: list[dict[str, _RaptorParent]] = []
+        arrival_by_round: list[dict[str, float]] = [
+            {stop_id: infinity for stop_id in self.network.stops}
+            for _ in range(max_transfers + 1)
+        ]
+        arrival_by_round[0][origin.id] = departure_minute
+        parents: list[dict[str, _RaptorParent]] = [{} for _ in range(max_transfers + 1)]
         best_destination: tuple[float, int] | None = None
+        best_destination_arrival = infinity
 
-        for round_index in range(max_transfers + 1):
-            current = dict(arrival)
-            next_arrival: dict[str, float] = {
-                stop_id: infinity for stop_id in self.network.stops
-            }
-            parent: dict[str, _RaptorParent] = {}
+        for round_index in range(1, max_transfers + 1):
+            current = arrival_by_round[round_index - 1]
+            # Stage 1: carry forward labels and provenance (RAPTOR Algorithm 1).
+            next_arrival: dict[str, float] = dict(current)
+            next_parents: dict[str, _RaptorParent] = dict(parents[round_index - 1])
+            improved = False
 
             for pattern in patterns:
+                route = self.network.routes[pattern.route_id]
+                best_key = infinity
                 board_stop: str | None = None
+                board_local = -1
                 board_time = infinity
                 ready_time = infinity
+                cumulative = 0.0
+                stop_count = len(pattern.stops)
 
-                for stop_id in pattern.stops:
+                # Stage 2: single pass per route; boarding choice maximizes
+                # earliest arrival downstream, i.e. minimizes departure -
+                # cumulative runtime (paper Section 3, trip update).
+                for local_index, stop_id in enumerate(pattern.stops):
                     ready = current.get(stop_id, infinity)
-                    if not isfinite(ready):
-                        continue
-                    if not self.network.routes[pattern.route_id].is_stop_open(stop_id):
-                        continue
-                    scheduled = _first_departure(pattern.departures, ready)
-                    if scheduled is None:
-                        continue
-                    if scheduled < board_time:
-                        board_stop = stop_id
-                        board_time = scheduled
-                        ready_time = ready
+                    if isfinite(ready) and route.is_stop_open(stop_id):
+                        scheduled = _first_departure(pattern.departures, ready)
+                        if scheduled is not None and scheduled - cumulative < best_key:
+                            best_key = scheduled - cumulative
+                            board_stop = stop_id
+                            board_local = local_index
+                            board_time = scheduled
+                            ready_time = ready
 
-                if board_stop is None:
-                    continue
+                    if board_stop is not None:
+                        arrival = best_key + cumulative
+                        if arrival < next_arrival[stop_id]:
+                            next_arrival[stop_id] = arrival
+                            next_parents[stop_id] = _RaptorParent(
+                                kind="transit",
+                                previous_stop=board_stop,
+                                previous_round=round_index - 1,
+                                route_id=pattern.route_id,
+                                service_id=pattern.service_id,
+                                board_time=board_time,
+                                ready_time=ready_time,
+                                arrival_time=arrival,
+                                direction=pattern.direction,
+                                board_local=board_local,
+                                alight_local=local_index,
+                                pattern_size=stop_count,
+                                boarding_wait_min=pattern.headway / 2.0,
+                            )
+                            improved = True
 
-                board_index = pattern.stops.index(board_stop)
-                running = board_time
-
-                for local_index in range(board_index, len(pattern.stops)):
-                    stop_id = pattern.stops[local_index]
-                    if local_index > board_index:
-                        from_stop = pattern.stops[local_index - 1]
-                        to_stop = stop_id
-                        running += pattern.segment_times[local_index - 1]
-                        running += max(
+                    if local_index < stop_count - 1:
+                        cumulative += pattern.segment_times[local_index]
+                        cumulative += max(
                             0.0,
                             segment_penalties.get(
-                                (pattern.route_id, from_stop, to_stop),
+                                (
+                                    pattern.route_id,
+                                    stop_id,
+                                    pattern.stops[local_index + 1],
+                                ),
                                 0.0,
                             ),
                         )
 
-                    if running >= next_arrival[stop_id]:
-                        continue
+            # Stage 3: foot-paths, walking does not consume a round.
+            if self._apply_footpaths(next_arrival, next_parents, round_index):
+                improved = True
 
-                    next_arrival[stop_id] = running
-                    parent[stop_id] = _RaptorParent(
-                        kind="transit",
-                        previous_stop=board_stop,
-                        route_id=pattern.route_id,
-                        service_id=pattern.service_id,
-                        board_time=board_time,
-                        ready_time=ready_time,
-                        arrival_time=running,
-                        direction=pattern.direction,
-                        board_local=board_index,
-                        alight_local=local_index,
-                        pattern_size=len(pattern.stops),
-                        boarding_wait_min=pattern.headway / 2.0,
-                    )
+            arrival_by_round[round_index] = next_arrival
+            parents[round_index] = next_parents
 
-            self._apply_footpaths(next_arrival, parent)
+            destination_arrival = next_arrival[destination.id]
+            if (
+                isfinite(destination_arrival)
+                and destination_arrival < best_destination_arrival
+            ):
+                best_destination_arrival = destination_arrival
+                best_destination = (destination_arrival, round_index)
 
-            if isfinite(next_arrival[destination.id]):
-                candidate = next_arrival[destination.id]
-                if (
-                    best_destination is None
-                    or candidate < best_destination[0]
-                ):
-                    best_destination = (candidate, round_index)
-
-            parents.append(parent)
-            if not parent:
+            if not improved:
                 break
-            arrival = next_arrival
 
         if best_destination is None:
             return None
@@ -456,10 +461,12 @@ class TransitRouter:
         self,
         arrivals: dict[str, float],
         parent: dict[str, _RaptorParent],
-    ) -> None:
+        round_index: int,
+    ) -> bool:
         if self.config.walk_transfer_radius_m <= 0:
-            return
+            return False
 
+        changed_any = False
         changed = True
         while changed:
             changed = False
@@ -474,6 +481,7 @@ class TransitRouter:
                     parent[to_stop] = _RaptorParent(
                         kind="walk",
                         previous_stop=from_stop,
+                        previous_round=round_index,
                         route_id=None,
                         service_id=None,
                         board_time=from_arrival,
@@ -481,6 +489,8 @@ class TransitRouter:
                         arrival_time=candidate,
                     )
                     changed = True
+                    changed_any = True
+        return changed_any
 
     def _reconstruct(
         self,
@@ -504,8 +514,7 @@ class TransitRouter:
 
             record = parents[current_round].get(current)
             if record is None:
-                current_round -= 1
-                continue
+                return None
 
             if record.kind == "walk":
                 legs_reversed.append(
@@ -520,6 +529,7 @@ class TransitRouter:
                     )
                 )
                 current = record.previous_stop
+                # Walking does not consume a round: same label layer.
                 continue
 
             route_id = record.route_id
@@ -568,7 +578,7 @@ class TransitRouter:
                 local = next_local
 
             current = record.previous_stop
-            current_round -= 1
+            current_round = record.previous_round
 
         if current != origin_id:
             return None

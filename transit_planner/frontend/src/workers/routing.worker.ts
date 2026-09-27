@@ -22,8 +22,8 @@ type RaptorRequest = {
   departureMin: number;
 };
 
-const WALK_WEIGHT = 1.39;
-const WAIT_WEIGHT = 1.37;
+const WALK_WEIGHT = 1.65;
+const WAIT_WEIGHT = 1.72;
 const SHIFT_WEIGHT = 0.4;
 const TRANSFER_PENALTY_MIN = 405 / 60;
 
@@ -48,6 +48,9 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
   if (input.type !== "route") return;
 
   const infinity = Number.POSITIVE_INFINITY;
+  const rounds = input.maxTransfers + 2;
+  const stops = input.stopCount;
+
   let bestGeneralized = infinity;
   let bestArrival = infinity;
   let bestTransfers = 0;
@@ -62,42 +65,127 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
   let bestDepartures = new Float64Array(0);
   let bestArrivals = new Float64Array(0);
 
-  const roundArrival = Array.from(
-    { length: input.maxTransfers + 2 },
-    () => new Float64Array(input.stopCount).fill(infinity),
+  // Carried-forward labels per round (RAPTOR Algorithm 1, stage 1) plus
+  // provenance so reconstruction can jump straight to the previous round.
+  const arrivalByRound = Array.from(
+    { length: rounds },
+    () => new Float64Array(stops).fill(infinity),
   );
-  const roundPrevious = Array.from(
-    { length: input.maxTransfers + 2 },
-    () => new Int32Array(input.stopCount).fill(-1),
+  const routeByRound = Array.from(
+    { length: rounds },
+    () => new Int32Array(stops).fill(-1),
   );
-  const roundRoute = Array.from(
-    { length: input.maxTransfers + 2 },
-    () => new Int32Array(input.stopCount).fill(-1),
+  const boardByRound = Array.from(
+    { length: rounds },
+    () => new Int32Array(stops).fill(-1),
   );
-  const roundBoard = Array.from(
-    { length: input.maxTransfers + 2 },
-    () => new Int32Array(input.stopCount).fill(-1),
+  const departureByRound = Array.from(
+    { length: rounds },
+    () => new Float64Array(stops).fill(infinity),
   );
-  const roundDeparture = Array.from(
-    { length: input.maxTransfers + 2 },
-    () => new Float64Array(input.stopCount).fill(infinity),
+  const prevStopByRound = Array.from(
+    { length: rounds },
+    () => new Int32Array(stops).fill(-1),
   );
+  const prevRoundByRound = Array.from(
+    { length: rounds },
+    () => new Int32Array(stops).fill(-1),
+  );
+  const labelRound = new Int32Array(stops).fill(-1);
+
+  const reconstruct = (departureMin: number, access: number, walkFrom: number) => {
+    const routes: number[] = [];
+    const boards: number[] = [];
+    const alights: number[] = [];
+    const departures: number[] = [];
+    const arrivals: number[] = [];
+    let cursor = input.destination;
+    let r = labelRound[cursor];
+    if (r < 0 || !Number.isFinite(arrivalByRound[r][cursor])) return null;
+    const finalArrival = arrivalByRound[r][cursor];
+    let wait = 0;
+    let guard = 0;
+
+    while (r > 0 && guard++ < rounds * 2) {
+      const routeId = routeByRound[r][cursor];
+      const fromStop = prevStopByRound[r][cursor];
+      const fromRound = prevRoundByRound[r][cursor];
+      if (fromStop < 0 || fromRound < 0) return null;
+      if (routeId >= 0) {
+        const board = boardByRound[r][cursor];
+        const scheduledDeparture = departureByRound[r][cursor];
+        routes.push(routeId);
+        boards.push(board);
+        alights.push(cursor);
+        departures.push(scheduledDeparture);
+        arrivals.push(arrivalByRound[r][cursor]);
+        wait += Math.max(0, scheduledDeparture - arrivalByRound[fromRound][board]);
+      }
+      cursor = fromStop;
+      r = fromRound;
+    }
+    if (cursor !== input.origin) return null;
+
+    const transfers = Math.max(0, routes.length - 1);
+    const shift = Math.max(0, departureMin - input.departureMin);
+    const arrivalWithEgress = finalArrival + walkFrom;
+    const generalized =
+      (arrivalWithEgress - departureMin) +
+      WAIT_WEIGHT * wait +
+      WALK_WEIGHT * (access + walkFrom) +
+      SHIFT_WEIGHT * shift +
+      TRANSFER_PENALTY_MIN * transfers;
+
+    routes.reverse();
+    boards.reverse();
+    alights.reverse();
+    departures.reverse();
+    arrivals.reverse();
+    return {
+      generalized,
+      arrivalWithEgress,
+      transfers,
+      walkTo: access,
+      walkFrom,
+      wait,
+      shift,
+      routeIds: Int32Array.from(routes),
+      boardStops: Int32Array.from(boards),
+      alightStops: Int32Array.from(alights),
+      departures: Float64Array.from(departures),
+      arrivals: Float64Array.from(arrivals),
+    };
+  };
 
   const evaluateDeparture = (departureMin: number) => {
-    for (const values of roundArrival) values.fill(infinity);
-    for (const values of roundPrevious) values.fill(-1);
-    for (const values of roundRoute) values.fill(-1);
-    for (const values of roundBoard) values.fill(-1);
-    for (const values of roundDeparture) values.fill(infinity);
+    for (const values of arrivalByRound) values.fill(infinity);
+    for (const values of routeByRound) values.fill(-1);
+    for (const values of boardByRound) values.fill(-1);
+    for (const values of departureByRound) values.fill(infinity);
+    for (const values of prevStopByRound) values.fill(-1);
+    for (const values of prevRoundByRound) values.fill(-1);
+    labelRound.fill(-1);
 
     const access = input.accessTimeMin[input.origin];
     if (!Number.isFinite(access)) return;
-    roundArrival[0][input.origin] = departureMin + access;
+    arrivalByRound[0][input.origin] = departureMin + access;
+    labelRound[input.origin] = 0;
+    let bestRoundArrival = arrivalByRound[0][input.destination];
 
     for (let round = 0; round <= input.maxTransfers; round += 1) {
-      const current = roundArrival[round];
-      const next = roundArrival[round + 1];
+      const current = arrivalByRound[round];
+      const next = arrivalByRound[round + 1];
 
+      // Stage 1: carry forward previous-round labels (and provenance).
+      next.set(current);
+      routeByRound[round + 1].set(routeByRound[round]);
+      boardByRound[round + 1].set(boardByRound[round]);
+      departureByRound[round + 1].set(departureByRound[round]);
+      prevStopByRound[round + 1].set(prevStopByRound[round]);
+      prevRoundByRound[round + 1].set(prevRoundByRound[round]);
+
+      // Stage 2: scan each route, boarding the trip that minimizes
+      // departureTime - cumulativeRunningTime (paper Section 3).
       for (let route = 0; route < input.routeCount; route += 1) {
         const routeStart = input.routeOffsets[route];
         const routeLength = input.routeStopCounts[route];
@@ -105,46 +193,54 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
 
         const departureStart = input.routeDepartureOffsets[route];
         const departureEnd = input.routeDepartureOffsets[route + 1];
-        let boardIndex = -1;
+        const segmentStart = input.routeSegmentOffsets[route];
+
+        let bestKey = infinity;
         let boardDeparture = infinity;
+        let boardStop = -1;
+        let cumulativeTime = 0;
 
         for (let local = 0; local < routeLength; local += 1) {
           const stop = input.routeStops[routeStart + local];
           const arrivalAtStop = current[stop];
-          if (!Number.isFinite(arrivalAtStop)) continue;
-          const departureIndex = firstDeparture(
-            input.departures,
-            departureStart,
-            departureEnd,
-            arrivalAtStop,
-          );
-          if (departureIndex < 0) continue;
-          const candidate = input.departures[departureIndex];
-          if (candidate < boardDeparture) {
-            boardDeparture = candidate;
-            boardIndex = local;
+          if (Number.isFinite(arrivalAtStop)) {
+            const departureIndex = firstDeparture(
+              input.departures,
+              departureStart,
+              departureEnd,
+              arrivalAtStop,
+            );
+            if (departureIndex >= 0) {
+              const scheduled = input.departures[departureIndex];
+              const key = scheduled - cumulativeTime;
+              if (key < bestKey) {
+                bestKey = key;
+                boardDeparture = scheduled;
+                boardStop = stop;
+              }
+            }
           }
-        }
 
-        if (boardIndex < 0) continue;
-
-        let arrival = boardDeparture;
-        for (let local = boardIndex; local < routeLength; local += 1) {
-          if (local > boardIndex) {
-            arrival += input.segmentTimes[
-              input.routeSegmentOffsets[route] + local - 1
-            ];
+          if (boardStop >= 0) {
+            const candidate = bestKey + cumulativeTime;
+            if (candidate < next[stop]) {
+              next[stop] = candidate;
+              routeByRound[round + 1][stop] = route;
+              boardByRound[round + 1][stop] = boardStop;
+              departureByRound[round + 1][stop] = boardDeparture;
+              prevStopByRound[round + 1][stop] = boardStop;
+              prevRoundByRound[round + 1][stop] = round;
+              labelRound[stop] = round + 1;
+            }
           }
-          const stop = input.routeStops[routeStart + local];
-          if (arrival >= next[stop]) continue;
-          next[stop] = arrival;
-          roundPrevious[round + 1][stop] = input.routeStops[routeStart + boardIndex];
-          roundRoute[round + 1][stop] = route;
-          roundBoard[round + 1][stop] = input.routeStops[routeStart + boardIndex];
-          roundDeparture[round + 1][stop] = boardDeparture;
+
+          if (local < routeLength - 1) {
+            cumulativeTime += input.segmentTimes[segmentStart + local];
+          }
         }
       }
 
+      // Stage 3: foot-paths. Walking does not increase the trip count.
       for (let from = 0; from < input.stopCount; from += 1) {
         const fromArrival = next[from];
         if (!Number.isFinite(fromArrival)) continue;
@@ -157,78 +253,38 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           const candidate = fromArrival + input.transferTimes[edge];
           if (candidate >= next[to]) continue;
           next[to] = candidate;
-          roundPrevious[round + 1][to] = from;
-          roundRoute[round + 1][to] = -1;
-          roundBoard[round + 1][to] = -1;
-          roundDeparture[round + 1][to] = infinity;
+          routeByRound[round + 1][to] = -1;
+          boardByRound[round + 1][to] = -1;
+          departureByRound[round + 1][to] = infinity;
+          prevStopByRound[round + 1][to] = from;
+          prevRoundByRound[round + 1][to] = labelRound[from];
+          labelRound[to] = round + 1;
         }
       }
 
-      const transitArrival = next[input.destination];
+      if (!Number.isFinite(next[input.destination]) && bestRoundArrival === infinity) {
+        continue;
+      }
+      if (next[input.destination] >= bestRoundArrival) continue;
+      bestRoundArrival = next[input.destination];
+
       const walkFrom = input.egressTimeMin[input.destination];
-      if (!Number.isFinite(transitArrival) || !Number.isFinite(walkFrom)) continue;
+      if (!Number.isFinite(walkFrom)) continue;
+      const journey = reconstruct(departureMin, access, walkFrom);
+      if (journey === null || journey.generalized >= bestGeneralized) continue;
 
-      const arrivalWithEgress = transitArrival + walkFrom;
-      const routes: number[] = [];
-      const boards: number[] = [];
-      const alights: number[] = [];
-      const departures: number[] = [];
-      const arrivals: number[] = [];
-      let cursor = input.destination;
-      let cursorRound = round + 1;
-      let routeLegs = 0;
-      let wait = 0;
-      let guard = 0;
-
-      while (cursorRound > 0 && guard++ < input.maxTransfers * 4 + 8) {
-        const previous = roundPrevious[cursorRound][cursor];
-        if (previous < 0) break;
-        const routeId = roundRoute[cursorRound][cursor];
-        if (routeId >= 0) {
-          const board = roundBoard[cursorRound][cursor];
-          const scheduledDeparture = roundDeparture[cursorRound][cursor];
-          routes.push(routeId);
-          boards.push(board);
-          alights.push(cursor);
-          departures.push(scheduledDeparture);
-          arrivals.push(roundArrival[cursorRound][cursor]);
-          routeLegs += 1;
-          const previousArrival = roundArrival[cursorRound - 1][board];
-          wait += Math.max(0, scheduledDeparture - previousArrival);
-        }
-        cursor = previous;
-        cursorRound -= 1;
-      }
-
-      const transfers = Math.max(0, routeLegs - 1);
-      const walkTo = access;
-      const shift = Math.max(0, departureMin - input.departureMin);
-      const generalized =
-        (arrivalWithEgress - departureMin) +
-        WAIT_WEIGHT * wait +
-        WALK_WEIGHT * (walkTo + walkFrom) +
-        SHIFT_WEIGHT * shift +
-        TRANSFER_PENALTY_MIN * transfers;
-
-      if (generalized >= bestGeneralized) continue;
-
-      routes.reverse();
-      boards.reverse();
-      alights.reverse();
-      departures.reverse();
-      arrivals.reverse();
-      bestGeneralized = generalized;
-      bestArrival = arrivalWithEgress;
-      bestTransfers = transfers;
-      bestWalkTo = walkTo;
-      bestWalkFrom = walkFrom;
-      bestWait = wait;
-      bestShift = shift;
-      bestRouteIds = Int32Array.from(routes);
-      bestBoardStops = Int32Array.from(boards);
-      bestAlightStops = Int32Array.from(alights);
-      bestDepartures = Float64Array.from(departures);
-      bestArrivals = Float64Array.from(arrivals);
+      bestGeneralized = journey.generalized;
+      bestArrival = journey.arrivalWithEgress;
+      bestTransfers = journey.transfers;
+      bestWalkTo = journey.walkTo;
+      bestWalkFrom = journey.walkFrom;
+      bestWait = journey.wait;
+      bestShift = journey.shift;
+      bestRouteIds = journey.routeIds;
+      bestBoardStops = journey.boardStops;
+      bestAlightStops = journey.alightStops;
+      bestDepartures = journey.departures;
+      bestArrivals = journey.arrivals;
     }
   };
 

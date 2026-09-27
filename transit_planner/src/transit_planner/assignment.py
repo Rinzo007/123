@@ -13,7 +13,6 @@ from .reference_model import (
     REFERENCE_MOBILITY,
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
-    REFERENCE_TRANSFER,
     SEVERE_LOAD_RATIO,
     crowding_time_multiplier,
     headway_unevenness_factor,
@@ -101,7 +100,6 @@ class AssignmentConfig:
     walking_speed_kph: float = 5.0
     bike_speed_kph: float = 15.12
     choice: ChoiceConfig = ChoiceConfig()
-    transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
     crowding_start_ratio: float = 0.85
     iterations: int = 6
     damping: float = 0.5
@@ -114,8 +112,6 @@ class AssignmentConfig:
     def __post_init__(self) -> None:
         if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0 or self.bike_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
-        if self.transfer_penalty_min < 0:
-            raise ValueError("transfer_penalty_min cannot be negative")
         if self.crowding_start_ratio < 0:
             raise ValueError("crowding_start_ratio cannot be negative")
         if self.iterations <= 0:
@@ -291,16 +287,52 @@ def _assign_once(
                 if any(leg.kind == "transit" for leg in candidate.legs)
             )
 
-        journey = journeys[0] if journeys else None
-        journey_stats = tuple(
-            (
-                candidate.duration_min + candidate.transfers * config.transfer_penalty_min,
-                sum(leg.wait_min for leg in candidate.legs if leg.kind == "transit"),
-            )
-            for candidate in journeys
+        # Zone-to-stop access/egress walking (door-to-door), stage-weighted by
+        # Ha et al. (2020): egress and transfer walking are more burdensome.
+        origin_zone = zones.get(pair.origin_zone_id)
+        destination_zone = zones.get(pair.destination_zone_id)
+        access_walk_min = _walk_minutes(
+            origin_zone,
+            network.stops[origin_stop_id].location if origin_stop_id in network.stops else None,
+            config.walking_speed_kph,
         )
-        journey_wait = 0.0 if journey is None else journey_stats[0][1]
-        transit_time = None if journey is None else journey_stats[0][0]
+        egress_walk_min = _walk_minutes(
+            destination_zone,
+            network.stops[destination_stop_id].location if destination_stop_id in network.stops else None,
+            config.walking_speed_kph,
+        )
+
+        def _journey_generalized(candidate: Journey) -> tuple[float, float, float]:
+            in_vehicle = sum(
+                leg.duration_min for leg in candidate.legs if leg.kind == "transit"
+            )
+            wait = sum(leg.wait_min for leg in candidate.legs if leg.kind == "transit")
+            transfer_walk = sum(
+                leg.duration_min for leg in candidate.legs if leg.kind == "walk"
+            )
+            generalized = config.choice.transit_generalized_minutes(
+                in_vehicle_min=in_vehicle,
+                wait_min=wait,
+                access_walk_min=access_walk_min,
+                egress_walk_min=egress_walk_min,
+                transfer_walk_min=transfer_walk,
+                transfers=candidate.transfers,
+            )
+            return generalized, wait, in_vehicle
+
+        journey = journeys[0] if journeys else None
+        journey_generalized: tuple[float, ...] = tuple(
+            _journey_generalized(candidate)[0] for candidate in journeys
+        )
+        journey_wait = 0.0 if journey is None else _journey_generalized(journey)[1]
+        journey_in_vehicle = 0.0 if journey is None else _journey_generalized(journey)[2]
+        journey_transfers = 0 if journey is None else journey.transfers
+        journey_transfer_walk = (
+            0.0
+            if journey is None
+            else sum(leg.duration_min for leg in journey.legs if leg.kind == "walk")
+        )
+        transit_time = journey_generalized[0] if journey_generalized else None
         no_car_share = _no_car_share(
             pair,
             zones,
@@ -314,12 +346,16 @@ def _assign_once(
             utilities(
                 walk_time_min=walk_time,
                 car_time_min=car_time,
-                transit_time_min=transit_time,
+                transit_time_min=journey_in_vehicle if journey is not None else None,
                 transit_wait_min=journey_wait,
                 bike_time_min=bike_time,
                 transit_fare=config.transit_fare,
                 car_distance_km=distance_m / 1000.0,
                 bike_distance_km=distance_m / 1000.0,
+                transit_access_walk_min=access_walk_min,
+                transit_egress_walk_min=egress_walk_min,
+                transit_transfer_walk_min=journey_transfer_walk,
+                transit_transfers=journey_transfers,
                 config=config.choice,
                 base_time_min=pair.base_time_min,
             ),
@@ -330,8 +366,7 @@ def _assign_once(
 
         transit_trips = trips * probs["transit"]
         alternative_shares = (
-            alternative_probabilities(journey_stats, config=config.choice)
-            if journeys else ()
+            alternative_probabilities(journey_generalized) if journeys else ()
         )
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
@@ -376,8 +411,10 @@ def _assign_once(
                 zip(alternative_shares, journeys)
             ):
                 candidate_trips = transit_trips * alternative_share
-                candidate_time, candidate_wait = journey_stats[alternative_index]
-                weighted_transit_time += candidate_trips * candidate_time
+                candidate_generalized, candidate_wait, _candidate_in_vehicle = (
+                    _journey_generalized(candidate)
+                )
+                weighted_transit_time += candidate_trips * candidate_generalized
                 weighted_transfers += candidate_trips * candidate.transfers
                 weighted_wait += candidate_trips * candidate_wait
 
@@ -754,6 +791,21 @@ def _distance_between_zones(pair: ODPairDemand, zones: dict[str, DemandZone]) ->
         (origin.centroid_x - destination.centroid_x) ** 2
         + (origin.centroid_y - destination.centroid_y) ** 2
     )
+
+
+def _walk_minutes(
+    zone: DemandZone | None,
+    stop_location,
+    walking_speed_kph: float,
+) -> float:
+    """Zone-centroid to stop walking time, zero when either side is absent."""
+    if zone is None or stop_location is None or walking_speed_kph <= 0:
+        return 0.0
+    distance_m = sqrt(
+        (zone.centroid_x - stop_location.x) ** 2
+        + (zone.centroid_y - stop_location.y) ** 2
+    )
+    return distance_m / 1000.0 / walking_speed_kph * 60.0
 
 
 def _max_penalty_delta(left: dict[str, float], right: dict[str, float]) -> float:
