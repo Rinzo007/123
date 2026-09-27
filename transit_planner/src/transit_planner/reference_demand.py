@@ -326,28 +326,40 @@ def generate_reference_purpose_layer(
                         float(_js_round(distance * 1.35 / 7.5 + 240.0)),
                     ))
 
+    period_rows: list[PeriodODPairDemand] = []
+    for origin_id, destination_id, trips, base_s in result:
+        for index, period in enumerate(REFERENCE_PERIODS):
+            outbound = trips * purpose.outbound_shares[index]
+            inbound = trips * purpose.return_shares[index]
+            if outbound > 0:
+                period_rows.append(
+                    PeriodODPairDemand(
+                        origin_id,
+                        destination_id,
+                        period.key,
+                        outbound,
+                        purpose.key,
+                        base_s / 60.0,
+                    )
+                )
+            if inbound > 0:
+                period_rows.append(
+                    PeriodODPairDemand(
+                        destination_id,
+                        origin_id,
+                        period.key,
+                        inbound,
+                        purpose.key,
+                        base_s / 60.0,
+                    )
+                )
+
     return ReferenceDemandLayerResult(
         purpose=purpose.key,
         label=purpose.label,
-        demand=TemporalDemandMatrix(
-            tuple(
-                PeriodODPairDemand(
-                    origin_id,
-                    destination_id,
-                    period.key,
-                    trips * (
-                        purpose.outbound_shares[index]
-                        + purpose.return_shares[index]
-                    ) / 2.0,
-                    purpose.key,
-                    base_s / 60.0,
-                )
-                for origin_id, destination_id, trips, base_s in result
-                for index, period in enumerate(REFERENCE_PERIODS)
-                if purpose.outbound_shares[index] + purpose.return_shares[index] > 0
-            )
-        ),
+        demand=TemporalDemandMatrix(tuple(period_rows)),
         od_pairs=tuple(result),
+    )
     )
 
 
