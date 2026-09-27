@@ -12,7 +12,7 @@ from transit_planner.demand import TemporalDemandMatrix
 from transit_planner.economics import EconomicsResult
 from transit_planner.infrastructure import TrackSection, YearPlan
 from transit_planner.providers import CityDataset
-from transit_planner.reference_model import ReferenceModeProfile
+from transit_planner.reference_model import ReferenceModeProfile, TrackRow
 from transit_planner.road import RoadEdge
 from transit_planner.routing import TransitRouter
 from transit_planner.scenario import MetricDelta, ScenarioComparison
@@ -57,3 +57,5 @@ TransitRouter.from_overture_network
 MetricDelta.relative_delta
 ScenarioComparison.base_scenario_id
 ScenarioComparison.alternative_scenario_id
+
+TrackRow.MIXED
