@@ -112,7 +112,7 @@ let showPopulation = false;
 
 const shell = document.createElement("div");
 shell.className = "app-shell";
-shell.innerHTML = \`
+shell.innerHTML = `
   <header class="topbar" role="banner">
     <div>
       <div class="brand">Transit Planner</div>
@@ -180,7 +180,7 @@ shell.innerHTML = \`
       <div id="network-content" class="network-view"></div>
     </main>
   </div>
-\`;
+`;
 root.appendChild(shell);
 
 const mapElement = shell.querySelector<HTMLDivElement>("#map")!;
@@ -200,7 +200,18 @@ const stopListElement = shell.querySelector<HTMLElement>("#stop-list")!;
 const stopCountElement = shell.querySelector<HTMLElement>("#stop-count")!;
 const mapHint = shell.querySelector<HTMLElement>("#map-hint")!;
 
-const toggleInputs: Array<[HTMLElement, keyof typeof initialSettings]> = [
+type SettingKey =
+  | "showRoads"
+  | "showRoadSpeed"
+  | "showStops"
+  | "showPlaces"
+  | "showConnectors"
+  | "showPopulation"
+  | "showDemandStreets"
+  | "showPassengerFlow"
+  | "showStationLoads";
+
+const toggleInputs: Array<[HTMLInputElement, SettingKey]> = [
   [shell.querySelector<HTMLInputElement>("#show-roads")!, "showRoads"],
   [shell.querySelector<HTMLInputElement>("#show-road-speed")!, "showRoadSpeed"],
   [shell.querySelector<HTMLInputElement>("#show-stops")!, "showStops"],
@@ -275,7 +286,7 @@ function buildNetworkPayload(): NetworkPayload {
     ? { points: coordinates.map(([lon, lat]) => toLocalMeters(lon, lat, origin.lon, origin.lat)) }
     : metricStops.length >= 2 ? { points: metricStops.map((stop) => stop.location) } : null;
   const vehicleType = {
-    id: \`vehicle-\${mode}\`,
+    id: `vehicle-${mode}`,
     name: MODE_LABELS[mode],
     mode,
     capacity: MODE_CAPACITY[mode],
@@ -390,12 +401,12 @@ function assignmentStopGeoJSON(): FeatureCollection<GeoJSONPoint, Record<string,
 }
 function datasetCacheKey(prefix: string, b: Bounds): string {
   const round = (value: number) => value.toFixed(4);
-  return \`\${prefix}:\${round(b.south)}:\${round(b.west)}:\${round(b.north)}:\${round(b.east)}\`;
+  return `${prefix}:${round(b.south)}:${round(b.west)}:${round(b.north)}:${round(b.east)}`;
 }
 
 async function ensureUrbanMultipliers(current: NetworkPayload, b: Bounds): Promise<UrbanMultipliersResponse | null> {
   const key = datasetCacheKey("overture-urban", b) + ":" + current.routes.map((route) =>
-    \`\${route.id}:\${route.stop_ids.join(",")}:\${JSON.stringify(route.geometry)}\`,
+    `${route.id}:${route.stop_ids.join(",")}:${JSON.stringify(route.geometry)}`,
   ).join("|");
   if (urbanMultipliersKey === key) return urbanMultipliers;
   const cached = await loadDataset<UrbanMultipliersResponse>(key);
@@ -454,7 +465,7 @@ async function loadCityData(): Promise<void> {
         populationZones = null;
       }
     }
-    setStatus(\`\${cached ? "Кэш Overture" : "Overture"} \${data.release}: \${data.counts.roads} участков, \${data.counts.connectors} коннекторов, \${data.counts.stops} остановок\`);
+    setStatus(`${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`);
     syncMapGeoJson();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "Ошибка загрузки Overture");
@@ -472,7 +483,7 @@ async function buildRoadRoute(): Promise<void> {
     const b = bounds();
     if (!b) throw new Error("Карта ещё не готова");
     const points = stops.map((stop) => ({ lon: stop.lon, lat: stop.lat }));
-    const key = datasetCacheKey("overture-route", b) + ":" + points.map((p) => \`\${p.lon.toFixed(5)},\${p.lat.toFixed(5)}\`).join(";");
+    const key = datasetCacheKey("overture-route", b) + ":" + points.map((p) => `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`).join(";");
     const cached = await loadDataset<OvertureRouteResponse>(key);
     const data = cached ?? await loadOvertureRoute(points, b.south, b.west, b.north, b.east);
     if (!cached) await saveDataset(key, data);
@@ -481,7 +492,7 @@ async function buildRoadRoute(): Promise<void> {
       features: [{ type: "Feature", geometry: data.geometry, properties: data.properties }],
     };
     network = buildNetworkPayload();
-    setStatus(\`\${cached ? "Кэш Overture" : "Overture"} маршрут: \${(data.properties.length_m / 1000).toFixed(2)} км, \${data.properties.travel_time_min.toFixed(1)} мин\`);
+    setStatus(`${cached ? "Кэш Overture" : "Overture"} маршрут: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`);
     syncMapGeoJson();
     markDirty();
   } catch (error) {
@@ -516,7 +527,7 @@ async function runPreview(): Promise<void> {
     }];
     assignmentResult = await calculateAssignment(network, demand, previewZones(), "am");
     demandStreets = await loadDemandStreets(demand, previewZones(), stops[0].lon, stops[0].lat);
-    setStatus(\`Пассажиропоток рассчитан: transit \${(assignmentResult.metrics.transit_share * 100).toFixed(1)}%\`);
+    setStatus(`Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}%`);
     renderResults();
     syncMapGeoJson();
   } catch (error) {
@@ -544,7 +555,7 @@ async function runCityAssignment(): Promise<void> {
     cityAssignmentMeta = result.data;
     cityAssignmentPeriods = result.periods;
     economicsResult = { scenario_id: "citywide", name: "Городская сеть", economics: result.economics };
-    setStatus(\`Городской расчёт: \${result.data.od_pairs} OD-пар\`);
+    setStatus(`Городской расчёт: ${result.data.od_pairs} OD-пар`);
     renderResults();
     syncMapGeoJson();
   } catch (error) {
@@ -721,7 +732,7 @@ function applyProject(project: ProjectFile): void {
 function addStop(event: MapMouseEvent): void {
   if (!drawMode) return;
   const index = stops.length + 1;
-  stops = [...stops, { id: \`stop-\${Date.now()}-\${index}\`, name: \`Остановка \${index}\`, lon: event.lngLat.lng, lat: event.lngLat.lat }];
+  stops = [...stops, { id: `stop-${Date.now()}-${index}`, name: `Остановка ${index}`, lon: event.lngLat.lng, lat: event.lngLat.lat }];
   roadRoute = null;
   assignmentResult = null;
   demandStreets = null;
@@ -761,43 +772,43 @@ function formatNumber(value: unknown): string {
 }
 function renderResults(): void {
   const metricGrid = (items: Array<[string, unknown]>) =>
-    \`<div class="analytics-grid">\${items.map(([name, value]) => \`<div><span>\${name}</span><b>\${formatNumber(value)}</b></div>\`).join("")}</div>\`;
-  let html = \`
+    `<div class="analytics-grid">${items.map(([name, value]) => `<div><span>${name}</span><b>${formatNumber(value)}</b></div>`).join("")}</div>`;
+  let html = `
     <div class="network-header">
-      <div><h2>\${viewMode === "network" ? "Сеть" : "Расчёт"}</h2><p>Линии, интервалы, городские данные и аналитика</p></div>
+      <div><h2>${viewMode === "network" ? "Сеть" : "Расчёт"}</h2><p>Линии, интервалы, городские данные и аналитика</p></div>
       <div class="network-kpis">
-        <div><span>Линий</span><b>\${network.routes.length}</b></div>
-        <div><span>Отправлений/сутки</span><b>\${evaluationSummary.dailyDepartures}</b></div>
-        <div><span>Остановок</span><b>\${network.stops.length}</b></div>
+        <div><span>Линий</span><b>${network.routes.length}</b></div>
+        <div><span>Отправлений/сутки</span><b>${evaluationSummary.dailyDepartures}</b></div>
+        <div><span>Остановок</span><b>${network.stops.length}</b></div>
       </div>
     </div>
     <section class="analytics-panel">
       <h3>Сеть</h3>
-      <div class="network-table-wrap"><table class="network-table"><thead><tr><th>Линия</th><th>Вид транспорта</th><th>Остановки</th><th>Вместимость</th>\${PERIODS.map((p) => \`<th>\${p.id}</th>\`).join("")}</tr></thead><tbody>
-      \${network.routes.map((route) => {
+      <div class="network-table-wrap"><table class="network-table"><thead><tr><th>Линия</th><th>Вид транспорта</th><th>Остановки</th><th>Вместимость</th>${PERIODS.map((p) => `<th>${p.id}</th>`).join("")}</tr></thead><tbody>
+      ${network.routes.map((route) => {
         const service = network.services.find((item) => item.route_id === route.id);
         const vehicle = network.vehicle_types.find((item) => item.id === service?.vehicle_type_id);
-        return \`<tr><td><strong>\${route.name}</strong></td><td>\${MODE_LABELS[route.mode]}</td><td>\${route.stop_ids.length}</td><td>\${vehicle?.capacity ?? "—"}</td>\${PERIODS.map((p) => \`<td>\${service?.headway_by_period[p.id] ?? "—"}</td>\`).join("")}</tr>\`;
+        return `<tr><td><strong>${route.name}</strong></td><td>${MODE_LABELS[route.mode]}</td><td>${route.stop_ids.length}</td><td>${vehicle?.capacity ?? "—"}</td>${PERIODS.map((p) => `<td>${service?.headway_by_period[p.id] ?? "—"}</td>`).join("")}</tr>`;
       }).join("")}</tbody></table></div>
     </section>
-  \`;
+  `;
   if (cityAssignmentMeta) {
-    html += \`<section class="analytics-panel"><h3>Городской расчёт</h3>\${metricGrid([
+    html += `<section class="analytics-panel"><h3>Городской расчёт</h3>${metricGrid([
       ["Зоны", cityAssignmentMeta.zones],
       ["Places", cityAssignmentMeta.places],
       ["OD-пары", cityAssignmentMeta.od_pairs],
       ["Спрос/сутки", cityAssignmentMeta.total_demand_trips],
-    ])}</section>\`;
+    ])}</section>`;
   }
   if (urbanMultipliers) {
-    html += \`<section class="analytics-panel"><h3>Городской контекст Overture</h3>\${metricGrid([
+    html += `<section class="analytics-panel"><h3>Городской контекст Overture</h3>${metricGrid([
       ["Здания", urbanMultipliers.counts.buildings],
       ["Вода", urbanMultipliers.counts.water],
       ["Сегменты", urbanMultipliers.counts.segments],
-    ])}</section>\`;
+    ])}</section>`;
   }
   if (assignmentResult) {
-    html += \`<section class="analytics-panel"><h3>Пассажиропоток</h3>\${metricGrid([
+    html += `<section class="analytics-panel"><h3>Пассажиропоток</h3>${metricGrid([
       ["Общий спрос", assignmentResult.metrics.total_trips],
       ["Общественный транспорт", assignmentResult.metrics.transit_trips],
       ["Автомобиль", assignmentResult.metrics.car_trips],
@@ -806,37 +817,37 @@ function renderResults(): void {
       ["Пересадки", assignmentResult.metrics.average_transfers],
       ["Макс. загрузка", assignmentResult.max_load_ratio * 100],
       ["Неназначенный ОТ", assignmentResult.unserved_transit_demand],
-    ])}</section>\`;
+    ])}</section>`;
   }
   if (cityAssignmentPeriods.length) {
-    html += \`<section class="analytics-panel"><h3>Линия × период</h3>\${cityAssignmentPeriods.map((period) => \`
-      <div class="period-card"><strong>\${period.period_id}</strong><span>спрос \${formatNumber(period.demand_trips)}</span><span>общественный транспорт \${(period.transit_share * 100).toFixed(1)}%</span><span>макс. загрузка \${(period.max_load_ratio * 100).toFixed(1)}%</span><span>эксплуатация \${formatNumber(period.economics.daily_operating_cost)}</span>\${period.services.map((service) => \`<span>\${service.route_id}: \${formatNumber(service.riders)} пасс. · PLF \${(service.peak_load_factor * 100).toFixed(1)}% · парк \${service.fleet}</span>\`).join("")}</div>\`).join("")}</section>\`;
+    html += `<section class="analytics-panel"><h3>Линия × период</h3>${cityAssignmentPeriods.map((period) => `
+      <div class="period-card"><strong>${period.period_id}</strong><span>спрос ${formatNumber(period.demand_trips)}</span><span>общественный транспорт ${(period.transit_share * 100).toFixed(1)}%</span><span>макс. загрузка ${(period.max_load_ratio * 100).toFixed(1)}%</span><span>эксплуатация ${formatNumber(period.economics.daily_operating_cost)}</span>${period.services.map((service) => `<span>${service.route_id}: ${formatNumber(service.riders)} пасс. · PLF ${(service.peak_load_factor * 100).toFixed(1)}% · парк ${service.fleet}</span>`).join("")}</div>`).join("")}</section>`;
   }
   if (economicsResult) {
     const e = economicsResult.economics;
-    html += \`<section class="analytics-panel economics-panel"><h3>Экономика</h3>\${metricGrid([
+    html += `<section class="analytics-panel economics-panel"><h3>Экономика</h3>${metricGrid([
       ["Транспортная работа", e.daily_vehicle_km],
       ["Эксплуатация", e.daily_operating_cost],
       ["Стоимость парка", e.daily_fleet_cost],
       ["Выручка", e.daily_fare_revenue],
       ["CAPEX", e.capital_cost],
       ["OPEX на поездку", e.operating_cost_per_transit_trip],
-    ])}</section>\`;
+    ])}</section>`;
   }
   if (scenarioComparison) {
-    html += \`<section class="analytics-panel"><h3>Сравнение сценариев</h3><p>Участков: \${scenarioComparison.comparison.sections.length} · линий-периодов: \${scenarioComparison.comparison.services.length}</p></section>\`;
+    html += `<section class="analytics-panel"><h3>Сравнение сценариев</h3><p>Участков: ${scenarioComparison.comparison.sections.length} · линий-периодов: ${scenarioComparison.comparison.services.length}</p></section>`;
   }
   if (timetable) {
-    html += \`<section class="analytics-panel"><h3>Расписание \${timetable.service_id}</h3>\${timetable.periods.map((period) => \`<div class="timetable-row"><strong>\${period.period_id}</strong><span>\${period.departures_minute.length} отправлений</span></div>\`).join("")}</section>\`;
+    html += `<section class="analytics-panel"><h3>Расписание ${timetable.service_id}</h3>${timetable.periods.map((period) => `<div class="timetable-row"><strong>${period.period_id}</strong><span>${period.departures_minute.length} отправлений</span></div>`).join("")}</section>`;
   }
-  html += \`<section class="analytics-panel"><button data-action="timetable" \${network.services.length ? "" : "disabled"}>Сформировать расписание</button></section>\`;
+  html += `<section class="analytics-panel"><button data-action="timetable" ${network.services.length ? "" : "disabled"}>Сформировать расписание</button></section>`;
   networkContent.innerHTML = html;
 }
 function renderStops(): void {
-  stopCountElement.textContent = \`(\${stops.length})\`;
+  stopCountElement.textContent = `(${stops.length})`;
   stopListElement.innerHTML = stops.length
-    ? \`\${stops.map((stop, index) => \`<div class="stop-row"><div class="stop-number">\${index + 1}</div><div class="stop-copy"><strong>\${escapeHtml(stop.name)}</strong><small>\${stop.lon.toFixed(5)}, \${stop.lat.toFixed(5)}</small></div><button class="icon-button" data-remove-stop="\${escapeHtml(stop.id)}" aria-label="Удалить остановку">×</button></div>\`).join("")}<button data-action="clear">Очистить маршрут</button>\`
-    : \`<div class="empty">Включите «Добавить остановки» и кликайте по карте.</div>\`;
+    ? `${stops.map((stop, index) => `<div class="stop-row"><div class="stop-number">${index + 1}</div><div class="stop-copy"><strong>${escapeHtml(stop.name)}</strong><small>${stop.lon.toFixed(5)}, ${stop.lat.toFixed(5)}</small></div><button class="icon-button" data-remove-stop="${escapeHtml(stop.id)}" aria-label="Удалить остановку">×</button></div>`).join("")}<button data-action="clear">Очистить маршрут</button>`
+    : `<div class="empty">Включите «Добавить остановки» и кликайте по карте.</div>`;
 }
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
@@ -849,7 +860,7 @@ function render(): void {
   fareInput.value = String(farePerTransitTrip);
   annualDaysInput.value = String(annualDays);
   headwayContainer.innerHTML = PERIODS.map((period) =>
-    \`<label>\${period.id}<input data-headway="\${period.id}" type="number" min="1" max="120" step="1" value="\${headways[period.id] ?? 20}" /></label>\`
+    `<label>${period.id}<input data-headway="${period.id}" type="number" min="1" max="120" step="1" value="${headways[period.id] ?? 20}" /></label>`
   ).join("");
   renderStops();
   renderResults();
@@ -897,7 +908,7 @@ shell.addEventListener("click", (event) => {
     case "timetable": void generateTimetable(); break;
     case "validate":
       busy = true;
-      void validateNetwork(network).then((result) => setStatus(result.valid ? "Сеть корректна" : \`Ошибки: \${result.errors.join("; ")}\`))
+      void validateNetwork(network).then((result) => setStatus(result.valid ? "Сеть корректна" : `Ошибки: ${result.errors.join("; ")}`))
         .catch((error) => setStatus(error instanceof Error ? error.message : "Ошибка проверки"))
         .finally(() => { busy = false; render(); });
       break;
@@ -939,7 +950,7 @@ headwayContainer.addEventListener("change", (event) => {
 });
 for (const [element, key] of toggleInputs) {
   element.addEventListener("change", () => {
-    (initialSettings as Record<string, unknown>)[key] = element.checked;
+    initialSettings[key] = element.checked;
     switch (key) {
       case "showRoads": showRoads = element.checked; break;
       case "showRoadSpeed": showRoadSpeed = element.checked; break;
@@ -1032,7 +1043,7 @@ async function bootstrap(): Promise<void> {
     showRoads, showRoadSpeed, showStops, showPlaces, showConnectors,
     showPopulation, showDemandStreets, showPassengerFlow, showStationLoads,
   });
-  modeInput.innerHTML = Object.entries(MODE_LABELS).map(([value, label]) => \`<option value="\${value}">\${label}</option>\`).join("");
+  modeInput.innerHTML = Object.entries(MODE_LABELS).map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
   try {
     const saved = await loadProject("current");
     if (saved && typeof saved === "object") applyProject(saved as ProjectFile);
