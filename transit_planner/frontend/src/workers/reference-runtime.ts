@@ -36,11 +36,22 @@ export type ReferenceMatrixOutput = {
 };
 
 let referenceRequestId = 0;
+
+function fingerprint(value: unknown): string {
+  const json = JSON.stringify(value);
+  let hash = 2166136261;
+  for (let index = 0; index < json.length; index += 1) {
+    hash ^= json.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
 let runtimeModelPromise: Promise<Record<string, unknown> | null> | null = null;
 
 async function loadRuntimeModel(): Promise<Record<string, unknown> | null> {
   if (!runtimeModelPromise) {
-    runtimeModelPromise = fetch("/model.json", { cache: "no-cache" })
+    runtimeModelPromise = fetch("/data/model.json", { cache: "force-cache" })
       .then(async (response) => {
         if (!response.ok) return null;
         const value = await response.json();
@@ -89,12 +100,25 @@ export class ReferenceEvaluationClient {
     }
   }
 
+  private cachedRunKey: string | null = null;
+  private cachedRunResult: ReferenceEvaluationResult | null = null;
+
   run(lines: unknown, geoms: unknown, useBaseline = false, fare = 0): Promise<ReferenceEvaluationResult> {
     if (!this.workers.length) return Promise.reject(new Error("reference evaluation worker unavailable"));
+    const key = fingerprint({ epoch: this.epoch, lines, geoms, useBaseline, fare });
+    if (key === this.cachedRunKey && this.cachedRunResult) return Promise.resolve(this.cachedRunResult);
+
     const id = this.nextId++;
     const worker = this.workers[this.nextWorker++ % this.workers.length];
     return new Promise((resolve, reject) => {
-      this.tasks.set(id, { resolve, reject });
+      this.tasks.set(id, {
+        resolve: (result) => {
+          this.cachedRunKey = key;
+          this.cachedRunResult = result;
+          resolve(result);
+        },
+        reject,
+      });
       worker.postMessage({ type: "run", id, epoch: this.epoch, lines, geoms, useBaseline, fare });
     });
   }
@@ -294,8 +318,12 @@ export async function runRuntimePreview(
       : {}),
   };
   const baselineT = demandInput?.baselineT;
+  const epoch = Number.parseInt(
+    fingerprint({ network, demand: mergedDemand, urban }),
+    16,
+  ) || 0;
   client.init(
-    Date.now(),
+    epoch,
     mergedDemand,
     baselineT,
     demand.layers ?? [],
