@@ -36,6 +36,22 @@ export type ReferenceMatrixOutput = {
 };
 
 let referenceRequestId = 0;
+let runtimeModelPromise: Promise<Record<string, unknown> | null> | null = null;
+
+async function loadRuntimeModel(): Promise<Record<string, unknown> | null> {
+  if (!runtimeModelPromise) {
+    runtimeModelPromise = fetch("/model.json", { cache: "no-cache" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const value = await response.json();
+        return value && typeof value === "object"
+          ? value as Record<string, unknown>
+          : null;
+      })
+      .catch(() => null);
+  }
+  return runtimeModelPromise;
+}
 
 export class ReferenceEvaluationClient {
   private readonly workers: Worker[] = [];
@@ -270,10 +286,17 @@ export async function runRuntimePreview(
   urban?: UrbanMultipliersResponse | null,
 ): Promise<ReferenceEvaluationResult> {
   const demand = demandInput ?? toReferenceDemand(network);
+  const runtimeModel = await loadRuntimeModel();
+  const mergedDemand = {
+    ...demand,
+    ...(runtimeModel || demand.model
+      ? { model: { ...(runtimeModel ?? {}), ...(demand.model ?? {}) } }
+      : {}),
+  };
   const baselineT = demandInput?.baselineT;
   client.init(
     Date.now(),
-    demand,
+    mergedDemand,
     baselineT,
     demand.layers ?? [],
     network.origin_lat ?? 51.67,
