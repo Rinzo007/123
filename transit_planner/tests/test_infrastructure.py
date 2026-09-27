@@ -3,7 +3,6 @@ from transit_planner.infrastructure import (
     TrackType,
     shared_track_departure_capacities,
     shared_track_departure_capacity,
-    total_reserved_capital,
 )
 
 
