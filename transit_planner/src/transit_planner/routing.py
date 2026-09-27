@@ -75,6 +75,7 @@ class _RaptorParent:
     board_time: float
     ready_time: float
     arrival_time: float
+    direction: int = 1
 
 
 class TransitRouter:
@@ -291,6 +292,11 @@ class TransitRouter:
                         continue
 
                     next_arrival[stop_id] = running
+                    direction = (
+                        1
+                        if pattern.stops.index(board_stop) <= pattern.stops.index(stop_id)
+                        else -1
+                    )
                     parent[stop_id] = _RaptorParent(
                         kind="transit",
                         previous_stop=board_stop,
@@ -299,6 +305,7 @@ class TransitRouter:
                         board_time=board_time,
                         ready_time=ready_time,
                         arrival_time=running,
+                        direction=direction,
                     )
 
             self._apply_footpaths(next_arrival, parent)
@@ -350,7 +357,7 @@ class TransitRouter:
             origin_stop_id=origin.id,
             destination_stop_id=destination.id,
             duration_min=sum(
-                leg.duration_min + leg.wait_min
+                leg.duration_min
                 for leg in adjusted
             ),
             transfers=transfers,
@@ -466,11 +473,10 @@ class TransitRouter:
         *,
         origin_id: str,
         destination_id: str,
-        departure_minute: float,
         parents: list[dict[str, _RaptorParent]],
         round_index: int,
     ) -> tuple[JourneyLeg, ...] | None:
-        legs: list[JourneyLeg] = []
+        legs_reversed: list[JourneyLeg] = []
         current = destination_id
         current_round = round_index
         guard = 0
@@ -486,47 +492,81 @@ class TransitRouter:
                 continue
 
             if record.kind == "walk":
-                legs.append(
+                legs_reversed.append(
                     JourneyLeg(
                         "walk",
                         record.previous_stop,
                         current,
-                        max(0.0, record.arrival_time - record.board_time),
+                        max(
+                            0.0,
+                            record.arrival_time - record.board_time,
+                        ),
                     )
                 )
                 current = record.previous_stop
                 continue
 
-            run = max(
-                0.0,
-                record.arrival_time - record.board_time,
-            )
-            wait = max(
-                0.0,
-                record.board_time - record.ready_time,
-            )
-            legs.append(
-                JourneyLeg(
-                    "transit",
-                    record.previous_stop,
-                    current,
-                    run,
-                    record.route_id,
-                    wait_min=wait,
-                    service_id=record.service_id,
+            route_id = record.route_id
+            if route_id is None or record.previous_stop not in self.network.stops:
+                return None
+
+            route = self.network.routes[route_id]
+            route_stops = route.stop_ids
+            board_index = route_stops.index(record.previous_stop)
+            alight_index = route_stops.index(current)
+
+            indices: range
+            if record.direction >= 0 and alight_index >= board_index:
+                indices = range(board_index, alight_index)
+            elif record.direction < 0 and alight_index <= board_index:
+                indices = range(board_index, alight_index, -1)
+            else:
+                return None
+
+            first_segment = True
+            for index in indices:
+                if record.direction >= 0:
+                    from_id = route_stops[index]
+                    to_id = route_stops[index + 1]
+                    segment_index = index
+                else:
+                    from_id = route_stops[index]
+                    to_id = route_stops[index - 1]
+                    segment_index = index - 1
+
+                duration = self.network.route_segment_run_time_min(
+                    route,
+                    segment_index,
                 )
-            )
+                legs_reversed.append(
+                    JourneyLeg(
+                        "transit",
+                        from_id,
+                        to_id,
+                        duration,
+                        route_id,
+                        wait_min=(
+                            max(0.0, record.board_time - record.ready_time)
+                            if first_segment
+                            else 0.0
+                        ),
+                        service_id=record.service_id,
+                    )
+                )
+                first_segment = False
+
             current = record.previous_stop
             current_round -= 1
 
         if current != origin_id:
             return None
 
-        legs.reverse()
+        legs_reversed.reverse()
 
-        first_transit_seen = False
+        # Waiting is carried only by the first transit leg.
+        seen_transit = False
         normalized: list[JourneyLeg] = []
-        for leg in legs:
+        for leg in legs_reversed:
             if leg.kind == "transit":
                 normalized.append(
                     JourneyLeg(
@@ -535,15 +575,16 @@ class TransitRouter:
                         leg.to_id,
                         leg.duration_min,
                         leg.route_id,
-                        wait_min=leg.wait_min if not first_transit_seen else 0.0,
+                        wait_min=leg.wait_min if not seen_transit else 0.0,
                         service_id=leg.service_id,
                     )
                 )
-                first_transit_seen = True
+                seen_transit = True
             else:
                 normalized.append(leg)
 
         return tuple(normalized)
+
 
     def _build_walking_neighbors(
         self,
@@ -619,42 +660,40 @@ def _add_intermediate_dwell(
     legs: tuple[JourneyLeg, ...],
 ) -> tuple[JourneyLeg, ...]:
     result: list[JourneyLeg] = []
-    for leg in legs:
-        if leg.kind != "transit" or leg.route_id is None:
-            result.append(leg)
-            continue
+    previous_route: str | None = None
 
-        route = network.routes[leg.route_id]
-        try:
-            route_stops = route.stop_ids
-            from_index = route_stops.index(leg.from_id)
-            to_index = route_stops.index(leg.to_id)
-            if from_index <= to_index:
-                intermediate_ids = route_stops[from_index + 1:to_index]
-            else:
-                intermediate_ids = route_stops[to_index + 1:from_index]
-            profile = REFERENCE_MODE_PROFILES[route.mode.value]
-            dwell = sum(
-                profile.dwell_s
-                for stop_id in intermediate_ids
-                if route.is_stop_open(stop_id)
-            ) / 60.0
-        except ValueError:
-            dwell = 0.0
+    for leg in legs:
+        duration = leg.duration_min
+        if (
+            leg.kind == "transit"
+            and leg.route_id is not None
+            and previous_route == leg.route_id
+            and network.routes[leg.route_id].is_stop_open(leg.from_id)
+        ):
+            profile = REFERENCE_MODE_PROFILES[
+                network.routes[leg.route_id].mode.value
+            ]
+            duration += profile.dwell_s / 60.0
 
         result.append(
             JourneyLeg(
                 leg.kind,
                 leg.from_id,
                 leg.to_id,
-                leg.duration_min + dwell,
+                duration,
                 leg.route_id,
                 leg.wait_min,
                 leg.service_id,
             )
         )
+        previous_route = (
+            leg.route_id
+            if leg.kind == "transit"
+            else None
+        )
 
     return tuple(result)
+
 
 
 def _adjust_connection_waits(
