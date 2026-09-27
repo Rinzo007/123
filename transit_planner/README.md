@@ -50,7 +50,7 @@
 - тарифная чувствительность transit;
 - диагностика причин потери спроса;
 - калибровочный отчёт по наблюдаемой/расчётной перевозке;
-- физическая инфраструктура surface/elevated/tunnel и годовой план;
+- физическая инфраструктура surface/elevated/tunnel/trenched/ramp, узлы, сигнальные блоки и crossovers;
 - визуализация Overture-коннекторов;
 - автоматические тесты и CI.
 
@@ -78,7 +78,7 @@ Overture Places агрегируются к ближайшим зонам спр
 
 Service хранит headway по каждому периоду и может дополнительно хранить departure offsets. Модуль timetable из этих параметров строит фактические отправления и умеет находить ближайшее отправление для заданного времени прибытия.
 
-Модуль infrastructure отделяет физические TrackSection от маршрутов и поддерживает surface/elevated/tunnel, shared track, parallel track, стоимость станций и YearPlan. Это основа для строительства по годам, а не игровой валюты или очков.
+Модуль infrastructure отделяет физические TrackSection от маршрутов и поддерживает surface/elevated/tunnel/trenched/ramp, shared track, parallel track, узлы, направления, уклоны, радиусы кривых, crossovers и сигнальные блоки. Инфраструктура описывает эксплуатационные ограничения сети; жизненный цикл строительства и CAPEX в модели отсутствуют.
 
 
 ### Настройки городской модели
@@ -92,4 +92,4 @@ Service хранит headway по каждому периоду и может д
 
 Frontend построен на Vanilla TypeScript + Vite/Rollup + MapLibre GL JS 5.24.0. Состояние сети и проекта хранится непосредственно в runtime, проекты и кэш Overture хранятся в IndexedDB, настройки интерфейса — в localStorage.
 
-Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/app.ts`, ручной DOM, MapLibre, reference worker runtime, TKBL-кэш геометрии и манифесты city packs с SHA-256.
+Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/app.ts`, ручной DOM, MapLibre, model worker runtime, TKBL-кэш геометрии и манифесты city packs с SHA-256.
