@@ -328,5 +328,25 @@
     "crowded": 1,
     "severe": 2,
     "extreme": 4
+  },
+  "routing": {
+    "range_window_min": 30,
+    "max_transfers": 4,
+    "max_access_walk_min": 45,
+    "transfer_walk_radius_m": 500
+  },
+  "journey_choice": {
+    "ride_weight": 1,
+    "walk_weight": 1.39,
+    "wait_weight": 1.37,
+    "departure_shift_weight": 0.4,
+    "driving_congestion_weight": 1.33,
+    "parking_weight": 1.6,
+    "source": "Wardman et al. (2026), as cited by Subway Builder simulation documentation"
+  },
+  "city_simulation": {
+    "income_dependent_mode_choice": true,
+    "real_home_workplace_pairing": false,
+    "notes": "For countries without public workplace OD microdata, retain population/attraction gravity model and calibrate city-specific commute distances when data becomes available."
   }
 }
