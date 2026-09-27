@@ -2,7 +2,8 @@ import type { Map as MapLibreMap, MapMouseEvent } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import type { NetworkPayload } from "./types";
 import { networkToGeoJSON } from "./network-editor";
-import { lonLatToLocalMeters } from "./core/geometry";
+import { lonLatToLocalMeters, normalizeTrackSection } from "./core/geometry";
+import { CommandHistory, type Command } from "./core/history";
 
 export type MapEditorMode = "select" | "node" | "track";
 
@@ -20,6 +21,8 @@ export class MapNetworkEditor {
   private selectedNodeId: string | null = null;
   private selectedTrackId: string | null = null;
   private draggingNodeId: string | null = null;
+  private dragStartNetwork: NetworkPayload | null = null;
+  private readonly history = new CommandHistory<NetworkPayload>();
 
   constructor(private readonly map: MapLibreMap, private readonly options: MapNetworkEditorOptions) {
     this.ensureLayers();
@@ -42,6 +45,18 @@ export class MapNetworkEditor {
   }
 
   getMode(): MapEditorMode { return this.mode; }
+  canUndo(): boolean { return this.history.canUndo; }
+  canRedo(): boolean { return this.history.canRedo; }
+  undo(): void { try { this.options.setNetwork(this.history.undo(this.options.getNetwork())); this.refresh(); } catch {} }
+  redo(): void { try { this.options.setNetwork(this.history.redo(this.options.getNetwork())); this.refresh(); } catch {} }
+  private commit(next: NetworkPayload, label: string): void {
+    const before = structuredClone(this.options.getNetwork());
+    const after = structuredClone(next);
+    const command: Command<NetworkPayload> = { label, execute: () => after, undo: () => before };
+    this.options.setNetwork(this.history.execute(command, before));
+    this.options.markDirty?.();
+    this.refresh();
+  }
 
   refresh(): void {
     const source = this.map.getSource("network-editor") as GeoJSONSource | undefined;
@@ -80,9 +95,7 @@ export class MapNetworkEditor {
       const network = structuredClone(this.options.getNetwork());
       const id = "node-" + crypto.randomUUID().slice(0, 8);
       network.track_nodes.push({ id, x: p.x, y: p.y, elevation_m: 0 });
-      this.options.setNetwork(network);
-      this.options.markDirty?.();
-      this.refresh();
+      this.commit(network, "Добавить узел");
       return;
     }
 
@@ -120,11 +133,9 @@ export class MapNetworkEditor {
         grade_crossing_count: 0, elevation_delta_m: b.elevation_m - a.elevation_m,
         slope_percent: (b.elevation_m - a.elevation_m) / Math.max(0.001, Math.hypot(dx, dy)) * 100,
       });
-      this.options.setNetwork(network);
-      this.options.markDirty?.();
+      this.commit(network, "Добавить участок");
       this.pendingNodeId = id;
       this.setSelection("track", trackId);
-      this.refresh();
       return;
     }
 
