@@ -34,6 +34,7 @@ import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
 import { RouteEditor } from "./planning/route-editor";
 import { estimateFleetRequirement } from "./planning/fleet";
 import { generateServiceTimetable } from "./planning/timetable";
+import { validateTopology } from "./core/topology";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
@@ -1237,7 +1238,7 @@ shell.addEventListener("click", (event) => {
     case "timetable": void generateTimetable(); break;
     case "validate":
       busy = true;
-      void validateNetwork(network).then((result) => setStatus(result.valid ? "Сеть корректна" : `Ошибки: ${result.errors.join("; ")}`))
+      void validateNetwork(network).then((result) => { const topology = validateTopology(network); const errors = [...result.errors, ...topology.filter(issue => issue.severity === "error").map(issue => issue.message)]; const warnings = topology.filter(issue => issue.severity === "warning").map(issue => issue.message); setStatus(errors.length ? `Ошибки: ${errors.join("; ")}` : warnings.length ? `Сеть корректна · предупреждения: ${warnings.join("; ")}` : "Сеть корректна"); })
         .catch((error) => setStatus(error instanceof Error ? error.message : "Ошибка проверки"))
         .finally(() => { busy = false; render(); });
       break;
