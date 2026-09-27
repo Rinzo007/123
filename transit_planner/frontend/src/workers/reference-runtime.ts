@@ -1,4 +1,3 @@
-import type { UrbanMultipliersResponse } from "../api";
 import type { NetworkPayload } from "../types";
 
 export type ReferenceEvaluationResult = {
@@ -273,7 +272,6 @@ export function toReferenceLines(network: NetworkPayload): ReferenceLine[] {
 
 export function toReferenceGeometries(
   network: NetworkPayload,
-  urban?: UrbanMultipliersResponse | null,
 ): Array<{
   stops: Array<[number, number]>;
   cum: number[];
@@ -288,13 +286,9 @@ export function toReferenceGeometries(
       const dy = (lat2 - lat1) * 111000;
       cum.push(cum[i - 1] + Math.hypot(dx, dy));
     }
-    const multipliers = urban?.routes[line.id]?.segment_multipliers;
-    return {
+      return {
       stops: line.stops,
       cum,
-      ...(multipliers && multipliers.length === Math.max(0, line.stops.length - 1)
-        ? { segCostMul: multipliers }
-        : {}),
     };
   });
 }
@@ -307,7 +301,6 @@ export async function runRuntimePreview(
   client: ReferenceEvaluationClient,
   network: NetworkPayload,
   demandInput?: ReferenceCityDemand,
-  urban?: UrbanMultipliersResponse | null,
 ): Promise<ReferenceEvaluationResult> {
   const demand = demandInput ?? toReferenceDemand(network);
   const runtimeModel = await loadRuntimeModel();
@@ -319,7 +312,7 @@ export async function runRuntimePreview(
   };
   const baselineT = demandInput?.baselineT;
   const epoch = Number.parseInt(
-    fingerprint({ network, demand: mergedDemand, urban }),
+    fingerprint({ network, demand: mergedDemand }),
     16,
   ) || 0;
   client.init(
@@ -329,5 +322,5 @@ export async function runRuntimePreview(
     demand.layers ?? [],
     network.origin_lat ?? 51.67,
   );
-  return client.run(toReferenceLines(network), toReferenceGeometries(network, urban), false, 0);
+  return client.run(toReferenceLines(network), toReferenceGeometries(network), false, 0);
 }
