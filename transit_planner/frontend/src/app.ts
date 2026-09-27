@@ -1236,7 +1236,7 @@ function initializeMap(): void {
     map!.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
     map!.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     mapReady = true;
-    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); renderNetwork(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; renderNetwork(); } });
+    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); render(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; render(); } });
     mapNetworkEditor.setMode(editorMode);
     syncMapGeoJson();
   });
