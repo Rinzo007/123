@@ -292,6 +292,7 @@ function renderPropertyPanel(): void {
       <label>ID<input value="${track.id}" disabled></label>
       <label>Тип пути<select data-field="track_type"><option value="surface">Поверхность</option><option value="elevated">Эстакада</option><option value="tunnel">Тоннель</option><option value="trenched">Выемка</option><option value="ramp">Рампа</option></select></label>
       <label>Направление<select data-field="direction"><option value="forward">Прямое</option><option value="reverse">Обратное</option><option value="both">Оба</option></select></label>
+      <label>Пропускная способность, отп./ч<input data-field="capacity_departures_per_hour" type="number" min="1" step="1" value="${track.capacity_departures_per_hour}"></label>
       <label>Скорость, км/ч<input data-field="speed_limit_kph" type="number" min="1" step="1" value="${track.speed_limit_kph}"></label>
       <label>Путей<input data-field="track_count" type="number" min="1" step="1" value="${track.track_count}"></label>
       <label>Макс. уклон, %<input data-field="max_slope_percent" type="number" min="0" step="0.1" value="${track.max_slope_percent}"></label>
@@ -315,7 +316,7 @@ function updateSelectedProperty(field: string, raw: string): void {
     (item as any)[field] = value;
   } else if (editorSelection.kind === "track") {
     const item = next.track_sections.find(t => t.id === editorSelection.id); if (!item) return;
-    const numeric = ["speed_limit_kph","track_count","max_slope_percent","grade_crossing_count","curve_radius_m"].includes(field);
+    const numeric = ["capacity_departures_per_hour","speed_limit_kph","track_count","max_slope_percent","grade_crossing_count","curve_radius_m"].includes(field);
     (item as any)[field] = numeric ? (raw === "" && field === "curve_radius_m" ? null : Number(raw)) : raw;
     const a = next.track_nodes.find(n => n.id === item.start_node_id), b = next.track_nodes.find(n => n.id === item.end_node_id);
     if (a && b) { const d = Math.max(.001, Math.hypot(b.x-a.x,b.y-a.y)); item.length_km=d/1000; item.elevation_delta_m=b.elevation_m-a.elevation_m; item.slope_percent=item.elevation_delta_m/d*100; item.start_elevation_m=a.elevation_m; item.end_elevation_m=b.elevation_m; }
@@ -324,14 +325,36 @@ function updateSelectedProperty(field: string, raw: string): void {
   renderPropertyPanel(); render();
 }
 function deleteSelectedProperty(): void {
-  const next = structuredClone(network);
-  if (editorSelection.kind === "track") next.track_sections = next.track_sections.filter(t => t.id !== editorSelection.id);
-  else if (editorSelection.kind === "node") {
-    const id = editorSelection.id; if (next.track_sections.some(t => t.start_node_id === id || t.end_node_id === id)) { setStatus("Нельзя удалить узел: сначала удалите связанные участки"); return; }
-    next.track_nodes = next.track_nodes.filter(n => n.id !== id);
-  } else return;
-  if (mapNetworkEditor) mapNetworkEditor.applyNetwork(next, "Удаление объекта"); else { network = next; markDirty(); }
-  editorSelection = { kind: null, id: null }; renderPropertyPanel(); render();
+  if (!editorSelection.kind || !editorSelection.id) return;
+  try {
+    if (mapNetworkEditor) {
+      if (editorSelection.kind === "track") mapNetworkEditor.deleteTrack(editorSelection.id);
+      else mapNetworkEditor.deleteNode(editorSelection.id);
+    } else {
+      const next = structuredClone(network);
+      if (editorSelection.kind === "track") {
+        next.track_sections = next.track_sections.filter(t => t.id !== editorSelection.id);
+        next.crossovers = next.crossovers.filter(c => c.from_track_id !== editorSelection.id && c.to_track_id !== editorSelection.id);
+        next.signal_blocks = next.signal_blocks.filter(b => b.track_section_id !== editorSelection.id);
+        next.routes = next.routes.map(route => ({ ...route, track_section_ids: route.track_section_ids?.filter(id => id !== editorSelection.id) }));
+      } else {
+        const id = editorSelection.id;
+        if (next.track_sections.some(t => t.start_node_id === id || t.end_node_id === id)) {
+          setStatus("Нельзя удалить узел: сначала удалите связанные участки");
+          return;
+        }
+        next.track_nodes = next.track_nodes.filter(n => n.id !== id);
+      }
+      network = next;
+      markDirty();
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Не удалось удалить объект");
+    return;
+  }
+  editorSelection = { kind: null, id: null };
+  renderPropertyPanel();
+  render();
 }
 function setStatus(next: string): void {
   message = next;
