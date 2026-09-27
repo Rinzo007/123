@@ -31,6 +31,7 @@ from .projection import project_local_point_wgs84
 from .geo import Point
 from .overture import (
     OvertureConnectorProvider,
+    OvertureUrbanProvider,
     OverturePlacesProvider,
     OvertureSource,
     OvertureTransitProvider,
@@ -250,6 +251,87 @@ def overture_route(payload: dict) -> dict:
             "snap_distances_m": list(route.snap_distances_m),
         },
     }
+
+@app.post("/api/v1/data/overture/urban-multipliers")
+def overture_urban_multipliers(payload: dict) -> dict:
+    """Calculate reference-style urban construction multipliers for route segments."""
+    try:
+        bounds = _bbox(
+            float(payload["south"]),
+            float(payload["west"]),
+            float(payload["north"]),
+            float(payload["east"]),
+        )
+        source = _overture_source(payload.get("release"))
+        origin_lon = float(
+            payload.get("origin_lon", (bounds[1] + bounds[3]) / 2.0)
+        )
+        origin_lat = float(
+            payload.get("origin_lat", (bounds[0] + bounds[2]) / 2.0)
+        )
+        network = network_from_dict(payload["network"])
+
+        buildings, water = OvertureUrbanProvider(
+            source=source,
+            bbox=bounds,
+        ).load()
+
+        from .urban import UrbanContext
+
+        context = UrbanContext(buildings, water)
+        routes: dict[str, dict] = {}
+        segment_count = 0
+
+        for route in network.routes.values():
+            multipliers: list[float] = []
+            metrics: list[dict[str, float]] = []
+            for index, (left_id, right_id) in enumerate(route.segment_pairs()):
+                geometry = network.route_segment_geometry_points(route, index)
+                if len(geometry) < 2:
+                    geometry = (
+                        network.stops[left_id].location,
+                        network.stops[right_id].location,
+                    )
+                wgs84 = tuple(
+                    project_local_point_wgs84(
+                        point,
+                        origin_lon=origin_lon,
+                        origin_lat=origin_lat,
+                    )
+                    for point in geometry
+                )
+                multiplier, segment_metrics = context.construction_multiplier(
+                    route.mode.value,
+                    network.route_segment_row(route, index).value,
+                    wgs84,
+                    cost_per_km=network.route_segment_cost_per_km(route, index),
+                )
+                multipliers.append(float(multiplier))
+                metrics.append(segment_metrics)
+                segment_count += 1
+
+            routes[route.id] = {
+                "segment_multipliers": multipliers,
+                "segments": metrics,
+            }
+
+        return {
+            "release": source.release,
+            "routes": routes,
+            "counts": {
+                "buildings": len(buildings),
+                "water": len(water),
+                "segments": segment_count,
+            },
+        }
+    except HTTPException:
+        raise
+    except (KeyError, TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Не удалось рассчитать городской контекст Overture: {exc}",
+        ) from exc
+
 
 @app.get("/api/v1/data/overture/places")
 def overture_places(
