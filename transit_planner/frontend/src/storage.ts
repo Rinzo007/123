@@ -259,6 +259,38 @@ export async function loadDataset<T>(id: string): Promise<T | null> {
   return readObject<T>(DATASET_PREFIX + id);
 }
 
+export async function saveBinaryDataset(
+  id: string,
+  data: ArrayBuffer,
+  ttlMs = 7 * 24 * 60 * 60 * 1000,
+): Promise<void> {
+  const key = DATASET_PREFIX + id;
+  const token = writer.begin(key);
+  try {
+    await writeValue({
+      key,
+      value: data,
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + ttlMs,
+      encoding: "identity",
+    });
+    writer.confirm(key, token);
+  } catch (error) {
+    writer.confirm(key, token);
+    throw error;
+  }
+}
+
+export async function loadBinaryDataset(id: string): Promise<ArrayBuffer | null> {
+  const record = await readValue(DATASET_PREFIX + id);
+  if (!record) return null;
+  if (record.expiresAt !== undefined && record.expiresAt < Date.now()) {
+    await deleteValue(DATASET_PREFIX + id);
+    return null;
+  }
+  return record.value instanceof ArrayBuffer ? record.value : null;
+}
+
 export async function clearDataset(id: string): Promise<void> {
   const key = DATASET_PREFIX + id;
   const token = writer.begin(key);
