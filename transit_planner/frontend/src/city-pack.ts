@@ -94,7 +94,7 @@ export type CityPackProgress = {
 
 async function fetchArrayBuffer(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   const response = await fetch(url, { signal, cache: "no-cache" });
-  if (!response.ok) throw new Error(\`Не удалось загрузить city pack: \${response.status} \${url}\`);
+  if (!response.ok) throw new Error(`Не удалось загрузить city pack: \${response.status} \${url}`);
   return response.arrayBuffer();
 }
 
@@ -105,12 +105,12 @@ export async function loadCityPack(
   signal?: AbortSignal,
   onProgress?: (progress: CityPackProgress) => void,
 ): Promise<CityPack> {
-  const manifestResponse = await fetch(\`\${baseUrl.replace(/\/$/, "")}/manifest.json\`, {
+  const manifestResponse = await fetch(`\${baseUrl.replace(/\/$/, "")}/manifest.json`, {
     signal,
     cache: "no-cache",
   });
   if (!manifestResponse.ok) {
-    throw new Error(\`Не удалось загрузить manifest city pack: \${manifestResponse.status}\`);
+    throw new Error(`Не удалось загрузить manifest city pack: \${manifestResponse.status}`);
   }
   const manifest = await manifestResponse.json() as CityPackManifest;
   const names = Object.keys(manifest.files);
@@ -124,12 +124,12 @@ export async function loadCityPack(
       if (fileIndex >= names.length) return;
       const name = names[fileIndex];
       const data = await fetchArrayBuffer(
-        \`\${baseUrl.replace(/\/$/, "")}/\${encodeURIComponent(name)}\`,
+        `\${baseUrl.replace(/\/$/, "")}/\${encodeURIComponent(name)}`,
         signal,
       );
       const expected = manifest.files[name];
       if (!expected || data.byteLength !== expected.bytes || await sha256(data) !== expected.sha256) {
-        throw new Error(\`Нарушена целостность city pack: \${name}\`);
+        throw new Error(`Нарушена целостность city pack: \${name}`);
       }
       files[name] = data;
       loadedBytes += data.byteLength;
