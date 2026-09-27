@@ -60,3 +60,4 @@ def test_reference_demand_exposes_separate_commuter_and_purpose_layers(monkeypat
     assert result["meta"]["purpose_layers"] == 5
     assert result["baselineT_included"] is True
     assert len(result["baselineT"]) == 3
+    assert all(-180.0 <= point[0] <= 180.0 and -90.0 <= point[1] <= 90.0 for point in result["pts"])
