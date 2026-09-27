@@ -325,6 +325,7 @@ function buildNetworkPayload(): NetworkPayload {
     to: stops[index + 1],
   }));
 
+  const trackNodes = metricStops.map((stop) => ({ id: `node-${stop.id}`, x: stop.location.x, y: stop.location.y, elevation_m: 0 }));
   const trackSections = segmentPairs.map(({ from, to }, index) => {
     const distanceKm = Math.hypot(
       toLocalMeters(to.lon, to.lat, origin.lon, origin.lat).x -
@@ -341,6 +342,16 @@ function buildNetworkPayload(): NetworkPayload {
       shared_group: null,
       station_ids: [from.id, to.id],
       speed_limit_kph: mode === "bus" ? 50 : mode === "tram" ? 50 : mode === "metro" ? 80 : 120,
+      start_node_id: `node-${from.id}`,
+      end_node_id: `node-${to.id}`,
+      start_elevation_m: 0,
+      end_elevation_m: 0,
+      max_slope_percent: null,
+      curve_radius_m: null,
+      track_count: 1,
+      direction: "both" as const,
+      parallel_group: null,
+      grade_crossing_count: 0,
     };
   });
 
@@ -370,7 +381,13 @@ function buildNetworkPayload(): NetworkPayload {
       departure_offset_by_period: Object.fromEntries(PERIODS.map((period) => [period.id, 0])),
       phase_by_period: Object.fromEntries(PERIODS.map((period) => [period.id, 0])),
     }] : [],
-    track_sections: trackSections,
+    track_nodes: trackNodes,
+    track_sections: trackSections.map((section) => {
+      const old = network?.track_sections?.find((item) => item.id === section.id);
+      return old ? { ...section, ...old } : section;
+    }),
+    crossovers: network?.crossovers ?? [],
+    signal_blocks: network?.signal_blocks ?? [],
     stations: stops.map((stop) => ({
       id: `station-${stop.id}`,
       name: stop.name,
@@ -428,6 +445,7 @@ function buildNetworkPayload(): NetworkPayload {
   };
 }
 let network = buildNetworkPayload();
+let selectedTrackId: string | null = null;
 
 function syncMapGeoJson(): void {
   if (!map || !mapReady) return;
@@ -942,6 +960,36 @@ function clearRoute(): void {
 function formatNumber(value: unknown): string {
   return typeof value === "number" ? value.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : String(value);
 }
+
+
+function renderPhysicalEditor(): string {
+  const selected = network.track_sections.find((item) => item.id === selectedTrackId) ?? network.track_sections[0];
+  if (!selected) {
+    return `<section class="analytics-panel"><h3>Физическая инфраструктура</h3><p>Добавьте минимум две остановки, чтобы создать участок сети.</p></section>`;
+  }
+  selectedTrackId = selected.id;
+  const field = (label: string, key: string, value: unknown, type = "number") =>
+    `<label>${label}<input data-track-field="${key}" type="${type}" value="${escapeHtml(String(value ?? ""))}" /></label>`;
+  return `<section class="analytics-panel physical-editor">
+    <h3>Физическая инфраструктура</h3>
+    <div class="network-table-wrap"><table class="network-table"><thead><tr><th>Участок</th><th>Тип</th><th>Длина, км</th><th>Путь</th><th>Направление</th></tr></thead><tbody>
+      ${network.track_sections.map((track) => `<tr data-track-select="${track.id}" class="${track.id === selected.id ? "selected" : ""}"><td>${track.id}</td><td>${track.track_type}</td><td>${track.length_km.toFixed(3)}</td><td>${track.track_count ?? 1}</td><td>${track.direction ?? "both"}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="physical-form">
+      <label>Тип<select data-track-field="track_type">${(["surface","elevated","tunnel","trenched","ramp"] as const).map((v) => `<option value="${v}" ${selected.track_type === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label>Направление<select data-track-field="direction">${(["forward","reverse","both"] as const).map((v) => `<option value="${v}" ${selected.direction === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      ${field("Скорость, км/ч","speed_limit_kph",selected.speed_limit_kph ?? "")}
+      ${field("Количество путей","track_count",selected.track_count ?? 1)}
+      ${field("Радиус кривой, м","curve_radius_m",selected.curve_radius_m ?? "")}
+      ${field("Макс. уклон, %","max_slope_percent",selected.max_slope_percent ?? "")}
+      ${field("Высота начала, м","start_elevation_m",selected.start_elevation_m ?? 0)}
+      ${field("Высота конца, м","end_elevation_m",selected.end_elevation_m ?? 0)}
+      ${field("Переезды","grade_crossing_count",selected.grade_crossing_count ?? 0)}
+      <label>Параллельная группа<input data-track-field="parallel_group" type="text" value="${escapeHtml(selected.parallel_group ?? "")}" /></label>
+    </div>
+    <div class="network-kpis"><div><span>Перепад высоты</span><b>${((selected.end_elevation_m ?? 0) - (selected.start_elevation_m ?? 0)).toFixed(1)} м</b></div></div>
+  </section>`;
+}
 function renderResults(): void {
   const metricGrid = (items: Array<[string, unknown]>) =>
     `<div class="analytics-grid">${items.map(([name, value]) => `<div><span>${name}</span><b>${formatNumber(value)}</b></div>`).join("")}</div>`;
@@ -964,6 +1012,7 @@ function renderResults(): void {
       }).join("")}</tbody></table></div>
     </section>
   `;
+  html += renderPhysicalEditor();
   if (cityAssignmentMeta) {
     html += `<section class="analytics-panel"><h3>Городской расчёт</h3>${metricGrid([
       ["Зоны", cityAssignmentMeta.zones],
@@ -1002,7 +1051,6 @@ function renderResults(): void {
       ["Эксплуатация", e.daily_operating_cost],
       ["Стоимость парка", e.daily_fleet_cost],
       ["Выручка", e.daily_fare_revenue],
-      ["CAPEX", e.capital_cost],
       ["OPEX на поездку", e.operating_cost_per_transit_trip],
     ])}</section>`;
   }
@@ -1060,6 +1108,24 @@ function render(): void {
   syncMapGeoJson();
 }
 
+shell.addEventListener("change", (event) => {
+  const target = event.target as HTMLInputElement | HTMLSelectElement;
+  const field = target.dataset.trackField;
+  if (!field) return;
+  const track = network.track_sections.find((item) => item.id === selectedTrackId);
+  if (!track) return;
+  if (field === "track_type" || field === "direction") {
+    (track as any)[field] = target.value;
+  } else if (field === "parallel_group") {
+    track.parallel_group = target.value || null;
+  } else {
+    const value = Number(target.value);
+    (track as any)[field] = Number.isFinite(value) ? value : null;
+  }
+  markDirty();
+  render();
+});
+
 shell.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
@@ -1067,6 +1133,8 @@ shell.addEventListener("click", (event) => {
     removeStop((target.closest("[data-remove-stop]") as HTMLElement).dataset.removeStop!);
     return;
   }
+  const selectedTrack = target.closest<HTMLElement>("[data-track-select]")?.dataset.trackSelect;
+  if (selectedTrack) { selectedTrackId = selectedTrack; render(); return; }
   switch (action) {
     case "view-map": viewMode = "map"; render(); break;
     case "view-network": viewMode = "network"; render(); break;
