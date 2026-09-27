@@ -12,7 +12,7 @@ export interface MapNetworkEditorOptions {
   setNetwork: (network: NetworkPayload) => void;
   getOrigin: () => { lon: number; lat: number };
   markDirty?: () => void;
-  onSelection?: (kind: "node" | "track" | null, id: string | null) => void;
+  onSelection?: (kind: "node" | "track" | "crossover" | "signal" | null, id: string | null) => void;
 }
 
 export class MapNetworkEditor {
@@ -35,6 +35,8 @@ export class MapNetworkEditor {
     this.map.on("mouseleave", this.onMouseUp);
     this.map.on("mouseenter", "network-nodes", () => { this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "network-nodes", () => { this.map.getCanvas().style.cursor = ""; });
+    this.map.on("click", "network-crossovers", this.onInfrastructureClick);
+    this.map.on("click", "network-signal-blocks", this.onInfrastructureClick);
     this.map.on("mouseenter", "network-tracks", () => { this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "network-tracks", () => { this.map.getCanvas().style.cursor = ""; });
     this.refresh();
@@ -43,7 +45,7 @@ export class MapNetworkEditor {
   setMode(mode: MapEditorMode): void {
     this.mode = mode;
     this.pendingNodeId = null;
-    this.map.getCanvas().style.cursor = mode === "node" || mode === "track" ? "crosshair" : "";
+    this.map.getCanvas().style.cursor = mode === "node" || mode === "track" || mode === "crossover" || mode === "signal" ? "crosshair" : "";
   }
 
   getMode(): MapEditorMode { return this.mode; }
@@ -184,6 +186,32 @@ export class MapNetworkEditor {
     this.commit(next, "Добавить сигнальный блок");
   }
 
+  private refreshInfrastructureLayers(): void {
+    const network = this.options.getNetwork();
+    const origin = this.options.getOrigin();
+    const byId = new Map(network.track_sections.map(t => [t.id, t]));
+    const pointFor = (trackId: string, position: number): [number, number] | null => {
+      const track = byId.get(trackId); if (!track?.start_node_id || !track.end_node_id) return null;
+      const a = network.track_nodes.find(n => n.id === track.start_node_id); const b = network.track_nodes.find(n => n.id === track.end_node_id);
+      if (!a || !b) return null;
+      const p = Math.max(0, Math.min(1, position));
+      const x = a.x + (b.x-a.x)*p, y = a.y + (b.y-a.y)*p;
+      const cosLat = Math.cos(origin.lat * Math.PI / 180), earthRadius = 6378137;
+      return [origin.lon + (x / Math.max(1e-9, earthRadius*cosLat))*180/Math.PI, origin.lat + (y/earthRadius)*180/Math.PI];
+    };
+    const crossovers = { type:"FeatureCollection", features: network.crossovers.flatMap(c => { const p=pointFor(c.from_track_id,c.position); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:c.id,kind:"crossover"}}] : []; }) };
+    const blocks = { type:"FeatureCollection", features: network.signal_blocks.flatMap(b => { const p=pointFor(b.track_section_id,(b.start_position+b.end_position)/2); return p ? [{type:"Feature",geometry:{type:"Point",coordinates:p},properties:{id:b.id,kind:"signal"}}] : []; }) };
+    (this.map.getSource("network-infrastructure") as GeoJSONSource)?.setData(crossovers as never);
+    (this.map.getSource("network-signal-blocks") as GeoJSONSource)?.setData(blocks as never);
+  }
+
+  private onInfrastructureClick = (e: MapMouseEvent): void => {
+    const hit = this.map.queryRenderedFeatures(e.point, { layers:["network-crossovers","network-signal-blocks"] })[0];
+    if (!hit) return;
+    const kind = hit.properties?.kind === "crossover" ? "crossover" : "signal";
+    this.options.onSelection?.(kind, String(hit.properties?.id ?? ""));
+  };
+
   private onClick = (e: MapMouseEvent): void => {
     if (this.mode === "node") {
       const p = this.coordinateToLocal(e);
@@ -308,6 +336,8 @@ export class MapNetworkEditor {
   }
 
   dispose(): void {
+    this.map.off("click", "network-crossovers", this.onInfrastructureClick);
+    this.map.off("click", "network-signal-blocks", this.onInfrastructureClick);
     this.map.off("click", this.onClick);
     this.map.off("mousemove", this.onMove);
     this.map.off("mousedown", "network-nodes", this.onMouseDown);
