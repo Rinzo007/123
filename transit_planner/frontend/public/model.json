@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "reference-bundle",
+      "fields": [
+        "rest",
+        "car",
+        "mobility",
+        "transfer",
+        "votSPerEur",
+        "noCarEffectiveness"
+      ]
+    },
+    {
+      "name": "Overture",
+      "role": "urban-context"
+    },
+    {
+      "name": "WorldPop",
+      "role": "population"
+    }
+  ],
+  "credits": [
+    "Параметры совместимости восстановлены из предоставленного reference bundle.",
+    "Геоданные городского контекста: Overture.",
+    "Население: WorldPop."
+  ],
+  "rest": {
+    "baseSpeed": 3.6,
+    "contSpeed": 5,
+    "accessS": 420,
+    "waitS": 240,
+    "circuity": 1.3
+  },
+  "car": {
+    "costPerKm": 0.25,
+    "parkEur": 1.5,
+    "parkingS": 240,
+    "circuity": 1.3
+  },
+  "mobility": {
+    "noCar": 0.35,
+    "twoWheelShare": 0.3,
+    "twoWheelSpeed": 4.2,
+    "twoWheelReachM": 7000,
+    "twoWheelPerKm": 0.03
+  },
+  "transfer": {
+    "baseS": 405,
+    "waitMul": 1,
+    "walkMul": 1,
+    "perMS": 0.25,
+    "riderBiasS": 0
+  },
+  "votSPerEur": 360,
+  "noCarEffectiveness": 0.78,
+  "capex": {
+    "rows": {
+      "bus": {
+        "mixed": 0.4,
+        "reserved": 2.5
+      },
+      "tram": {
+        "mixed": 9,
+        "reserved": 18,
+        "grade": 85
+      },
+      "metro": {
+        "reserved": 32,
+        "elevated": 62,
+        "grade": 120
+      },
+      "rail": {
+        "reserved": 22,
+        "elevated": 48,
+        "grade": 95
+      }
+    }
+  }
+}
