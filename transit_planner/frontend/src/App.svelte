@@ -97,6 +97,8 @@
   let populationZones: FeatureCollection | null = null;
   let demandStreets: FeatureCollection | null = null;
   let roadRoute: FeatureCollection<LineString, object> | null = null;
+  let urbanMultipliers: UrbanMultipliersResponse | null = null;
+  let urbanMultipliersKey = "";
 
   let showRoads = true;
   let showRoadSpeed = false;
@@ -336,6 +338,39 @@
     return `${prefix}:${round(bounds.south)}:${round(bounds.west)}:${round(bounds.north)}:${round(bounds.east)}`;
   }
 
+  async function ensureUrbanMultipliers(
+    network: NetworkPayload,
+    bounds: { south: number; west: number; north: number; east: number },
+  ): Promise<UrbanMultipliersResponse | null> {
+    const key =
+      datasetCacheKey("overture-urban", bounds) + ":" + network.routes.map((route) =>
+        \`\${route.id}:\${route.stop_ids.join(",")}:\${JSON.stringify(route.geometry)}\`,
+      ).join("|");
+    if (urbanMultipliersKey === key) return urbanMultipliers;
+
+    const cached = await loadDataset<UrbanMultipliersResponse>(key);
+    if (cached) {
+      urbanMultipliers = cached;
+      urbanMultipliersKey = key;
+      return cached;
+    }
+
+    try {
+      const loaded = await loadOvertureUrbanMultipliers(
+        network,
+        bounds.south, bounds.west, bounds.north, bounds.east,
+      );
+      urbanMultipliers = loaded;
+      urbanMultipliersKey = key;
+      await saveDataset(key, loaded);
+      return loaded;
+    } catch {
+      urbanMultipliers = null;
+      urbanMultipliersKey = key;
+      return null;
+    }
+  }
+
   async function loadCityData() {
     if (!mapRef) return;
     busy = true;
@@ -355,6 +390,8 @@
       cityConnectors = data.connectors;
       cityStops = data.stops;
       cityPlaces = data.places;
+      urbanMultipliers = null;
+      urbanMultipliersKey = "";
 
       const populationKey = datasetCacheKey("population-zones", {
         south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
@@ -435,34 +472,20 @@
             network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
           )
         : undefined;
-
-      let urbanMultipliers: UrbanMultipliersResponse | null = null;
-      if (bounds && referenceDemand) {
-        const urbanKey =
-          datasetCacheKey("overture-urban", {
-            south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
-          }) + ":" + network.routes.map((route) =>
-            `${route.id}:${route.stop_ids.join(",")}:${JSON.stringify(route.geometry)}`,
-          ).join("|");
-        urbanMultipliers = await loadDataset<UrbanMultipliersResponse>(urbanKey);
-        if (!urbanMultipliers) {
-          try {
-            urbanMultipliers = await loadOvertureUrbanMultipliers(
-              network,
-              bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
-            );
-            await saveDataset(urbanKey, urbanMultipliers);
-          } catch {
-            urbanMultipliers = null;
-          }
-        }
-      }
+      const urbanForPreview = bounds
+        ? await ensureUrbanMultipliers(network, {
+            south: bounds.getSouth(),
+            west: bounds.getWest(),
+            north: bounds.getNorth(),
+            east: bounds.getEast(),
+          })
+        : null;
 
       const referencePreview = await runRuntimePreview(
         referenceEvaluationClient,
         network,
         referenceDemand,
-        urbanMultipliers,
+        urbanForPreview,
       );
       const demand = [{
         origin_zone_id: $stopsStore[0].id,
@@ -518,6 +541,15 @@
     busy = true;
     message = "Расчёт экономики…";
     try {
+      const bounds = mapRef?.getBounds();
+      const urbanForEconomics = bounds
+        ? await ensureUrbanMultipliers(network, {
+            south: bounds.getSouth(),
+            west: bounds.getWest(),
+            north: bounds.getNorth(),
+            east: bounds.getEast(),
+          })
+        : urbanMultipliers;
       const result = await calculateEconomics(
         network,
         [{
@@ -530,6 +562,7 @@
         "am",
         Math.max(0, farePerTransitTrip),
         Math.max(1, Math.min(366, Math.round(annualDays))),
+        urbanForEconomics,
       );
       economicsResult = result;
       message = "Экономика рассчитана";
