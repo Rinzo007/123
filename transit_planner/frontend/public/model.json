@@ -55,27 +55,5 @@
   },
   "votSPerEur": 360,
   "noCarEffectiveness": 0.78,
-  "capex": {
-    "rows": {
-      "bus": {
-        "mixed": 0.4,
-        "reserved": 2.5
-      },
-      "tram": {
-        "mixed": 9,
-        "reserved": 18,
-        "grade": 85
-      },
-      "metro": {
-        "reserved": 32,
-        "elevated": 62,
-        "grade": 120
-      },
-      "rail": {
-        "reserved": 22,
-        "elevated": 48,
-        "grade": 95
-      }
-    }
-  }
 }
+
