@@ -30,6 +30,7 @@ import {
 } from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
 import { runModelPreview } from "./workers/reference-runtime";
+import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
   changedSegments,
@@ -130,6 +131,8 @@ let showPopulation = false;
 
 document.documentElement.dataset.cpVariant = cpVariant;
 
+function setEditorMode(mode: MapEditorMode): void { editorMode = mode; mapNetworkEditor?.setMode(mode); setStatus(mode === "select" ? "Выбор объектов сети" : mode === "node" ? "Добавление узлов" : "Создание участка: выберите два узла"); }
+
 const shell = document.createElement("div");
 shell.className = "app-shell";
 shell.innerHTML = `
@@ -141,7 +144,7 @@ shell.innerHTML = `
     </div>
     <div class="actions" role="toolbar" aria-label="Действия">
       <button data-action="view-map" class="active-toggle">Карта</button>
-      <button data-action="view-network">Сеть</button>
+      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button>
       <button data-action="load-city">Загрузить Overture</button>
       <button data-action="build-road" disabled>Построить по дорогам</button>
       <button data-action="draw" class="primary" aria-pressed="false">Добавить остановки</button>
@@ -444,6 +447,8 @@ let previousNetwork: NetworkPayload | null = null;
 let network = buildNetworkPayload();
 previousNetwork = network;
 let selectedTrackId: string | null = null;
+let mapNetworkEditor: MapNetworkEditor | null = null;
+let editorMode: MapEditorMode = "select";
 
 function syncMapGeoJson(): void {
   if (!map || !mapReady) return;
@@ -1231,10 +1236,14 @@ function initializeMap(): void {
     map!.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
     map!.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     mapReady = true;
+    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); renderNetwork(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; renderNetwork(); } });
+    mapNetworkEditor.setMode(editorMode);
     syncMapGeoJson();
   });
-  map.on("click", addStop);
+  map.on("click", (event) => { if (drawMode) addStop(event); });
 }
+function wireEditorActions(): void { shell.querySelector('[data-action="editor-select"]')?.addEventListener("click", () => setEditorMode("select")); shell.querySelector('[data-action="editor-node"]')?.addEventListener("click", () => setEditorMode("node")); shell.querySelector('[data-action="editor-track"]')?.addEventListener("click", () => setEditorMode("track")); }
+
 async function bootstrap(): Promise<void> {
   const settings = loadUiSettings({
     showRoads: true, showRoadSpeed: false, showStops: true, showPlaces: true,
@@ -1287,4 +1296,5 @@ window.addEventListener("beforeunload", () => {
   map?.remove();
 });
 
+wireEditorActions();
 void bootstrap();
