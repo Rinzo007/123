@@ -219,7 +219,7 @@ const networkArea = shell.querySelector<HTMLElement>("#network-area")!;
 const mapArea = shell.querySelector<HTMLElement>("#map-area")!;
 const networkContent = shell.querySelector<HTMLElement>("#network-content")!;
 const propertyPanel = shell.querySelector<HTMLElement>("#property-panel")!;
-let editorSelection: { kind: "node" | "track" | null; id: string | null } = { kind: null, id: null };
+let editorSelection: { kind: "node" | "track" | "crossover" | "signal" | null; id: string | null } = { kind: null, id: null };
 const fileInput = shell.querySelector<HTMLInputElement>("#file-input")!;
 const routeNameInput = shell.querySelector<HTMLInputElement>("#route-name")!;
 const modeInput = shell.querySelector<HTMLSelectElement>("#mode")!;
@@ -275,11 +275,17 @@ function renderPropertyPanel(): void {
   const current = network;
   const node = kind === "node" ? current.track_nodes.find(n => n.id === id) : undefined;
   const track = kind === "track" ? current.track_sections.find(t => t.id === id) : undefined;
-  if (!node && !track) {
+  const crossover = kind === "crossover" ? current.crossovers.find(c => c.id === id) : undefined;
+  const signal = kind === "signal" ? current.signal_blocks.find(b => b.id === id) : undefined;
+  if (!node && !track && !crossover && !signal) {
     propertyPanel.innerHTML = '<div class="property-empty"><strong>Свойства</strong><p>Объект больше не существует.</p></div>';
     return;
   }
-  if (node) {
+  if (crossover) {
+    propertyPanel.innerHTML = `<div class="property-head"><div><span class="property-kind">СТРЕЛОЧНЫЙ ПЕРЕВОД</span><h3>${crossover.id}</h3></div><button data-property-action="delete" class="danger">Удалить</button></div><label>ID<input value="${crossover.id}" disabled></label><label>От<input value="${crossover.from_track_id}" disabled></label><label>На<input value="${crossover.to_track_id}" disabled></label><label>Позиция<input data-field="position" type="number" min="0" max="1" step="0.01" value="${crossover.position}"></label>`;
+  } else if (signal) {
+    propertyPanel.innerHTML = `<div class="property-head"><div><span class="property-kind">СИГНАЛЬНЫЙ БЛОК</span><h3>${signal.id}</h3></div><button data-property-action="delete" class="danger">Удалить</button></div><label>ID<input value="${signal.id}" disabled></label><label>Участок<input value="${signal.track_section_id}" disabled></label><label>Начало<input data-field="start_position" type="number" min="0" max="1" step="0.01" value="${signal.start_position}"></label><label>Конец<input data-field="end_position" type="number" min="0" max="1" step="0.01" value="${signal.end_position}"></label><label>Headway, с<input data-field="minimum_headway_seconds" type="number" min="1" step="1" value="${signal.minimum_headway_seconds}"></label>`;
+  } else if (node) {
     propertyPanel.innerHTML = `
       <div class="property-head"><div><span class="property-kind">УЗЕЛ</span><h3>${node.id}</h3></div><button data-property-action="delete" class="danger">Удалить</button></div>
       <label>ID<input value="${node.id}" disabled></label>
@@ -315,6 +321,12 @@ function updateSelectedProperty(field: string, raw: string): void {
     const item = next.track_nodes.find(n => n.id === editorSelection.id); if (!item) return;
     const value = field === "elevation_m" || field === "x" || field === "y" ? Number(raw) : raw;
     (item as any)[field] = value;
+  } else if (editorSelection.kind === "crossover") {
+    const item = next.crossovers.find(c => c.id === editorSelection.id); if (!item) return;
+    if (field === "position") item.position = clampNumber(Number(raw), 0, 1);
+  } else if (editorSelection.kind === "signal") {
+    const item = next.signal_blocks.find(b => b.id === editorSelection.id); if (!item) return;
+    if (field === "start_position" || field === "end_position" || field === "minimum_headway_seconds") (item as Record<string, unknown>)[field] = Number(raw);
   } else if (editorSelection.kind === "track") {
     const item = next.track_sections.find(t => t.id === editorSelection.id); if (!item) return;
     const numeric = ["capacity_departures_per_hour","speed_limit_kph","track_count","max_slope_percent","grade_crossing_count","curve_radius_m"].includes(field);
