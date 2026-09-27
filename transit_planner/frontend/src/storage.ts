@@ -22,6 +22,13 @@ const PROJECT_PREFIX = "takt-project-v4:";
 const DATASET_PREFIX = "takt-geo-v2:";
 const UI_KEY = "takt-ui-v1:";
 const WRITER_PREFIX = "takt_network_writer_v1_";
+const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
+const LEGACY_LOCAL_PREFIXES = [
+  "transit-planner-project:",
+  "takt-project-v3:",
+  "takt-project-v2:",
+  "takt-project:",
+];
 
 type PendingToken = string;
 
@@ -60,6 +67,20 @@ class AtomicWriter {
 }
 
 const writer = new AtomicWriter();
+
+const externalListeners = new Set<(key: string) => void>();
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (!event.key || !event.key.startsWith(WRITER_PREFIX)) return;
+    const key = event.key.slice(WRITER_PREFIX.length);
+    if (!event.newValue) for (const listener of externalListeners) listener(key);
+  });
+}
+
+export function onExternalWrite(listener: (key: string) => void): () => void {
+  externalListeners.add(listener);
+  return () => externalListeners.delete(listener);
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -138,6 +159,12 @@ async function compress(data: unknown): Promise<{ encoding: "identity" | "gzip";
   }
 }
 
+function assertSize(value: unknown): void {
+  if (value instanceof ArrayBuffer && value.byteLength > MAX_COMPRESSED_BYTES) {
+    throw new Error("The game file is too large");
+  }
+}
+
 async function decompress(record: StoredValue): Promise<unknown> {
   if (record.encoding !== "gzip") return record.value;
   if (!(record.value instanceof ArrayBuffer)) return record.value;
@@ -151,6 +178,7 @@ async function writeObject(key: string, data: unknown, expiresAt?: number): Prom
   const token = writer.begin(key);
   try {
     const compressed = await compress(data);
+    assertSize(compressed.value);
     await writeValue({
       key,
       value: compressed.value,
@@ -173,6 +201,27 @@ async function readObject<T>(key: string): Promise<T | null> {
     return null;
   }
   return await decompress(record) as T;
+}
+
+async function readLegacyLocalProject(id: string): Promise<{ data: unknown; savedAt: number } | null> {
+  if (typeof localStorage === "undefined") return null;
+  const keys = LEGACY_LOCAL_PREFIXES.map((prefix) => prefix + id);
+  keys.push("takt-project-current", "transit-planner-project-current", "transit-planner:current");
+  let newest: { data: unknown; savedAt: number } | null = null;
+  for (const key of keys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { savedAt?: number; updatedAt?: number; data?: unknown };
+      const data = parsed && "data" in parsed ? parsed.data : parsed;
+      const savedAt = Number(parsed?.savedAt ?? parsed?.updatedAt ?? 0);
+      if (!data || !Number.isFinite(savedAt)) continue;
+      if (!newest || savedAt > newest.savedAt) newest = { data, savedAt };
+    } catch {
+      // Ignore malformed legacy records.
+    }
+  }
+  return newest;
 }
 
 async function migrateLegacyProject(): Promise<unknown | null> {
@@ -211,14 +260,23 @@ export async function saveProject(id: string, data: unknown): Promise<void> {
 
 export async function loadProject(id: string): Promise<unknown | null> {
   const key = PROJECT_PREFIX + id;
-  const current = await readObject<unknown>(key);
-  if (current !== null) return current;
-  const legacy = await migrateLegacyProject();
-  if (legacy !== null) {
-    await saveProject(id, legacy);
-    return legacy;
+  const currentRecord = await readValue(key);
+  const current = currentRecord ? await decompress(currentRecord) : null;
+  const legacyIdb = await migrateLegacyProject();
+  const legacyLocal = await readLegacyLocalProject(id);
+
+  const candidates = [
+    currentRecord && current !== null ? { data: current, savedAt: currentRecord.updatedAt } : null,
+    legacyIdb ? { data: legacyIdb, savedAt: 0 } : null,
+    legacyLocal,
+  ].filter((item): item is { data: unknown; savedAt: number } => Boolean(item));
+
+  if (!candidates.length) return null;
+  const newest = candidates.reduce((best, item) => item.savedAt > best.savedAt ? item : best);
+  if (!currentRecord || newest.savedAt > currentRecord.updatedAt) {
+    await saveProject(id, newest.data);
   }
-  return null;
+  return newest.data;
 }
 
 export function saveUiSettings(settings: Record<string, unknown>): void {
@@ -245,6 +303,33 @@ export interface CachedDataset<T = unknown> {
   data: T;
   updatedAt: number;
   expiresAt: number;
+}
+
+export async function saveDatasetBatch(
+  records: ReadonlyArray<{ id: string; data: unknown; ttlMs?: number }>,
+): Promise<void> {
+  const now = Date.now();
+  const stored: StoredValue[] = [];
+  const tokens: Array<[string, PendingToken]> = [];
+  try {
+    for (const record of records) {
+      const key = DATASET_PREFIX + record.id;
+      const token = writer.begin(key);
+      tokens.push([key, token]);
+      const compressed = await compress(record.data);
+      assertSize(compressed.value);
+      stored.push({
+        key,
+        value: compressed.value,
+        updatedAt: now,
+        expiresAt: now + (record.ttlMs ?? 7 * 24 * 60 * 60 * 1000),
+        encoding: compressed.encoding,
+      });
+    }
+    await writeValues(stored);
+  } finally {
+    for (const [key, token] of tokens) writer.confirm(key, token);
+  }
 }
 
 export async function saveDataset<T>(
