@@ -5,3 +5,4 @@ export * from "./history";
 export * from "./jobs";
 export * from "./network-editor";
 export * from "./project";
+export * from "./topology";
