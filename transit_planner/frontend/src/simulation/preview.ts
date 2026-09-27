@@ -77,14 +77,14 @@ function routeLengthKm(network: NetworkPayload, route: NetworkPayload["routes"][
 export function planningPreview(network: NetworkPayload): PlanningPreview {
   let dailyDepartures = 0;
   let fleetEstimate = 0;
-  let routeLengthKm = 0;
+  let totalRouteLengthKm = 0;
   let capitalCost = 0;
 
   for (const service of network.services) {
     const route = network.routes.find((item) => item.id === service.route_id);
     if (!route) continue;
     const length = routeLengthKm(network, route);
-    routeLengthKm += length;
+    totalRouteLengthKm += length;
 
     const activeHeadways: number[] = [];
     for (const [periodId, headway] of Object.entries(service.headway_by_period)) {
@@ -113,7 +113,7 @@ export function planningPreview(network: NetworkPayload): PlanningPreview {
     stops: network.stops.length,
     dailyDepartures,
     fleetEstimate,
-    routeLengthKm,
+    routeLengthKm: totalRouteLengthKm,
     capitalCost,
     signature: networkSignature(network),
   };
@@ -142,7 +142,7 @@ export function segmentSignatures(network: NetworkPayload): Map<string, string> 
         to: to?.location,
         geometry: route.geometry,
       });
-      result.set(\`\${route.id}:\${index}\`, hashText(signature));
+      result.set(`${route.id}:${index}`, hashText(signature));
     }
   }
   return result;

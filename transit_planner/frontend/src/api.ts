@@ -1,4 +1,4 @@
-import type { FeatureCollection } from "./geojson";
+import type { FeatureCollection, LineString, Position } from "./geojson";
 import type { NetworkPayload, ValidationResult } from "./types";
 
 export async function validateNetwork(
@@ -87,7 +87,7 @@ export function loadOvertureConnectors(
 }
 
 export interface OvertureNetworkResponse {
-  roads: FeatureCollection;
+  roads: FeatureCollection<LineString>;
   connectors: FeatureCollection;
   stops: FeatureCollection;
   places: FeatureCollection;
@@ -121,7 +121,7 @@ export interface OvertureRouteResponse {
   type: "Feature";
   geometry: {
     type: "LineString";
-    coordinates: number[][];
+    coordinates: Position[];
   };
   properties: {
     edge_ids: string[];

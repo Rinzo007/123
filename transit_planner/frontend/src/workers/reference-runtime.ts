@@ -1,4 +1,5 @@
 import type { NetworkPayload } from "../types";
+import type { ReferenceDemandResponse } from "../api";
 
 export type EvaluationResult = {
   result: unknown;
@@ -46,19 +47,27 @@ function fingerprint(value: unknown): string {
   return (hash >>> 0).toString(16);
 }
 
-let runtimeModelPromise: Promise<Record<string, unknown> | null> | null = null;
+let runtimeModelPromise: Promise<Record<string, unknown>> | null = null;
 
-async function loadRuntimeModel(): Promise<Record<string, unknown> | null> {
+function assertModelShape(value: unknown, reason: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Некорректная reference модель: ${reason}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+async function loadRuntimeModel(): Promise<Record<string, unknown>> {
   if (!runtimeModelPromise) {
-    runtimeModelPromise = fetch("/data/model.json", { cache: "force-cache" })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const value = await response.json();
-        return value && typeof value === "object"
-          ? value as Record<string, unknown>
-          : null;
-      })
-      .catch(() => null);
+    runtimeModelPromise = (async () => {
+      const response = await fetch("/data/model.json", { cache: "force-cache" });
+      if (!response.ok) {
+        throw new Error(`Не удалось загрузить reference модель: HTTP ${response.status}`);
+      }
+      return assertModelShape(await response.json(), "ожидался JSON-объект");
+    })().catch((error: unknown) => {
+      runtimeModelPromise = null;
+      throw error;
+    });
   }
   return runtimeModelPromise;
 }
@@ -190,15 +199,6 @@ export async function solveMatrix(input: MatrixInput): Promise<MatrixOutput> {
   return { times, previous };
 }
 
-export function closeEvaluation(client: EvaluationClient | null): void {
-  client?.close();
-}
-
-export function networkForRuntime(network: NetworkPayload): NetworkPayload {
-  return network;
-}
-
-
 export type ModelLine = {
   id: string;
   mode: "bus" | "tram" | "metro" | "rail";
@@ -233,21 +233,6 @@ function fromLocalMeters(x: number, y: number, lon0: number, lat0: number): [num
   ];
 }
 
-export function toDemandInput(network: NetworkPayload, trips = 1000): DemandInput {
-  const lon0 = network.origin_lon ?? 39.2;
-  const lat0 = network.origin_lat ?? 51.67;
-  const pts: Array<[number, number, number, number]> = network.stops.map((stop) => {
-    const [lon, lat] = fromLocalMeters(stop.location.x, stop.location.y, lon0, lat0);
-    return [lon, lat, 1, 1];
-  });
-  const last = Math.max(0, pts.length - 1);
-  return {
-    pts,
-    od: pts.length >= 2 ? [[0, last, Math.max(0, trips), 0]] : [],
-    model: {},
-  };
-}
-
 export function toModelLines(network: NetworkPayload): ModelLine[] {
   const byId = new Map(network.stops.map((stop) => [stop.id, stop]));
   return network.routes.map((route) => {
@@ -258,8 +243,8 @@ export function toModelLines(network: NetworkPayload): ModelLine[] {
       .map((stop) => fromLocalMeters(
         stop.location.x,
         stop.location.y,
-        network.origin_lon ?? 39.2,
-        network.origin_lat ?? 51.67,
+        network.origin_lon,
+        network.origin_lat,
       ));
     return {
       id: route.id,
@@ -294,33 +279,37 @@ export function toGeometries(
 }
 
 export type CityDemandInput = DemandInput & {
-  baselineT?: number[][];
+  baselineT?: number[][] | null;
 };
 
 export async function runRuntimePreview(
   client: EvaluationClient,
   network: NetworkPayload,
-  demandInput?: CityDemandInput,
+  demandInput: CityDemandInput,
 ): Promise<EvaluationResult> {
-  const demand = demandInput ?? toDemandInput(network);
+  if (!Array.isArray(demandInput.pts) || !Array.isArray(demandInput.od) || demandInput.od.length === 0) {
+    throw new Error("Reference demand отсутствует: OD-матрица не получена от authoritative источника");
+  }
   const runtimeModel = await loadRuntimeModel();
-  const mergedDemand = {
-    ...demand,
-    ...(runtimeModel || demand.model
-      ? { model: { ...(runtimeModel ?? {}), ...(demand.model ?? {}) } }
-      : {}),
+  const mergedDemand: DemandInput = {
+    pts: demandInput.pts,
+    od: demandInput.od,
+    ...(demandInput.layers ? { layers: demandInput.layers } : {}),
+    model: { ...runtimeModel, ...(demandInput.model ?? {}) },
   };
-  const baselineT = demandInput?.baselineT;
   const epoch = Number.parseInt(
     fingerprint({ network, demand: mergedDemand }),
     16,
-  ) || 0;
+  );
+  if (!Number.isFinite(epoch) || epoch <= 0) {
+    throw new Error("Не удалось вычислить версию epoch reference-модели");
+  }
   client.init(
     epoch,
     mergedDemand,
-    baselineT,
-    demand.layers ?? [],
-    network.origin_lat ?? 51.67,
+    demandInput.baselineT ?? undefined,
+    demandInput.layers ?? [],
+    network.origin_lat,
   );
   return client.run(toModelLines(network), toGeometries(network), false, 0);
 }

@@ -1,3 +1,7 @@
+export {};
+
+export {};
+
 type SolveMessage = {
   type: "solve";
   job: number;

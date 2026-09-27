@@ -38,6 +38,7 @@ export interface TrackSectionPayload {
   end_node_id?: string | null;
   start_elevation_m?: number;
   end_elevation_m?: number;
+  elevation_delta_m?: number;
   max_slope_percent?: number | null;
   slope_percent?: number;
   curve_radius_m?: number | null;
@@ -65,8 +66,8 @@ export interface SignalBlockPayload {
 }
 
 export interface NetworkPayload {
-  origin_lon?: number;
-  origin_lat?: number;
+  origin_lon: number;
+  origin_lat: number;
   stops: Array<{
     id: string;
     name: string;

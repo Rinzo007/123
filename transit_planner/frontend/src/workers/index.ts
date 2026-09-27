@@ -7,7 +7,9 @@ import {
   solveDemand,
   solveMatrix,
   type DemandBatch,
+  type DemandOutput,
   type MatrixInput,
+  type MatrixOutput,
 } from "./reference-runtime";
 
 export type EvaluationSummary = {
@@ -19,16 +21,25 @@ export type EvaluationSummary = {
 export type { PlanningPreview, ScenarioProbe, RaptorJourney };
 export { planningPreview, probe, keepNetwork, routeWithRaptor };
 
-export type ClientPreviewResult = {
-  evaluation: EvaluationSummary;
-  operations: {
-    dailyDepartures: number;
-    fleetEstimate: number;
-  };
+export type NetworkCounts = {
+  lines: number;
+  stops: number;
+  dailyDepartures: number;
+  fleetEstimate: number;
 };
 
-export type DemandBatchResult = Awaited<ReturnType<typeof solveDemand>>;
-export type MatrixResult = Awaited<ReturnType<typeof solveMatrix>>;
+export function networkCounts(network: NetworkPayload): NetworkCounts {
+  const preview: PlanningPreview = planningPreview(network);
+  return {
+    lines: preview.lines,
+    stops: preview.stops,
+    dailyDepartures: preview.dailyDepartures,
+    fleetEstimate: preview.fleetEstimate,
+  };
+}
+
+export type DemandBatchResult = DemandOutput;
+export type MatrixResult = MatrixOutput;
 
 export function solveDemandStrategy(
   batch: DemandBatch,
@@ -38,7 +49,7 @@ export function solveDemandStrategy(
 
 export function solveRoadMatrix(
   input: MatrixInput,
-): Promise<ReferenceMatrixResult> {
+): Promise<MatrixResult> {
   return solveMatrix(input);
 }
 
@@ -48,19 +59,4 @@ export function createEvaluationClient(workerCount?: number): EvaluationClient {
 
 export function disposeComputationWorkers(): void {
   // EvaluationClient owns the actual evaluation worker pool.
-}
-
-export function runClientPreview(network: NetworkPayload): Promise<ClientPreviewResult> {
-  const preview: PlanningPreview = planningPreview(network);
-  return Promise.resolve({
-    evaluation: {
-      lines: preview.lines,
-      stops: preview.stops,
-      dailyDepartures: preview.dailyDepartures,
-    },
-    operations: {
-      dailyDepartures: preview.dailyDepartures,
-      fleetEstimate: preview.fleetEstimate,
-    },
-  });
 }

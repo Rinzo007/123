@@ -17,7 +17,7 @@ import {
   type OvertureRouteResponse,
   type ScenarioPayload,
 } from "./api";
-import type { NetworkPayload, StopDraft, TransitMode } from "./types";
+import type { NetworkPayload, StopDraft, TransitMode, TrackType } from "./types";
 import {
   loadBinaryDataset,
   loadDataset,
@@ -28,8 +28,8 @@ import {
   saveProject,
   saveUiSettings,
 } from "./storage";
-import { createEvaluationClient, disposeComputationWorkers, runClientPreview } from "./workers";
-import { runModelPreview } from "./workers/reference-runtime";
+import { createEvaluationClient, disposeComputationWorkers, networkCounts } from "./workers";
+import { runRuntimePreview } from "./workers/reference-runtime";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
 import { RouteEditor } from "./planning/route-editor";
 import { estimateFleetRequirement } from "./planning/fleet";
@@ -45,7 +45,7 @@ import {
   type PlanningPreview,
 } from "./simulation/preview";
 
-const DEFAULT_CENTER: [number, number] = [39.2, 51.67];
+const INITIAL_MAP_CENTER: [number, number] = [39.2, 51.67];
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const MODE_LABELS: Record<TransitMode, string> = {
   bus: "Автобус",
@@ -306,9 +306,9 @@ function renderPropertyPanel(): void {
       <label>Радиус кривой, м<input data-field="curve_radius_m" type="number" min="0" step="1" value="${track.curve_radius_m ?? ""}"></label>
       <label>Переездов<input data-field="grade_crossing_count" type="number" min="0" step="1" value="${track.grade_crossing_count}"></label>
       <label>Группа параллельности<input data-field="parallel_group" value="${track.parallel_group ?? ""}"></label>
-      <div class="property-grid"><div><span>Длина</span><b>${track.length_km.toFixed(3)} км</b></div><div><span>Уклон</span><b>${track.slope_percent.toFixed(2)}%</b></div><div><span>Перепад</span><b>${track.elevation_delta_m.toFixed(1)} м</b></div><div><span>Пропускная способность</span><b>${track.capacity_departures_per_hour} отп./ч</b></div></div>`;
+      <div class="property-grid"><div><span>Длина</span><b>${track.length_km.toFixed(3)} км</b></div><div><span>Уклон</span><b>${(track.slope_percent ?? 0).toFixed(2)}%</b></div><div><span>Перепад</span><b>${((track.end_elevation_m ?? 0) - (track.start_elevation_m ?? 0)).toFixed(1)} м</b></div><div><span>Пропускная способность</span><b>${track.capacity_departures_per_hour} отп./ч</b></div></div>`;
     const type = propertyPanel.querySelector<HTMLSelectElement>('[data-field="track_type"]'); if (type) type.value = track.track_type;
-    const direction = propertyPanel.querySelector<HTMLSelectElement>('[data-field="direction"]'); if (direction) direction.value = track.direction;
+    const direction = propertyPanel.querySelector<HTMLSelectElement>('[data-field="direction"]'); if (direction) direction.value = track.direction ?? "both";
   }
   propertyPanel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-field]").forEach(input => {
     input.addEventListener("change", () => updateSelectedProperty(input.dataset.field!, input.value));
@@ -326,13 +326,13 @@ function updateSelectedProperty(field: string, raw: string): void {
     if (field === "position") item.position = clampNumber(Number(raw), 0, 1);
   } else if (editorSelection.kind === "signal") {
     const item = next.signal_blocks.find(b => b.id === editorSelection.id); if (!item) return;
-    if (field === "start_position" || field === "end_position" || field === "minimum_headway_seconds") (item as Record<string, unknown>)[field] = Number(raw);
+    if (field === "start_position" || field === "end_position" || field === "minimum_headway_seconds") (item as unknown as Record<string, number>)[field] = Number(raw);
   } else if (editorSelection.kind === "track") {
     const item = next.track_sections.find(t => t.id === editorSelection.id); if (!item) return;
     const numeric = ["capacity_departures_per_hour","speed_limit_kph","track_count","max_slope_percent","grade_crossing_count","curve_radius_m"].includes(field);
     (item as any)[field] = numeric ? (raw === "" && field === "curve_radius_m" ? null : Number(raw)) : raw;
     const a = next.track_nodes.find(n => n.id === item.start_node_id), b = next.track_nodes.find(n => n.id === item.end_node_id);
-    if (a && b) { const d = Math.max(.001, Math.hypot(b.x-a.x,b.y-a.y)); item.length_km=d/1000; item.elevation_delta_m=b.elevation_m-a.elevation_m; item.slope_percent=item.elevation_delta_m/d*100; item.start_elevation_m=a.elevation_m; item.end_elevation_m=b.elevation_m; }
+    if (a && b) { const d = Math.max(.001, Math.hypot(b.x-a.x,b.y-a.y)); const delta = b.elevation_m-a.elevation_m; item.length_km=d/1000; item.elevation_delta_m=delta; item.slope_percent=delta/d*100; item.start_elevation_m=a.elevation_m; item.end_elevation_m=b.elevation_m; }
   }
   if (mapNetworkEditor) mapNetworkEditor.applyNetwork(next, "Изменение свойств"); else { network = next; markDirty(); }
   renderPropertyPanel(); render();
@@ -408,7 +408,7 @@ function bounds(): Bounds | null {
   return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() };
 }
 function buildNetworkPayload(): NetworkPayload {
-  const origin = stops[0] ?? { lon: DEFAULT_CENTER[0], lat: DEFAULT_CENTER[1] };
+  const origin = stops[0] ?? { lon: INITIAL_MAP_CENTER[0], lat: INITIAL_MAP_CENTER[1] };
   const metricStops = stops.map((stop) => ({
     id: stop.id,
     name: stop.name,
@@ -416,8 +416,8 @@ function buildNetworkPayload(): NetworkPayload {
     is_station: false,
   }));
 
-  const coordinates = roadRoute?.features[0]?.geometry.coordinates ?? [];
-  const geometry = coordinates.length >= 2
+  const coordinates = roadRoute?.features[0]?.geometry.coordinates;
+  const geometry = coordinates && coordinates.length >= 2
     ? { points: coordinates.map(([lon, lat]) => toLocalMeters(lon, lat, origin.lon, origin.lat)) }
     : metricStops.length >= 2 ? { points: metricStops.map((stop) => stop.location) } : null;
 
@@ -446,7 +446,7 @@ function buildNetworkPayload(): NetworkPayload {
     return {
       id: `track-${index + 1}`,
       length_km: Math.max(0.001, distanceKm),
-      track_type: mode === "metro" ? "tunnel" : "surface",
+      track_type: (mode === "metro" ? "tunnel" : "surface") as TrackType,
       capacity_departures_per_hour: mode === "bus" ? 60 : 30,
       shared_group: null,
       station_ids: [from.id, to.id],
@@ -563,7 +563,7 @@ let editorMode: MapEditorMode = "select";
 function syncMapGeoJson(): void {
   if (!map || !mapReady) return;
   const source = (id: string) => map!.getSource(id) as GeoJSONSource | undefined;
-  source("draft-route")?.setData(roadRoute ?? routeGeoJSON());
+  source("draft-route")?.setData(roadRoute ?? emptyRouteGeoJSON());
   source("draft-stops")?.setData(stopsGeoJSON());
   if (cityRoads) source("city-roads")?.setData(cityRoads);
   if (cityConnectors) source("city-connectors")?.setData(cityConnectors);
@@ -603,15 +603,8 @@ function stopsGeoJSON(): FeatureCollection<GeoJSONPoint, { id: string; name: str
     })),
   };
 }
-function routeGeoJSON(): FeatureCollection<LineString, object> {
-  return {
-    type: "FeatureCollection",
-    features: stops.length >= 2 ? [{
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: stops.map((stop) => [stop.lon, stop.lat]) },
-      properties: {},
-    }] : [],
-  };
+function emptyRouteGeoJSON(): FeatureCollection<LineString, object> {
+  return { type: "FeatureCollection", features: [] };
 }
 function assignmentSectionGeoJSON(): FeatureCollection<LineString, Record<string, unknown>> {
   if (!assignmentResult) return { type: "FeatureCollection", features: [] };
@@ -789,15 +782,14 @@ async function runPreview(): Promise<void> {
     const changed = changedSegments(previousSegmentState, network);
     previousSegmentSignatures = segmentSignatures(network);
     lastPlanningPreview = planningPreview(network);
-    const clientPreview = await runClientPreview(network);
-    evaluationSummary = clientPreview.evaluation;
+    evaluationSummary = networkCounts(network);
     if (!evaluationClient) evaluationClient = createEvaluationClient();
     const b = bounds();
-    const demandInput = b ? await loadReferenceDemand(
-      b.south, b.west, b.north, b.east, network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
-    ) : undefined;
-    const urban = b && demandInput ? await ensureUrbanMultipliers(network, b) : null;
-    await runModelPreview(evaluationClient, network, demandInput, urban);
+    if (!b) throw new Error("Карта ещё не готова");
+    const demandInput = await loadReferenceDemand(
+      b.south, b.west, b.north, b.east, network.origin_lon, network.origin_lat,
+    );
+    await runRuntimePreview(evaluationClient, network, demandInput);
     const demand = [{
       origin_zone_id: stops[0].id,
       destination_zone_id: stops[stops.length - 1].id,
@@ -827,7 +819,7 @@ async function runCityAssignment(): Promise<void> {
     if (!b) throw new Error("Карта ещё не готова");
     const result = await calculateCityAssignment(
       network, b.south, b.west, b.north, b.east,
-      network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
+      network.origin_lon, network.origin_lat,
       "am", farePerTransitTrip, annualDays,
     );
     assignmentResult = result.assignment;
@@ -875,8 +867,8 @@ async function runEconomics(): Promise<void> {
 }
 
 function scenarioPayload(id: string, name: string, scenarioNetwork: NetworkPayload, origin: StopDraft, destination: StopDraft, trips: number, fare: number, days: number): ScenarioPayload {
-  const lon0 = scenarioNetwork.origin_lon ?? origin.lon;
-  const lat0 = scenarioNetwork.origin_lat ?? origin.lat;
+  const lon0 = scenarioNetwork.origin_lon;
+  const lat0 = scenarioNetwork.origin_lat;
   const zone = (stop: StopDraft, zoneId: string) => {
     const point = toLocalMeters(stop.lon, stop.lat, lon0, lat0);
     return { id: zoneId, centroid_x: point.x, centroid_y: point.y };
@@ -1351,7 +1343,7 @@ fileInput.addEventListener("change", () => {
 });
 
 function initializeMap(): void {
-  map = new MapLibreMap({ container: mapElement, style: MAP_STYLE, center: DEFAULT_CENTER, zoom: 11 });
+  map = new MapLibreMap({ container: mapElement, style: MAP_STYLE, center: INITIAL_MAP_CENTER, zoom: 11 });
   map.addControl(new NavigationControl(), "top-right");
   map.on("load", () => {
     const blank = { type: "FeatureCollection", features: [] } as FeatureCollection;
@@ -1371,7 +1363,7 @@ function initializeMap(): void {
     map!.addLayer({ id: "analysis-section-loads", type: "line", source: "analysis-sections", paint: { "line-width": 6, "line-opacity": 0.82, "line-color": ["interpolate", ["linear"], ["get", "load_ratio"], 0, "#22c55e", 0.7, "#eab308", 1, "#f97316", 1.5, "#dc2626"] } });
     map!.addSource("analysis-stops", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map!.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-stops", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
-    map!.addSource("draft-route", { type: "geojson", data: routeGeoJSON() });
+    map!.addSource("draft-route", { type: "geojson", data: emptyRouteGeoJSON() });
     map!.addLayer({ id: "draft-route-line", type: "line", source: "draft-route", paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2563eb" } });
     map!.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
     map!.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
@@ -1429,7 +1421,7 @@ async function bootstrap(): Promise<void> {
 }
 async function refreshEvaluation(): Promise<void> {
   try {
-    evaluationSummary = await runClientPreview(network).then((result) => result.evaluation);
+    evaluationSummary = networkCounts(network);
     render();
   } catch {
     // Local editing remains available when a worker fails.

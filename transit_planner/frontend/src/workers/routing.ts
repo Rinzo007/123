@@ -70,7 +70,10 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
       .filter((value): value is number => value !== undefined);
     if (stops.length < 2) continue;
 
-    const segmentTimes = route.segment_pairs().map((_, i) => segmentTime(network, route, i));
+    const segmentTimes: number[] = [];
+    for (let i = 0; i < route.stop_ids.length - 1; i += 1) {
+      segmentTimes.push(segmentTime(network, route, i));
+    }
     const patternStops = route.closed ? [...stops, stops[0]] : stops;
     const patternTimes = segmentTimes;
     routePatterns.push({
@@ -80,7 +83,7 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
         network.periods.find((item) => item.id === periodId)?.start_minute ?? 0,
         network.periods.find((item) => item.id === periodId)?.end_minute ?? 1440,
         headway,
-        service.departure_offset_by_period[periodId] ?? 0,
+        service.departure_offset_by_period?.[periodId] ?? 0,
       ),
       segmentTimes: patternTimes,
     });
@@ -97,7 +100,7 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
           network.periods.find((item) => item.id === periodId)?.start_minute ?? 0,
           network.periods.find((item) => item.id === periodId)?.end_minute ?? 1440,
           headway,
-          service.departure_offset_by_period[periodId] ?? 0,
+          service.departure_offset_by_period?.[periodId] ?? 0,
         ),
         segmentTimes: reverseTimes,
       });
