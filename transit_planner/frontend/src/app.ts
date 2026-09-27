@@ -135,7 +135,7 @@ let showPopulation = false;
 
 document.documentElement.dataset.cpVariant = cpVariant;
 
-function setEditorMode(mode: MapEditorMode): void { editorMode = mode; mapNetworkEditor?.setMode(mode); setStatus(mode === "select" ? "Выбор объектов сети" : mode === "node" ? "Добавление узлов" : "Создание участка: выберите два узла"); }
+function setEditorMode(mode: MapEditorMode): void { editorMode = mode; mapNetworkEditor?.setMode(mode); setStatus(mode === "select" ? "Выбор объектов сети" : mode === "node" ? "Добавление узлов" : mode === "track" ? "Создание участка: выберите два узла" : mode === "crossover" ? "Стрелочный перевод: выберите два участка" : "Сигнальный блок: выберите участок"); }
 
 const shell = document.createElement("div");
 shell.className = "app-shell";
@@ -148,7 +148,7 @@ shell.innerHTML = `
     </div>
     <div class="actions" role="toolbar" aria-label="Действия">
       <button data-action="view-map" class="active-toggle">Карта</button>
-      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button><button data-action="split-track">Разделить</button><button data-action="merge-track">Объединить</button><button data-action="undo" title="Ctrl+Z">↶</button><button data-action="redo" title="Ctrl+Shift+Z">↷</button>
+      <button data-action="view-network">Сеть</button><button data-action="editor-select">Выбор</button><button data-action="editor-node">Узел</button><button data-action="editor-track">Участок</button><button data-action="editor-crossover">Стрелка</button><button data-action="editor-signal">Сигнал</button><button data-action="split-track">Разделить</button><button data-action="merge-track">Объединить</button><button data-action="undo" title="Ctrl+Z">↶</button><button data-action="redo" title="Ctrl+Shift+Z">↷</button>
       <button data-action="load-city">Загрузить Overture</button>
       <button data-action="build-road" disabled>Построить по дорогам</button>
       <button data-action="draw" class="primary" aria-pressed="false">Добавить остановки</button>
@@ -1374,6 +1374,8 @@ function wireEditorActions(): void {
   shell.querySelector('[data-action="editor-select"]')?.addEventListener("click", () => setEditorMode("select"));
   shell.querySelector('[data-action="editor-node"]')?.addEventListener("click", () => setEditorMode("node"));
   shell.querySelector('[data-action="editor-track"]')?.addEventListener("click", () => setEditorMode("track"));
+  shell.querySelector('[data-action="editor-crossover"]')?.addEventListener("click", () => setEditorMode("crossover"));
+  shell.querySelector('[data-action="editor-signal"]')?.addEventListener("click", () => setEditorMode("signal"));
   shell.querySelector('[data-action="undo"]')?.addEventListener("click", () => { mapNetworkEditor?.undo(); editorSelection = { kind: null, id: null }; renderPropertyPanel(); render(); });
   shell.querySelector('[data-action="redo"]')?.addEventListener("click", () => { mapNetworkEditor?.redo(); editorSelection = { kind: null, id: null }; renderPropertyPanel(); render(); });
 }
