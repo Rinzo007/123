@@ -591,7 +591,11 @@ async function runPreview(): Promise<void> {
   busy = true;
   setStatus("Расчёт проверочного пассажиропотока…");
   try {
-    network = buildNetworkPayload();
+    const previousSegmentState = previousSegmentSignatures;
+    network = keepNetwork(network, buildNetworkPayload());
+    const changed = changedSegments(previousSegmentState, network);
+    previousSegmentSignatures = segmentSignatures(network);
+    lastPlanningPreview = planningPreview(network);
     const clientPreview = await runClientPreview(network);
     evaluationSummary = clientPreview.evaluation;
     if (!referenceEvaluationClient) referenceEvaluationClient = createEvaluationClient();
@@ -609,7 +613,7 @@ async function runPreview(): Promise<void> {
     }];
     assignmentResult = await calculateAssignment(network, demand, previewZones(), "am");
     demandStreets = await loadDemandStreets(demand, previewZones(), stops[0].lon, stops[0].lat);
-    setStatus(`Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}%`);
+    setStatus(`Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}% · изменено сегментов ${changed.length}`);
     renderResults();
     syncMapGeoJson();
   } catch (error) {
