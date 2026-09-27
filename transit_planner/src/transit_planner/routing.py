@@ -64,6 +64,7 @@ class _RaptorPattern:
     stops: tuple[str, ...]
     departures: tuple[float, ...]
     segment_times: tuple[float, ...]
+    direction: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,11 +296,6 @@ class TransitRouter:
                         continue
 
                     next_arrival[stop_id] = running
-                    direction = (
-                        1
-                        if pattern.stops.index(board_stop) <= pattern.stops.index(stop_id)
-                        else -1
-                    )
                     parent[stop_id] = _RaptorParent(
                         kind="transit",
                         previous_stop=board_stop,
@@ -308,7 +304,7 @@ class TransitRouter:
                         board_time=board_time,
                         ready_time=ready_time,
                         arrival_time=running,
-                        direction=direction,
+                        direction=pattern.direction,
                         board_local=board_index,
                         alight_local=local_index,
                         pattern_size=len(pattern.stops),
@@ -415,6 +411,7 @@ class TransitRouter:
                     base_stops,
                     departures,
                     forward_times,
+                    1,
                 )
             )
 
@@ -430,6 +427,7 @@ class TransitRouter:
                         reverse_stops,
                         departures,
                         tuple(reversed(forward_times)),
+                        -1,
                     )
                 )
 
