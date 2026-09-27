@@ -220,7 +220,7 @@ class OvertureUrbanProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                ST_AsGeoJSON(geometry) AS geojson,
                 subtype,
                 class,
                 is_underground,
