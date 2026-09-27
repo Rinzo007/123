@@ -249,6 +249,46 @@ class Network:
         for route in self.routes.values():
             if len(route.stop_ids) != len(set(route.stop_ids)):
                 errors.append(f"Route {route.id} contains duplicate stops")
+            for section_id in route.track_section_ids:
+                if section_id not in self.track_sections:
+                    errors.append(f"Route {route.id} references unknown track {section_id}")
+        for section in self.track_sections.values():
+            if section.start_node_id and section.start_node_id not in self.track_nodes:
+                errors.append(f"Track {section.id} references unknown start node {section.start_node_id}")
+            if section.end_node_id and section.end_node_id not in self.track_nodes:
+                errors.append(f"Track {section.id} references unknown end node {section.end_node_id}")
+            if section.max_slope_percent is not None and section.slope_percent > section.max_slope_percent + 1e-9:
+                errors.append(
+                    f"Track {section.id} slope {section.slope_percent:.2f}% exceeds "
+                    f"{section.max_slope_percent:.2f}%"
+                )
+        for platform in self.platforms.values():
+            if platform.station_id not in self.stations:
+                errors.append(f"Platform {platform.id} references unknown station {platform.station_id}")
+            for track_id in platform.track_ids:
+                if track_id not in self.track_sections:
+                    errors.append(f"Platform {platform.id} references unknown track {track_id}")
+        for block in self.signal_blocks.values():
+            if block.track_section_id not in self.track_sections:
+                errors.append(f"Signal block {block.id} references unknown track {block.track_section_id}")
+        for service in self.services.values():
+            if service.route_id not in self.routes:
+                errors.append(f"Service {service.id} references unknown route {service.route_id}")
+            if service.vehicle_type_id not in self.vehicle_types:
+                errors.append(f"Service {service.id} references unknown vehicle type {service.vehicle_type_id}")
+            for period_id, headway in service.headway_by_period.items():
+                if headway <= 0:
+                    errors.append(f"Service {service.id} has invalid headway in {period_id}")
+                route = self.routes.get(service.route_id)
+                if route and route.track_section_ids:
+                    tph = 60.0 / headway
+                    for section_id in route.track_section_ids:
+                        section = self.track_sections[section_id]
+                        if tph > section.capacity_departures_per_hour + 1e-9:
+                            errors.append(
+                                f"Service {service.id} exceeds track {section_id} capacity "
+                                f"({tph:.2f} > {section.capacity_departures_per_hour:.2f} tph)"
+                            )
         return errors
 
     def route_segment_geometry_points(
