@@ -5,7 +5,7 @@ import { networkToGeoJSON } from "./network-editor";
 import { lonLatToLocalMeters, normalizeTrackSection } from "./core/geometry";
 import { CommandHistory, type Command } from "./core/history";
 
-export type MapEditorMode = "select" | "node" | "track";
+export type MapEditorMode = "select" | "node" | "track" | "crossover" | "signal";
 
 export interface MapNetworkEditorOptions {
   getNetwork: () => NetworkPayload;
@@ -21,6 +21,7 @@ export class MapNetworkEditor {
   private selectedNodeId: string | null = null;
   private selectedTrackId: string | null = null;
   private mergeTrackId: string | null = null;
+  private pendingTrackId: string | null = null;
   private draggingNodeId: string | null = null;
   private dragStartNetwork: NetworkPayload | null = null;
   private readonly history = new CommandHistory<NetworkPayload>();
@@ -131,10 +132,15 @@ export class MapNetworkEditor {
   refresh(): void {
     const source = this.map.getSource("network-editor") as GeoJSONSource | undefined;
     if (source) source.setData(networkToGeoJSON(this.options.getNetwork()) as never);
+    this.refreshInfrastructureLayers();
     this.refreshSelection();
   }
 
   private ensureLayers(): void {
+    if (!this.map.getSource("network-infrastructure")) this.map.addSource("network-infrastructure",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    if (!this.map.getSource("network-signal-blocks")) this.map.addSource("network-signal-blocks",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    if (!this.map.getLayer("network-crossovers")) this.map.addLayer({id:"network-crossovers",type:"circle",source:"network-infrastructure",paint:{"circle-radius":7,"circle-color":"#dc2626","circle-stroke-width":2,"circle-stroke-color":"#fff"}});
+    if (!this.map.getLayer("network-signal-blocks")) this.map.addLayer({id:"network-signal-blocks",type:"circle",source:"network-signal-blocks",paint:{"circle-radius":6,"circle-color":"#7c3aed","circle-stroke-width":2,"circle-stroke-color":"#fff"}});
     if (!this.map.getSource("network-editor")) {
       this.map.addSource("network-editor", { type: "geojson", data: networkToGeoJSON(this.options.getNetwork()) as never });
     }
@@ -159,6 +165,25 @@ export class MapNetworkEditor {
     return lonLatToLocalMeters(e.lngLat.lng, e.lngLat.lat, o.lon, o.lat);
   }
 
+  private createCrossover(firstId: string, secondId: string): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (!next.track_sections.some(t => t.id === firstId) || !next.track_sections.some(t => t.id === secondId)) throw new Error("Участки стрелки не найдены");
+    if (firstId === secondId) throw new Error("Стрелка требует два разных участка");
+    const id = "crossover-" + crypto.randomUUID().slice(0, 8);
+    next.crossovers.push({ id, from_track_id:firstId, to_track_id:secondId, position:0.5, automatic:false });
+    this.commit(next, "Добавить стрелочный перевод");
+  }
+
+  private createSignalBlock(trackId: string, position = 0.5): void {
+    const next = structuredClone(this.options.getNetwork());
+    if (!next.track_sections.some(t => t.id === trackId)) throw new Error("Участок сигнального блока не найден");
+    const id = "block-" + crypto.randomUUID().slice(0, 8);
+    const p = Math.max(0, Math.min(1, position));
+    const half = 0.2;
+    next.signal_blocks.push({ id, track_section_id:trackId, start_position:Math.max(0,p-half), end_position:Math.min(1,p+half), direction:"both", minimum_headway_seconds:120 });
+    this.commit(next, "Добавить сигнальный блок");
+  }
+
   private onClick = (e: MapMouseEvent): void => {
     if (this.mode === "node") {
       const p = this.coordinateToLocal(e);
@@ -178,6 +203,19 @@ export class MapNetworkEditor {
     }
     const id = String(hit.properties?.id ?? "");
     const kind = String(hit.properties?.kind ?? "");
+    if (this.mode === "crossover") {
+      if (kind !== "track") return;
+      if (!this.pendingTrackId) { this.pendingTrackId = id; this.setSelection("track", id); return; }
+      const first = this.pendingTrackId; this.pendingTrackId = null;
+      if (first !== id) this.createCrossover(first, id);
+      return;
+    }
+    if (this.mode === "signal") {
+      if (kind !== "track") return;
+      this.createSignalBlock(id, 0.5);
+      this.setSelection("track", id);
+      return;
+    }
     if (this.mode === "track") {
       if (kind !== "node") return;
       if (!this.pendingNodeId) {
