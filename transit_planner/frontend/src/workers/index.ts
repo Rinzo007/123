@@ -1,6 +1,6 @@
 import type { NetworkPayload } from "../types";
 import { planningPreview, probe, keepNetwork, type PlanningPreview, type ScenarioProbe } from "../simulation/preview";
-import { packGraph, routeGraph, type DirectedEdgeInput, type PackedGraph, type RouteSolution } from "./routing";
+
 import {
   ReferenceEvaluationClient,
   solveDemand,
@@ -15,9 +15,9 @@ export type EvaluationSummary = {
   dailyDepartures: number;
 };
 
-export type { PlanningPreview, ScenarioProbe };
-export { planningPreview, probe, keepNetwork, packGraph, routeGraph };
-export type { DirectedEdgeInput, PackedGraph, RouteSolution };
+export type { PlanningPreview, ScenarioProbe, RaptorJourney };
+export { planningPreview, probe, keepNetwork, routeWithRaptor };
+export type { RaptorJourney };
 
 export type ClientPreviewResult = {
   evaluation: EvaluationSummary;
