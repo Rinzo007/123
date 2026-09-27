@@ -49,6 +49,8 @@ export class MapNetworkEditor {
   canRedo(): boolean { return this.history.canRedo; }
   undo(): void { try { this.options.setNetwork(this.history.undo(this.options.getNetwork())); this.refresh(); } catch {} }
   redo(): void { try { this.options.setNetwork(this.history.redo(this.options.getNetwork())); this.refresh(); } catch {} }
+  applyNetwork(next: NetworkPayload, label = "Изменение сети"): void { this.commit(next, label); }
+
   private commit(next: NetworkPayload, label: string): void {
     const before = structuredClone(this.options.getNetwork());
     const after = structuredClone(next);
