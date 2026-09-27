@@ -28,7 +28,7 @@ export type ClientPreviewResult = {
 };
 
 export type DemandBatchResult = Awaited<ReturnType<typeof solveDemand>>;
-export type ReferenceMatrixResult = Awaited<ReturnType<typeof solveMatrix>>;
+export type MatrixResult = Awaited<ReturnType<typeof solveMatrix>>;
 
 export function solveDemandStrategy(
   batch: DemandBatch,
