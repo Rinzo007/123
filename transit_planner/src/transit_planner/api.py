@@ -378,6 +378,7 @@ def _economics_config_from_payload(
     payload: dict,
     *,
     default_period_id: str,
+    segment_multipliers_override: dict[str, tuple[float, ...]] | None = None,
 ) -> EconomicsConfig:
     raw = payload.get("economics_config", {})
     if not isinstance(raw, dict):
@@ -386,7 +387,11 @@ def _economics_config_from_payload(
     mode_costs = raw.get("infrastructure_cost_per_km")
     track_costs = raw.get("infrastructure_cost_per_track_km")
     row_multipliers = raw.get("reference_row_cost_multipliers")
-    segment_multipliers = raw.get("reference_segment_cost_multipliers")
+    segment_multipliers = (
+        segment_multipliers_override
+        if segment_multipliers_override is not None
+        else raw.get("reference_segment_cost_multipliers")
+    )
 
     return EconomicsConfig(
         period_id=str(raw.get("period_id", default_period_id)),
