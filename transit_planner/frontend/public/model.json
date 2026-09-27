@@ -2,7 +2,7 @@
   "version": 1,
   "sources": [
     {
-      "name": "reference-bundle",
+      "name": "runtime-model",
       "fields": [
         "rest",
         "car",
@@ -22,7 +22,7 @@
     }
   ],
   "credits": [
-    "Параметры совместимости восстановлены из предоставленного reference bundle.",
+    "Параметры совместимости восстановлены из runtime model.",
     "Геоданные городского контекста: Overture.",
     "Население: WorldPop."
   ],
