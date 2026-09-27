@@ -6,6 +6,7 @@
     createTimetable,
     loadOvertureNetwork,
     loadOvertureRoute,
+    loadOvertureUrbanMultipliers,
     validateNetwork,
     calculateAssignment,
     calculateCityAssignment,
@@ -17,6 +18,7 @@
     type ScenarioPayload,
     type OvertureNetworkResponse,
     type OvertureRouteResponse,
+    type UrbanMultipliersResponse,
   } from "./api";
   import type { NetworkPayload, StopDraft, TransitMode } from "./types";
   import { loadDataset, loadProject, loadUiSettings, saveDataset, saveProject, saveUiSettings } from "./storage";
@@ -433,15 +435,35 @@
             network.origin_lon ?? DEFAULT_CENTER[0], network.origin_lat ?? DEFAULT_CENTER[1],
           )
         : undefined;
-      const referencePreview = await runRuntimePreview(referenceEvaluationClient, network, referenceDemand);
-      const referenceResult = referencePreview.result as { lines?: unknown[]; stops?: number; };
-      if (Array.isArray(referenceResult.lines)) {
-        evaluationSummary = {
-          lines: referenceResult.lines.length,
-          stops: Number(referenceResult.stops ?? network.stops.length),
-          dailyDepartures: clientPreview.operations.dailyDepartures,
-        };
+
+      let urbanMultipliers: UrbanMultipliersResponse | null = null;
+      if (bounds && referenceDemand) {
+        const urbanKey =
+          datasetCacheKey("overture-urban", {
+            south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
+          }) + ":" + network.routes.map((route) =>
+            \`\${route.id}:\${route.stop_ids.join(",")}:\${JSON.stringify(route.geometry)}\`,
+          ).join("|");
+        urbanMultipliers = await loadDataset<UrbanMultipliersResponse>(urbanKey);
+        if (!urbanMultipliers) {
+          try {
+            urbanMultipliers = await loadOvertureUrbanMultipliers(
+              network,
+              bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast(),
+            );
+            await saveDataset(urbanKey, urbanMultipliers);
+          } catch {
+            urbanMultipliers = null;
+          }
+        }
       }
+
+      const referencePreview = await runRuntimePreview(
+        referenceEvaluationClient,
+        network,
+        referenceDemand,
+        urbanMultipliers,
+      );
       const demand = [{
         origin_zone_id: $stopsStore[0].id,
         destination_zone_id: $stopsStore[$stopsStore.length - 1].id,
