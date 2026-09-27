@@ -17,7 +17,7 @@ from .geojson import connectors_to_geojson, places_to_geojson, roads_to_geojson,
 from .infrastructure import TrackType
 from .network import TransitMode
 from .od import GravityParameters, gravity_od
-from .overture import OvertureConnectorProvider, OverturePlacesProvider, OvertureSource, OvertureTransitProvider, OvertureTransportationProvider, OvertureUrbanProvider
+from .overture import OvertureConnectorProvider, OverturePlacesProvider, OvertureSource, OvertureTransitProvider, OvertureTransportationProvider
 from .overture_network import OvertureNetworkProvider
 from .projection import project_local_point_wgs84
 from .reference_demand import build_reference_demand_layers
@@ -26,7 +26,6 @@ from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 from .temporal_assignment import assign_temporal_demand
 from .timetable import generate_service_timetable
-from .urban import UrbanContext
 from .zones import generate_zones_from_population_raster
 
 app=FastAPI(title="Transit Planner",version="0.1.0")
@@ -54,18 +53,7 @@ def scenario(p,d):
     zones=tuple(DemandZone(str(x["id"]),float(x["centroid_x"]),float(x["centroid_y"]),population=float(x.get("population",0)),jobs=float(x.get("jobs",0)),no_car_share=float(x.get("no_car_share",REFERENCE_MOBILITY.no_car_share))) for x in p.get("zones",[]))
     return ScenarioDefinition(str(p.get("id",d)),str(p.get("name",p.get("id",d))),network_from_dict(p["network"]),DemandMatrix(pairs),AssignmentConfig(**p.get("config",{"period_id":"am"})),zones)
 
-def urban(n,b,lon,lat,release):
-    buildings,water=OvertureUrbanProvider(source=src(release),bbox=b).load(); ctx=UrbanContext(buildings,water); out={}; count=0
-    for route in n.routes.values():
-        vals=[]
-        for i,_ in enumerate(route.segment_pairs()):
-            g=n.route_segment_geometry_points(route,i)
-            if len(g)<2: raise ValueError(f"Route {route.id} segment {i} has no geometry")
-            pts=tuple(project_local_point_wgs84(p,origin_lon=lon,origin_lat=lat) for p in g); m,_=ctx.construction_multiplier(route.mode.value,n.route_segment_row(route,i).value,pts,cost_per_km=n.route_segment_cost_per_km(route,i)); vals.append(float(m)); count+=1
-        out[route.id]=tuple(vals)
-    return out,{"release":src(release).release,"buildings":len(buildings),"water":len(water),"segments":count}
-
-def result_dict(x): return {k:getattr(x,k) for k in ("daily_vehicle_km","daily_fleet_cost","daily_operating_cost","daily_fare_revenue","annual_fleet_cost","annual_operating_cost","annual_fare_revenue","capital_cost","operating_cost_per_transit_trip","revenue_per_transit_trip")}
+def result_dict(x): return {k:getattr(x,k) for k in ("daily_vehicle_km","daily_fleet_cost","daily_operating_cost","daily_fare_revenue","annual_fleet_cost","annual_operating_cost","annual_fare_revenue","operating_cost_per_transit_trip","revenue_per_transit_trip")}
 
 @app.get("/health")
 def health(): return {"status":"ok","data_source":"overture","overture_release":RELEASE}
@@ -100,11 +88,6 @@ def route(p:dict):
     except (KeyError,TypeError,ValueError) as x:raise HTTPException(400,str(x)) from x
     except (OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
     g=[project_local_point_wgs84(q,origin_lon=n.origin_lon,origin_lat=n.origin_lat) for q in r.geometry]; return {"type":"Feature","geometry":{"type":"LineString","coordinates":[[q.x,q.y] for q in g]},"properties":{"edge_ids":list(r.edge_ids),"length_m":r.length_m,"travel_time_min":r.travel_time_min,"snap_distances_m":list(r.snap_distances_m)}}
-@app.post("/api/v1/data/overture/urban-multipliers")
-def urban_endpoint(p:dict):
-    try:m,meta=urban(network_from_dict(p["network"]),bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])),float(p["origin_lon"]),float(p["origin_lat"]),p.get("release"))
-    except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
-    return {"release":meta["release"],"routes":{k:{"segment_multipliers":list(v)} for k,v in m.items()},"counts":meta}
 @app.get("/api/v1/demand/population-zones")
 def population_zones(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...)):
     raster=os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
