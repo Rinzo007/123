@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import ceil
 
 from .assignment import AssignmentResult
-from .network import Network, TransitMode
+from .network import Network
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,22 +40,18 @@ def calculate_economics(
     *,
     config: EconomicsConfig,
 ) -> EconomicsResult:
-    period = network.periods[config.period_id]
     daily_vehicle_km = 0.0
     daily_fleet_cost = 0.0
     daily_operating_cost = 0.0
 
-    active_routes: set[str] = set()
     for service in network.services.values():
         headway = service.headway_by_period.get(config.period_id)
         if headway is None:
             continue
         departures = network.service_departures(service, config.period_id)
         route = network.routes[service.route_id]
-        active_routes.add(route.id)
         length_km = network.route_length_km(route)
         vehicle = network.vehicle_types[service.vehicle_type_id]
-        profile = None
         required_vehicles = max(1, ceil(network.route_cycle_time_min(route) / headway))
         stock = next((item for item in network.rolling_stock.values() if item.vehicle_type_id == vehicle.id), None)
         daily_fleet_cost += required_vehicles * (stock.car_cost if stock is not None else 0.0)
