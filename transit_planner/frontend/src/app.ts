@@ -1,5 +1,5 @@
 import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
-import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "geojson";
+import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "./geojson";
 import {
   calculateAssignment,
   calculateCityAssignment,
