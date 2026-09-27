@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from heapq import heappop, heappush
-from math import inf, isfinite, sqrt
+from math import hypot, inf, isfinite
 
 from .network import Network, Stop, TransitMode
-from .timetable import average_connection_wait_minutes
 from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_TRANSFER
-from .road import RoadGraph
+from .timetable import average_connection_wait_minutes
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,18 +58,32 @@ class RouterConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class _TransitOption:
+class _RaptorPattern:
     route_id: str
-    neighbor_stop_id: str
-    headway: float
-    departure_offset: float
-    mode: TransitMode
     service_id: str
-    physical_run_time_min: float | None = None
+    stops: tuple[str, ...]
+    departures: tuple[float, ...]
+    segment_times: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RaptorParent:
+    kind: str
+    previous_stop: str
+    route_id: str | None
+    service_id: str | None
+    board_time: float
+    ready_time: float
+    arrival_time: float
 
 
 class TransitRouter:
-    """Time-dependent stop router with precomputed network adjacency."""
+    """Schedule-aware range-rRAPTOR router.
+
+    The transit route-choice model is timetable-first. Street topology is
+    consumed upstream through Network.route_segment_run_time_min(), so this
+    router never falls back to a graph shortest-path search.
+    """
 
     _SPEEDS = {
         TransitMode(mode): profile.rows[profile.default_row].speed_kph
@@ -83,40 +95,13 @@ class TransitRouter:
         network: Network,
         *,
         config: RouterConfig = RouterConfig(),
-        road_graph: RoadGraph | None = None,
-        stop_road_nodes: dict[str, int | None] | None = None,
     ) -> None:
         self.network = network
         self.config = config
-        self.road_graph = road_graph
-        self.stop_road_nodes = dict(stop_road_nodes or {})
-        self._road_run_time_cache: dict[
-            tuple[str, str, TransitMode, float | None],
-            float | None,
-        ] = {}
         self._walking_neighbors_cache = self._build_walking_neighbors()
-        self._transit_options_by_period = self._build_transit_options()
+        self._pattern_cache: dict[str, tuple[_RaptorPattern, ...]] = {}
 
-    @classmethod
-    def from_overture_network(
-        cls,
-        network: Network,
-        overture_network,
-        *,
-        config: RouterConfig = RouterConfig(),
-    ) -> TransitRouter:
-        stop_road_nodes = {
-            snap.stop_id: snap.road_node_id
-            for snap in overture_network.stop_snaps
-        }
-        return cls(
-            network,
-            config=config,
-            road_graph=overture_network.graph,
-            stop_road_nodes=stop_road_nodes,
-        )
-
-    def _shortest_graph(
+    def shortest(
         self,
         origin: Stop,
         destination: Stop,
@@ -133,181 +118,51 @@ class TransitRouter:
         if origin.id == destination.id:
             return Journey(origin.id, destination.id, 0.0, 0, ())
 
-        options_by_stop = self._transit_options_by_period.get(period_id, {})
-        penalties = route_penalties or {}
+        route_penalties = route_penalties or {}
         segment_penalties = segment_crowding_penalties or {}
         headway_factors = service_headway_factors or {}
-        State = tuple[str, str | None]
-        start: State = (origin.id, None)
-        queue: list[tuple[float, int, State]] = [(0.0, 0, start)]
-        best: dict[State, float] = {start: 0.0}
-        previous: dict[State, tuple[State, JourneyLeg]] = {}
-        serial = 1
-        target_state: State | None = None
+        period = self.network.periods[period_id]
 
-        while queue:
-            cost, _, state = heappop(queue)
-            if cost != best.get(state, inf):
-                continue
-            stop_id, current_route = state
-            if stop_id == destination.id:
-                target_state = state
-                break
-
-            for neighbor_id, walk_time in self._walking_neighbors_cache.get(stop_id, ()):
-                transfer_walk = current_route is not None
-                effective_walk_time = (
-                    walk_time * self.config.transfer_walk_multiplier
-                    if transfer_walk else walk_time
-                )
-                transfer_penalty = 0.0
-                if transfer_walk:
-                    distance_m = (
-                        walk_time
-                        * self.config.walking_speed_kph
-                        * 1000.0
-                        / 60.0
-                    )
-                    transfer_penalty = (
-                        self.config.transfer_penalty_min
-                        + self.config.transfer_penalty_per_m_s * distance_m / 60.0
-                    )
-                next_state: State = (neighbor_id, None)
-                candidate = cost + effective_walk_time + transfer_penalty
-                if candidate < best.get(next_state, inf):
-                    best[next_state] = candidate
-                    previous[next_state] = (
-                        state,
-                        JourneyLeg("walk", stop_id, neighbor_id, effective_walk_time),
-                    )
-                    heappush(queue, (candidate, serial, next_state))
-                    serial += 1
-
-            for option in options_by_stop.get(stop_id, ()):
-                route = self.network.routes[option.route_id]
-                board = current_route != option.route_id
-                if board and not route.is_stop_open(stop_id):
-                    continue
-                wait = 0.0
-                if board:
-                    period = self.network.periods[period_id]
-                    wait = _scheduled_wait_minutes(
-                        period_start=period.start_minute,
-                        period_end=period.end_minute,
-                        headway=option.headway
-                        * headway_factors.get(option.service_id, 1.0),
-                        departure_offset=option.departure_offset,
-                    )
-                    if wait is None:
-                        continue
-                penalty = (
-                    self.config.transfer_penalty_min
-                    + penalties.get(option.route_id, 0.0)
-                    if board and current_route is not None
-                    else penalties.get(option.route_id, 0.0) if board else 0.0
-                )
-                run = self._run_time_between(
-                    stop_id,
-                    option.neighbor_stop_id,
-                    option.mode,
-                    physical_run_time_min=option.physical_run_time_min,
-                )
-                next_state = (option.neighbor_stop_id, option.route_id)
-                weighted_wait = wait * self.config.wait_weight
-                segment_penalty = segment_penalties.get(
-                    (option.route_id, stop_id, option.neighbor_stop_id),
-                    0.0,
-                )
-                candidate = cost + weighted_wait + run + penalty + segment_penalty
-                if candidate < best.get(next_state, inf):
-                    best[next_state] = candidate
-                    previous[next_state] = (
-                        state,
-                        JourneyLeg(
-                            "transit",
-                            stop_id,
-                            option.neighbor_stop_id,
-                            run,
-                            option.route_id,
-                            wait_min=wait,
-                            service_id=option.service_id,
-                        ),
-                    )
-                    heappush(queue, (candidate, serial, next_state))
-                    serial += 1
-
-        if target_state is None:
-            return None
-
-        legs: list[JourneyLeg] = []
-        current = target_state
-        while current != start:
-            parent_leg = previous.get(current)
-            if parent_leg is None:
-                return None
-            parent, leg = parent_leg
-            legs.append(leg)
-            current = parent
-        legs.reverse()
-
-        route_sequence = [leg.route_id for leg in legs if leg.kind == "transit"]
-        transfers = sum(
-            1
-            for previous_route, route_id in zip(route_sequence, route_sequence[1:])
-            if previous_route != route_id
-        )
-        adjusted_legs = _add_intermediate_dwell(
-            self.network,
-            tuple(legs),
-        )
-        adjusted_legs = _add_segment_crowding_penalties(
-            adjusted_legs,
-            segment_penalties,
-        )
-        adjusted_legs = _adjust_connection_waits(
-            self.network,
-            period_id,
-            adjusted_legs,
-            service_headway_factors=headway_factors,
-        )
-        return Journey(
-            origin_stop_id=origin.id,
-            destination_stop_id=destination.id,
-            duration_min=sum(leg.duration_min for leg in adjusted_legs),
-            transfers=transfers,
-            legs=adjusted_legs,
+        best: Journey | None = None
+        best_score = inf
+        first = float(period.start_minute)
+        last = min(
+            float(period.end_minute),
+            first + self.config.raptor_range_window_min,
         )
 
-
-    def shortest(
-        self,
-        origin: Stop,
-        destination: Stop,
-        *,
-        period_id: str,
-        route_penalties: dict[str, float] | None = None,
-        segment_crowding_penalties: dict[tuple[str, str, str], float] | None = None,
-        service_headway_factors: dict[str, float] | None = None,
-    ) -> Journey | None:
-        """Primary schedule-aware range-rRAPTOR router with safe graph fallback."""
-        try:
-            return self._shortest_raptor(
-                origin,
-                destination,
+        departure = first
+        while departure <= last + 1e-9:
+            candidate = self._raptor_once(
+                origin=origin,
+                destination=destination,
                 period_id=period_id,
-                route_penalties=route_penalties,
-                segment_crowding_penalties=segment_crowding_penalties,
-                service_headway_factors=service_headway_factors,
+                departure_minute=departure,
+                max_transfers=self.config.raptor_max_transfers,
+                segment_penalties=segment_penalties,
+                service_headway_factors=headway_factors,
             )
-        except (KeyError, IndexError, ValueError, OverflowError):
-            return self._shortest_graph(
-                origin,
-                destination,
-                period_id=period_id,
-                route_penalties=route_penalties,
-                segment_crowding_penalties=segment_crowding_penalties,
-                service_headway_factors=service_headway_factors,
-            )
+            if candidate is not None:
+                used_routes = {
+                    leg.route_id
+                    for leg in candidate.legs
+                    if leg.kind == "transit" and leg.route_id is not None
+                }
+                score = candidate.duration_min
+                score += self.config.transfer_penalty_min * candidate.transfers
+                score += self.config.wait_weight * sum(
+                    leg.wait_min for leg in candidate.legs
+                )
+                score += sum(
+                    max(0.0, route_penalties.get(route_id, 0.0))
+                    for route_id in used_routes
+                )
+                if score < best_score:
+                    best_score = score
+                    best = candidate
+            departure += 1.0
+
+        return best
 
     def shortest_alternatives(
         self,
@@ -321,23 +176,15 @@ class TransitRouter:
         service_headway_factors: dict[str, float] | None = None,
         diversity_penalty_min: float = 15.0,
     ) -> tuple[Journey, ...]:
-        """Return route-diverse journeys using deterministic route penalties.
-
-        The first journey is the normal shortest path. Subsequent journeys are
-        encouraged to avoid route IDs already used by earlier alternatives.
-        This is intentionally lightweight and deterministic so it remains
-        suitable for large OD matrices before a full Yen-style enumerator is
-        introduced.
-        """
         if max_alternatives <= 0:
             return ()
         if diversity_penalty_min < 0:
             raise ValueError("diversity_penalty_min cannot be negative")
 
         base_penalties = dict(route_penalties or {})
+        penalties = dict(base_penalties)
         results: list[Journey] = []
         seen_sequences: set[tuple[str, ...]] = set()
-        penalties = dict(base_penalties)
 
         for rank in range(max_alternatives):
             journey = self.shortest(
@@ -350,6 +197,7 @@ class TransitRouter:
             )
             if journey is None:
                 break
+
             sequence = tuple(
                 leg.route_id
                 for leg in journey.legs
@@ -359,69 +207,347 @@ class TransitRouter:
                 break
             seen_sequences.add(sequence)
             results.append(journey)
+
             increment = diversity_penalty_min * (rank + 1)
             for route_id in sequence:
                 penalties[route_id] = max(
                     penalties.get(route_id, 0.0),
                     base_penalties.get(route_id, 0.0) + increment,
                 )
+
         return tuple(results)
 
-    def _run_time_between(
+    def _raptor_once(
         self,
-        from_id: str,
-        to_id: str,
-        mode: TransitMode,
         *,
-        physical_run_time_min: float | None = None,
-    ) -> float:
-        if physical_run_time_min is not None:
-            return physical_run_time_min
+        origin: Stop,
+        destination: Stop,
+        period_id: str,
+        departure_minute: float,
+        max_transfers: int,
+        segment_penalties: dict[tuple[str, str, str], float],
+        service_headway_factors: dict[str, float],
+    ) -> Journey | None:
+        patterns = self._patterns(
+            period_id,
+            service_headway_factors,
+        )
+        infinity = float("inf")
+        arrival: dict[str, float] = {
+            stop_id: infinity for stop_id in self.network.stops
+        }
+        arrival[origin.id] = departure_minute
 
-        cache_key = (from_id, to_id, mode)
-        if cache_key in self._road_run_time_cache:
-            cached = self._road_run_time_cache[cache_key]
+        parents: list[dict[str, _RaptorParent]] = []
+        best_destination: tuple[float, int] | None = None
+
+        for round_index in range(max_transfers + 1):
+            current = dict(arrival)
+            next_arrival: dict[str, float] = {
+                stop_id: infinity for stop_id in self.network.stops
+            }
+            parent: dict[str, _RaptorParent] = {}
+
+            for pattern in patterns:
+                board_stop: str | None = None
+                board_time = infinity
+                ready_time = infinity
+
+                for stop_id in pattern.stops:
+                    ready = current.get(stop_id, infinity)
+                    if not isfinite(ready):
+                        continue
+                    if not self.network.routes[pattern.route_id].is_stop_open(stop_id):
+                        continue
+                    scheduled = _first_departure(pattern.departures, ready)
+                    if scheduled is None:
+                        continue
+                    if scheduled < board_time:
+                        board_stop = stop_id
+                        board_time = scheduled
+                        ready_time = ready
+
+                if board_stop is None:
+                    continue
+
+                board_index = pattern.stops.index(board_stop)
+                running = board_time
+
+                for local_index in range(board_index, len(pattern.stops)):
+                    stop_id = pattern.stops[local_index]
+                    if local_index > board_index:
+                        from_stop = pattern.stops[local_index - 1]
+                        to_stop = stop_id
+                        running += pattern.segment_times[local_index - 1]
+                        running += max(
+                            0.0,
+                            segment_penalties.get(
+                                (pattern.route_id, from_stop, to_stop),
+                                0.0,
+                            ),
+                        )
+
+                    if running >= next_arrival[stop_id]:
+                        continue
+
+                    next_arrival[stop_id] = running
+                    parent[stop_id] = _RaptorParent(
+                        kind="transit",
+                        previous_stop=board_stop,
+                        route_id=pattern.route_id,
+                        service_id=pattern.service_id,
+                        board_time=board_time,
+                        ready_time=ready_time,
+                        arrival_time=running,
+                    )
+
+            self._apply_footpaths(next_arrival, parent)
+
+            if isfinite(next_arrival[destination.id]):
+                candidate = next_arrival[destination.id]
+                if (
+                    best_destination is None
+                    or candidate < best_destination[0]
+                ):
+                    best_destination = (candidate, round_index)
+
+            parents.append(parent)
+            if not parent:
+                break
+            arrival = next_arrival
+
+        if best_destination is None:
+            return None
+
+        legs = self._reconstruct(
+            origin_id=origin.id,
+            destination_id=destination.id,
+            departure_minute=departure_minute,
+            parents=parents,
+            round_index=best_destination[1],
+        )
+        if legs is None:
+            return None
+
+        adjusted = _add_intermediate_dwell(self.network, legs)
+        adjusted = _adjust_connection_waits(
+            self.network,
+            period_id,
+            adjusted,
+            service_headway_factors=service_headway_factors,
+        )
+        route_ids = [
+            leg.route_id
+            for leg in adjusted
+            if leg.kind == "transit" and leg.route_id is not None
+        ]
+        transfers = sum(
+            previous != current
+            for previous, current in zip(route_ids, route_ids[1:])
+        )
+
+        return Journey(
+            origin_stop_id=origin.id,
+            destination_stop_id=destination.id,
+            duration_min=sum(
+                leg.duration_min + leg.wait_min
+                for leg in adjusted
+            ),
+            transfers=transfers,
+            legs=adjusted,
+        )
+
+    def _patterns(
+        self,
+        period_id: str,
+        service_headway_factors: dict[str, float],
+    ) -> tuple[_RaptorPattern, ...]:
+        if not service_headway_factors:
+            cached = self._pattern_cache.get(period_id)
             if cached is not None:
                 return cached
 
-        if self.road_graph is not None:
-            origin_node = self.stop_road_nodes.get(from_id)
-            destination_node = self.stop_road_nodes.get(to_id)
-            if origin_node is not None and destination_node is not None:
-                _, path = self.road_graph.shortest_path(origin_node, destination_node)
-                if path:
-                    mode_speed = self._SPEEDS.get(
-                        mode,
-                        self.config.default_transit_speed_kph,
+        period = self.network.periods[period_id]
+        patterns: list[_RaptorPattern] = []
+
+        for service in self.network.services.values():
+            base_headway = service.headway_by_period.get(period_id)
+            if base_headway is None:
+                continue
+            multiplier = max(
+                1.0,
+                service_headway_factors.get(service.id, 1.0),
+            )
+            headway = base_headway * multiplier
+            departures = _service_departures(
+                period.start_minute,
+                period.end_minute,
+                headway,
+                service.departure_offset_by_period.get(period_id, 0.0),
+            )
+            if not departures:
+                continue
+
+            route = self.network.routes[service.route_id]
+            forward_stops = route.stop_ids
+            forward_times = tuple(
+                self.network.route_segment_run_time_min(route, index)
+                for index in range(len(route.segment_pairs()))
+            )
+            patterns.append(
+                _RaptorPattern(
+                    route.id,
+                    service.id,
+                    forward_stops,
+                    departures,
+                    forward_times,
+                )
+            )
+
+            if route.both_ways:
+                patterns.append(
+                    _RaptorPattern(
+                        route.id,
+                        service.id,
+                        tuple(reversed(forward_stops)),
+                        departures,
+                        tuple(reversed(forward_times)),
                     )
-                    road_time = 0.0
-                    for edge_id in path:
-                        edge = self.road_graph.edges[edge_id]
-                        effective_speed = min(mode_speed, edge.speed_kph)
-                        road_time += edge.length_m / 1000.0 / effective_speed * 60.0
-                    if isfinite(road_time) and road_time >= 0.0:
-                        self._road_run_time_cache[cache_key] = road_time
-                        return road_time
+                )
 
-        a = self.network.stops[from_id]
-        b = self.network.stops[to_id]
-        distance_km = self._point_distance(a, b) / 1000.0
-        speed = self._SPEEDS.get(
-            mode,
-            self.config.default_transit_speed_kph,
-        )
-        direct_time = distance_km / speed * 60.0
-        self._road_run_time_cache[cache_key] = direct_time
-        return direct_time
+            if route.closed and not route.both_ways:
+                patterns.append(
+                    _RaptorPattern(
+                        route.id,
+                        service.id,
+                        tuple(route.stop_ids),
+                        departures,
+                        forward_times,
+                    )
+                )
 
-    @staticmethod
-    def _point_distance(a: Stop, b: Stop) -> float:
-        return sqrt(
-            (a.location.x - b.location.x) ** 2
-            + (a.location.y - b.location.y) ** 2
-        )
+        result = tuple(patterns)
+        if not service_headway_factors:
+            self._pattern_cache[period_id] = result
+        return result
 
-    def _build_walking_neighbors(self) -> dict[str, tuple[tuple[str, float], ...]]:
+    def _apply_footpaths(
+        self,
+        arrivals: dict[str, float],
+        parent: dict[str, _RaptorParent],
+    ) -> None:
+        if self.config.walk_transfer_radius_m <= 0:
+            return
+
+        changed = True
+        while changed:
+            changed = False
+            for from_stop, from_arrival in tuple(arrivals.items()):
+                if not isfinite(from_arrival):
+                    continue
+                for to_stop, walk_time in self._walking_neighbors_cache.get(from_stop, ()):
+                    candidate = from_arrival + walk_time
+                    if candidate >= arrivals.get(to_stop, inf):
+                        continue
+                    arrivals[to_stop] = candidate
+                    parent[to_stop] = _RaptorParent(
+                        kind="walk",
+                        previous_stop=from_stop,
+                        route_id=None,
+                        service_id=None,
+                        board_time=from_arrival,
+                        ready_time=from_arrival,
+                        arrival_time=candidate,
+                    )
+                    changed = True
+
+    def _reconstruct(
+        self,
+        *,
+        origin_id: str,
+        destination_id: str,
+        departure_minute: float,
+        parents: list[dict[str, _RaptorParent]],
+        round_index: int,
+    ) -> tuple[JourneyLeg, ...] | None:
+        legs: list[JourneyLeg] = []
+        current = destination_id
+        current_round = round_index
+        guard = 0
+
+        while current != origin_id and guard < 10000:
+            guard += 1
+            if current_round < 0 or current_round >= len(parents):
+                return None
+
+            record = parents[current_round].get(current)
+            if record is None:
+                current_round -= 1
+                continue
+
+            if record.kind == "walk":
+                legs.append(
+                    JourneyLeg(
+                        "walk",
+                        record.previous_stop,
+                        current,
+                        max(0.0, record.arrival_time - record.board_time),
+                    )
+                )
+                current = record.previous_stop
+                continue
+
+            run = max(
+                0.0,
+                record.arrival_time - record.board_time,
+            )
+            wait = max(
+                0.0,
+                record.board_time - record.ready_time,
+            )
+            legs.append(
+                JourneyLeg(
+                    "transit",
+                    record.previous_stop,
+                    current,
+                    run,
+                    record.route_id,
+                    wait_min=wait,
+                    service_id=record.service_id,
+                )
+            )
+            current = record.previous_stop
+            current_round -= 1
+
+        if current != origin_id:
+            return None
+
+        legs.reverse()
+
+        first_transit_seen = False
+        normalized: list[JourneyLeg] = []
+        for leg in legs:
+            if leg.kind == "transit":
+                normalized.append(
+                    JourneyLeg(
+                        leg.kind,
+                        leg.from_id,
+                        leg.to_id,
+                        leg.duration_min,
+                        leg.route_id,
+                        wait_min=leg.wait_min if not first_transit_seen else 0.0,
+                        service_id=leg.service_id,
+                    )
+                )
+                first_transit_seen = True
+            else:
+                normalized.append(leg)
+
+        return tuple(normalized)
+
+    def _build_walking_neighbors(
+        self,
+    ) -> dict[str, tuple[tuple[str, float], ...]]:
         if self.config.walk_transfer_radius_m <= 0:
             return {stop_id: () for stop_id in self.network.stops}
 
@@ -434,110 +560,58 @@ class TransitRouter:
                 distance_m = self._point_distance(origin, candidate)
                 if distance_m > self.config.walk_transfer_radius_m:
                     continue
-                duration = distance_m / 1000.0 / self.config.walking_speed_kph * 60.0
+                duration = (
+                    distance_m
+                    / 1000.0
+                    / self.config.walking_speed_kph
+                    * 60.0
+                )
                 result[origin.id].append((candidate.id, duration))
                 result[candidate.id].append((origin.id, duration))
-        return {stop_id: tuple(items) for stop_id, items in result.items()}
-
-    def _build_transit_options(
-        self,
-    ) -> dict[str, dict[str, tuple[_TransitOption, ...]]]:
-        result: dict[str, dict[str, list[_TransitOption]]] = {
-            period_id: {} for period_id in self.network.periods
-        }
-        for service in self.network.services.values():
-            route = self.network.routes[service.route_id]
-            for period_id, headway in service.headway_by_period.items():
-                stop_map = result.setdefault(period_id, {})
-                offset = service.departure_offset_by_period.get(period_id, 0.0)
-                for index, (from_id, to_id) in enumerate(route.segment_pairs()):
-                    section_id = route.track_section_for_segment(index)
-                    physical_run_time_min = (
-                        self.network.route_segment_run_time_min(route, index)
-                        if (
-                            section_id is not None
-                            or route.geometry is not None
-                            or route.row_by_segment
-                        )
-                        else None
-                    )
-                    stop_map.setdefault(from_id, []).append(
-                        _TransitOption(
-                            route.id,
-                            to_id,
-                            headway,
-                            offset,
-                            route.mode,
-                            service.id,
-                            physical_run_time_min,
-                        )
-                    )
-                    if route.both_ways:
-                        stop_map.setdefault(to_id, []).append(
-                            _TransitOption(
-                                route.id,
-                                from_id,
-                                headway,
-                                offset,
-                                route.mode,
-                                service.id,
-                                physical_run_time_min,
-                            )
-                        )
         return {
-            period_id: {
-                stop_id: tuple(options)
-                for stop_id, options in stop_map.items()
-            }
-            for period_id, stop_map in result.items()
+            stop_id: tuple(items)
+            for stop_id, items in result.items()
         }
 
+    @staticmethod
+    def _point_distance(left: Stop, right: Stop) -> float:
+        return hypot(
+            left.location.x - right.location.x,
+            left.location.y - right.location.y,
+        )
 
-def _scheduled_wait_minutes(
-    *,
-    period_start: int,
-    period_end: int,
+
+def _service_departures(
+    start_minute: int,
+    end_minute: int,
     headway: float,
-    departure_offset: float,
-) -> float | None:
-    """Среднее ожидание для статического назначения спроса.
+    offset: float,
+) -> tuple[float, ...]:
+    if headway <= 0:
+        return ()
+    first = start_minute + ((offset - start_minute) % headway)
+    if first >= end_minute:
+        return ()
+    count = int((end_minute - first - 1e-9) // headway) + 1
+    return tuple(
+        first + index * headway
+        for index in range(max(0, count))
+    )
 
-    Без заданного времени отправления пассажира точное ожидание не определено,
-    поэтому используется среднее ожидание равное половине интервала. Смещение
-    отправлений не меняет среднее значение при равномерном распределении
-    прибытий в течение периода.
-    """
-    if headway <= 0 or period_start >= period_end:
-        return None
-    first_departure = period_start + ((departure_offset - period_start) % headway)
-    if first_departure >= period_end:
-        return None
-    return headway / 2.0
-def _add_segment_crowding_penalties(
-    legs: tuple[JourneyLeg, ...],
-    penalties: dict[tuple[str, str, str], float],
-) -> tuple[JourneyLeg, ...]:
-    if not penalties:
-        return legs
-    result: list[JourneyLeg] = []
-    for leg in legs:
-        penalty = (
-            penalties.get((leg.route_id or "", leg.from_id, leg.to_id), 0.0)
-            if leg.kind == "transit"
-            else 0.0
-        )
-        result.append(
-            JourneyLeg(
-                leg.kind,
-                leg.from_id,
-                leg.to_id,
-                leg.duration_min + max(0.0, penalty),
-                leg.route_id,
-                leg.wait_min,
-                leg.service_id,
-            )
-        )
-    return tuple(result)
+
+def _first_departure(
+    departures: tuple[float, ...],
+    arrival_minute: float,
+) -> float | None:
+    left = 0
+    right = len(departures)
+    while left < right:
+        middle = (left + right) // 2
+        if departures[middle] < arrival_minute:
+            left = middle + 1
+        else:
+            right = middle
+    return departures[left] if left < len(departures) else None
 
 
 def _add_intermediate_dwell(
@@ -545,31 +619,41 @@ def _add_intermediate_dwell(
     legs: tuple[JourneyLeg, ...],
 ) -> tuple[JourneyLeg, ...]:
     result: list[JourneyLeg] = []
-    previous_transit_route: str | None = None
     for leg in legs:
-        duration = leg.duration_min
-        if (
-            leg.kind == "transit"
-            and leg.route_id is not None
-            and previous_transit_route == leg.route_id
-            and network.routes[leg.route_id].is_stop_open(leg.from_id)
-        ):
-            profile = REFERENCE_MODE_PROFILES[network.routes[leg.route_id].mode.value]
-            duration += profile.dwell_s / 60.0
+        if leg.kind != "transit" or leg.route_id is None:
+            result.append(leg)
+            continue
+
+        route = network.routes[leg.route_id]
+        try:
+            route_stops = route.stop_ids
+            from_index = route_stops.index(leg.from_id)
+            to_index = route_stops.index(leg.to_id)
+            if from_index <= to_index:
+                intermediate_ids = route_stops[from_index + 1:to_index]
+            else:
+                intermediate_ids = route_stops[to_index + 1:from_index]
+            profile = REFERENCE_MODE_PROFILES[route.mode.value]
+            dwell = sum(
+                profile.dwell_s
+                for stop_id in intermediate_ids
+                if route.is_stop_open(stop_id)
+            ) / 60.0
+        except ValueError:
+            dwell = 0.0
+
         result.append(
             JourneyLeg(
                 leg.kind,
                 leg.from_id,
                 leg.to_id,
-                duration,
+                leg.duration_min + dwell,
                 leg.route_id,
                 leg.wait_min,
                 leg.service_id,
             )
         )
-        previous_transit_route = (
-            leg.route_id if leg.kind == "transit" else None
-        )
+
     return tuple(result)
 
 
@@ -584,16 +668,16 @@ def _adjust_connection_waits(
         return legs
 
     result: list[JourneyLeg] = []
-    headway_factors = service_headway_factors or {}
-    active_route_id: str | None = None
-    active_service_id: str | None = None
+    factors = service_headway_factors or {}
+    active_route: str | None = None
+    active_service: str | None = None
     upstream_run = 0.0
     transfer_walk = 0.0
 
     for leg in legs:
         if leg.kind == "walk":
             result.append(leg)
-            if active_route_id is not None:
+            if active_route is not None:
                 transfer_walk += leg.duration_min
             continue
 
@@ -602,49 +686,29 @@ def _adjust_connection_waits(
             continue
 
         wait = leg.wait_min
-        if active_route_id is not None and active_route_id != leg.route_id:
-            upstream_service = network.services.get(active_service_id or "")
+        if active_route is not None and active_route != leg.route_id:
+            upstream_service = network.services.get(active_service or "")
             downstream_service = network.services.get(leg.service_id or "")
-            if upstream_service is not None and downstream_service is not None:
-                upstream_h = upstream_service.headway_by_period.get(period_id)
-                downstream_h = downstream_service.headway_by_period.get(period_id)
-                if upstream_h is not None and downstream_h is not None:
+            if upstream_service and downstream_service:
+                upstream_headway = upstream_service.headway_by_period.get(period_id)
+                downstream_headway = downstream_service.headway_by_period.get(period_id)
+                if upstream_headway and downstream_headway:
                     upstream_profile = REFERENCE_MODE_PROFILES[
                         network.routes[upstream_service.route_id].mode.value
                     ]
                     wait = average_connection_wait_minutes(
-                        upstream_h * max(
+                        upstream_headway * max(
                             1.0,
-                            headway_factors.get(upstream_service.id, 1.0),
+                            factors.get(upstream_service.id, 1.0),
                         ),
-                        downstream_h * max(
+                        downstream_headway * max(
                             1.0,
-                            headway_factors.get(downstream_service.id, 1.0),
-                        ),
-                        upstream_offset=(
-                            upstream_service.departure_offset_by_period.get(
-                                period_id,
-                                0.0,
-                            )
-                            + upstream_service.phase_by_period.get(
-                                period_id,
-                                0.0,
-                            )
-                        ),
-                        downstream_offset=(
-                            downstream_service.departure_offset_by_period.get(
-                                period_id,
-                                0.0,
-                            )
-                            + downstream_service.phase_by_period.get(
-                                period_id,
-                                0.0,
-                            )
+                            factors.get(downstream_service.id, 1.0),
                         ),
                         upstream_run_time=upstream_run,
                         mode_jitter_s=upstream_profile.jitter_s,
                         walk_time_min=transfer_walk,
-                    ) or wait
+                    )
 
         result.append(
             JourneyLeg(
@@ -653,18 +717,15 @@ def _adjust_connection_waits(
                 leg.to_id,
                 leg.duration_min,
                 leg.route_id,
-                wait,
-                leg.service_id,
+                wait_min=0.0 if wait is None else wait,
+                service_id=leg.service_id,
             )
         )
-
-        if active_route_id != leg.route_id:
-            active_route_id = leg.route_id
-            active_service_id = leg.service_id
-            upstream_run = leg.duration_min
-        else:
-            upstream_run += leg.duration_min
+        active_route = leg.route_id
+        active_service = leg.service_id
+        upstream_run = leg.duration_min
         transfer_walk = 0.0
 
     return tuple(result)
+
 
