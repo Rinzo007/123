@@ -9,7 +9,6 @@ import {
   loadDemandStreets,
   loadOvertureNetwork,
   loadOvertureRoute,
-  loadOvertureUrbanMultipliers,
   loadPopulationZones,
   loadReferenceDemand,
   validateNetwork,
@@ -17,7 +16,6 @@ import {
   type OvertureNetworkResponse,
   type OvertureRouteResponse,
   type ScenarioPayload,
-  type UrbanMultipliersResponse,
 } from "./api";
 import type { NetworkPayload, StopDraft, TransitMode } from "./types";
 import {
@@ -104,8 +102,6 @@ let cityStops: FeatureCollection | null = null;
 let cityPlaces: FeatureCollection | null = null;
 let populationZones: FeatureCollection | null = null;
 let demandStreets: FeatureCollection | null = null;
-let urbanMultipliers: UrbanMultipliersResponse | null = null;
-let urbanMultipliersKey = "";
 let assignmentResult: Awaited<ReturnType<typeof calculateAssignment>> | null = null;
 let cityAssignmentMeta: Awaited<ReturnType<typeof calculateCityAssignment>>["data"] | null = null;
 let cityAssignmentPeriods: Awaited<ReturnType<typeof calculateCityAssignment>>["periods"] = [];
@@ -550,11 +546,7 @@ async function ensureUrbanMultipliers(current: NetworkPayload, b: Bounds): Promi
     return cached;
   }
   try {
-    const loaded = await loadOvertureUrbanMultipliers(current, b.south, b.west, b.north, b.east);
-    urbanMultipliers = loaded;
-    urbanMultipliersKey = key;
-    await saveDataset(key, loaded);
-    return loaded;
+return loaded;
   } catch {
     urbanMultipliers = null;
     urbanMultipliersKey = key;
@@ -1022,13 +1014,6 @@ function renderResults(): void {
       ["Places", cityAssignmentMeta.places],
       ["OD-пары", cityAssignmentMeta.od_pairs],
       ["Спрос/сутки", cityAssignmentMeta.total_demand_trips],
-    ])}</section>`;
-  }
-  if (urbanMultipliers) {
-    html += `<section class="analytics-panel"><h3>Городской контекст Overture</h3>${metricGrid([
-      ["Здания", urbanMultipliers.counts.buildings],
-      ["Вода", urbanMultipliers.counts.water],
-      ["Сегменты", urbanMultipliers.counts.segments],
     ])}</section>`;
   }
   if (assignmentResult) {
