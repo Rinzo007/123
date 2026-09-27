@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "version": "reference-2026-09",
+  "sources": [
+    {
+      "id": "takt-bundle",
+      "description": "Recovered reference JavaScript bundle and worker constants supplied with the project"
+    },
+    {
+      "id": "overture",
+      "description": "Overture Maps transportation, infrastructure, places, buildings and water data"
+    },
+    {
+      "id": "openfreemap",
+      "description": "Map display tiles/style for interactive cartography"
+    }
+  ],
+  "credits": {
+    "reference": "Takt/playtakt technical behavior recovered from supplied bundles",
+    "geodata": "Overture Maps",
+    "map": "OpenFreeMap / MapLibre GL JS"
+  },
+  "periods": [
+    [
+      "early",
+      240,
+      360,
+      0.06,
+      0.01
+    ],
+    [
+      "am",
+      360,
+      540,
+      0.6,
+      0.06
+    ],
+    [
+      "mid",
+      540,
+      900,
+      0.2,
+      0.18
+    ],
+    [
+      "pm",
+      900,
+      1140,
+      0.1,
+      0.55
+    ],
+    [
+      "eve",
+      1140,
+      1440,
+      0.04,
+      0.2
+    ]
+  ],
+  "purposes": [
+    [
+      "edu",
+      "School or campus",
+      0.16,
+      1600,
+      6,
+      [
+        0.04,
+        0.76,
+        0.14,
+        0.05,
+        0.01
+      ],
+      [
+        0,
+        0.02,
+        0.6,
+        0.32,
+        0.06
+      ]
+    ],
+    [
+      "health",
+      "Hospital or clinic",
+      0.06,
+      3000,
+      6,
+      [
+        0.08,
+        0.34,
+        0.36,
+        0.16,
+        0.06
+      ],
+      [
+        0.04,
+        0.12,
+        0.36,
+        0.32,
+        0.16
+      ]
+    ],
+    [
+      "shop",
+      "Shops",
+      0.34,
+      2000,
+      6,
+      [
+        0.01,
+        0.07,
+        0.44,
+        0.36,
+        0.12
+      ],
+      [
+        0.01,
+        0.03,
+        0.36,
+        0.42,
+        0.18
+      ]
+    ],
+    [
+      "air",
+      "Airport",
+      0.03,
+      14000,
+      2,
+      [
+        0.18,
+        0.24,
+        0.26,
+        0.2,
+        0.12
+      ],
+      [
+        0.06,
+        0.14,
+        0.26,
+        0.28,
+        0.26
+      ]
+    ],
+    [
+      "night",
+      "Bar, café or venue",
+      0.22,
+      3000,
+      6,
+      [
+        0,
+        0.02,
+        0.14,
+        0.32,
+        0.52
+      ],
+      [
+        0.02,
+        0.02,
+        0.08,
+        0.24,
+        0.64
+      ]
+    ]
+  ],
+  "modes": {
+    "bus": {
+      "capacity": 90,
+      "opex_per_vehicle_km": 5,
+      "vehicle_cost_day": 250,
+      "dwell_s": 20,
+      "dwell_per_passenger_s": 2,
+      "jitter_s": 90,
+      "turnback_s": 60,
+      "track_capacity_per_hour": 90,
+      "access_m": 500,
+      "max_class": 3,
+      "passenger_per_square_m": 6,
+      "platform_m": 0,
+      "platform_cost_per_m": 0,
+      "acceleration_mps2": 1.2,
+      "comfortable_radius_m": 15,
+      "minimum_radius_m": 8,
+      "lateral_acceleration_mps2": 1.1,
+      "infill_m": 0.4,
+      "default_row": "mixed",
+      "rows": {
+        "mixed": [
+          18,
+          0.4
+        ],
+        "reserved": [
+          23,
+          2.5
+        ]
+      }
+    },
+    "tram": {
+      "capacity": 250,
+      "opex_per_vehicle_km": 9,
+      "vehicle_cost_day": 900,
+      "dwell_s": 25,
+      "dwell_per_passenger_s": 0.6,
+      "jitter_s": 60,
+      "turnback_s": 90,
+      "track_capacity_per_hour": 40,
+      "access_m": 600,
+      "max_class": 2,
+      "passenger_per_square_m": 6.5,
+      "platform_m": 40,
+      "platform_cost_per_m": 0.031,
+      "acceleration_mps2": 1.2,
+      "comfortable_radius_m": 30,
+      "minimum_radius_m": 18,
+      "lateral_acceleration_mps2": 0.9,
+      "infill_m": 2.5,
+      "default_row": "mixed",
+      "rows": {
+        "mixed": [
+          19,
+          9
+        ],
+        "reserved": [
+          25,
+          18
+        ],
+        "grade": [
+          33,
+          85
+        ]
+      }
+    },
+    "metro": {
+      "capacity": 750,
+      "opex_per_vehicle_km": 14,
+      "vehicle_cost_day": 3200,
+      "dwell_s": 30,
+      "dwell_per_passenger_s": 0.15,
+      "jitter_s": 15,
+      "turnback_s": 150,
+      "track_capacity_per_hour": 30,
+      "access_m": 800,
+      "max_class": 3,
+      "passenger_per_square_m": 8,
+      "platform_m": 100,
+      "platform_cost_per_m": 0.3,
+      "acceleration_mps2": 1,
+      "comfortable_radius_m": 150,
+      "minimum_radius_m": 90,
+      "lateral_acceleration_mps2": 0.8,
+      "infill_m": 60,
+      "default_row": "reserved",
+      "rows": {
+        "reserved": [
+          70,
+          32
+        ],
+        "elevated": [
+          70,
+          62
+        ],
+        "grade": [
+          70,
+          120
+        ]
+      }
+    },
+    "rail": {
+      "capacity": 1000,
+      "opex_per_vehicle_km": 22,
+      "vehicle_cost_day": 5200,
+      "dwell_s": 45,
+      "dwell_per_passenger_s": 0.3,
+      "jitter_s": 25,
+      "turnback_s": 300,
+      "track_capacity_per_hour": 20,
+      "access_m": 1500,
+      "max_class": 3,
+      "passenger_per_square_m": 7,
+      "platform_m": 140,
+      "platform_cost_per_m": 0.125,
+      "acceleration_mps2": 0.8,
+      "comfortable_radius_m": 400,
+      "minimum_radius_m": 150,
+      "lateral_acceleration_mps2": 0.65,
+      "infill_m": 35,
+      "default_row": "reserved",
+      "rows": {
+        "reserved": [
+          58,
+          22
+        ],
+        "elevated": [
+          78,
+          48
+        ],
+        "grade": [
+          78,
+          95
+        ]
+      }
+    }
+  },
+  "transfer": {
+    "base_s": 405,
+    "wait_multiplier": 1,
+    "walk_multiplier": 1,
+    "per_m_s": 0.25,
+    "rider_bias_s": 0
+  },
+  "car": {
+    "cost_per_km_eur": 0.25,
+    "parking_eur": 1.5,
+    "parking_s": 240,
+    "circuity": 1.3
+  },
+  "mobility": {
+    "no_car_share": 0.35,
+    "two_wheel_share": 0.3,
+    "two_wheel_speed_kph": 15.12,
+    "two_wheel_reach_m": 7000,
+    "two_wheel_per_km_eur": 0.03
+  },
+  "vot_s_per_eur": 360,
+  "no_car_effectiveness": 0.78,
+  "crowding": {
+    "crowded": 1,
+    "severe": 2,
+    "extreme": 4
+  }
+}
