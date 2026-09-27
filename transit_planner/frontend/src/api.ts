@@ -517,6 +517,7 @@ export function calculateEconomics(
   periodId = "am",
   farePerTransitTrip = 0,
   annualDays = 365,
+  urbanMultipliers: UrbanMultipliersResponse | null = null,
 ): Promise<EconomicsResponse> {
   return fetch("/api/v1/economics", {
     method: "POST",
@@ -532,6 +533,14 @@ export function calculateEconomics(
         period_id: periodId,
         fare_per_transit_trip: farePerTransitTrip,
         annual_days: annualDays,
+        reference_segment_cost_multipliers: urbanMultipliers
+          ? Object.fromEntries(
+              Object.entries(urbanMultipliers.routes).map(([routeId, value]) => [
+                routeId,
+                value.segment_multipliers,
+              ]),
+            )
+          : null,
       },
     }),
   }).then(async (response) => {
