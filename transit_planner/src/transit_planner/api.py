@@ -435,6 +435,58 @@ def _economics_result_to_dict(result) -> dict:
     }
 
 
+def _urban_segment_multipliers(
+    network,
+    *,
+    bounds: tuple[float, float, float, float],
+    origin_lon: float,
+    origin_lat: float,
+    release: str | None = None,
+) -> tuple[dict[str, tuple[float, ...]], dict]:
+    source = _overture_source(release)
+    buildings, water = OvertureUrbanProvider(
+        source=source,
+        bbox=bounds,
+    ).load()
+    context = UrbanContext(buildings, water)
+    routes: dict[str, tuple[float, ...]] = {}
+    metric_count = 0
+
+    for route in network.routes.values():
+        values: list[float] = []
+        for index, (left_id, right_id) in enumerate(route.segment_pairs()):
+            geometry = network.route_segment_geometry_points(route, index)
+            if len(geometry) < 2:
+                geometry = (
+                    network.stops[left_id].location,
+                    network.stops[right_id].location,
+                )
+            wgs84 = tuple(
+                project_local_point_wgs84(
+                    point,
+                    origin_lon=origin_lon,
+                    origin_lat=origin_lat,
+                )
+                for point in geometry
+            )
+            multiplier, _metrics = context.construction_multiplier(
+                route.mode.value,
+                network.route_segment_row(route, index).value,
+                wgs84,
+                cost_per_km=network.route_segment_cost_per_km(route, index),
+            )
+            values.append(float(multiplier))
+            metric_count += 1
+        routes[route.id] = tuple(values)
+
+    return routes, {
+        "release": source.release,
+        "buildings": len(buildings),
+        "water": len(water),
+        "segments": metric_count,
+    }
+
+
 def _scenario_definition_from_payload(payload: dict, *, default_id: str) -> ScenarioDefinition:
     raw_demand = payload.get("demand", [])
     pairs = tuple(
