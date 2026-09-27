@@ -20,6 +20,7 @@ export class MapNetworkEditor {
   private pendingNodeId: string | null = null;
   private selectedNodeId: string | null = null;
   private selectedTrackId: string | null = null;
+  private mergeTrackId: string | null = null;
   private draggingNodeId: string | null = null;
   private dragStartNetwork: NetworkPayload | null = null;
   private readonly history = new CommandHistory<NetworkPayload>();
@@ -69,6 +70,44 @@ export class MapNetworkEditor {
     next.signal_blocks = next.signal_blocks.filter(item => item.track_section_id !== trackId);
     next.routes = next.routes.map(route => ({ ...route, track_section_ids: route.track_section_ids?.filter(id => id !== trackId) }));
     this.commit(next, "Удаление участка " + trackId);
+  }
+
+  splitSelectedTrack(ratio = 0.5): void {
+    if (!this.selectedTrackId) throw new Error("Сначала выберите участок");
+    const next = structuredClone(this.options.getNetwork());
+    const track = next.track_sections.find(t => t.id === this.selectedTrackId);
+    if (!track || !track.start_node_id || !track.end_node_id) throw new Error("Для разделения нужны оба конца участка");
+    const a = next.track_nodes.find(n => n.id === track.start_node_id);
+    const b = next.track_nodes.find(n => n.id === track.end_node_id);
+    if (!a || !b) throw new Error("Узлы участка не найдены");
+    const r = Math.max(0.05, Math.min(0.95, ratio));
+    const nodeId = track.id + "-split";
+    if (next.track_nodes.some(n => n.id === nodeId)) throw new Error("Узел разделения уже существует");
+    next.track_nodes.push({ id: nodeId, x:a.x+(b.x-a.x)*r, y:a.y+(b.y-a.y)*r, elevation_m:a.elevation_m+(b.elevation_m-a.elevation_m)*r });
+    const first = { ...track, id:track.id+"-a", end_node_id:nodeId };
+    const second = { ...track, id:track.id+"-b", start_node_id:nodeId };
+    const nodes = new Map(next.track_nodes.map(n=>[n.id,n]));
+    next.track_sections = next.track_sections.flatMap(t=>t.id===track.id?[normalizeTrackSection(first,nodes),normalizeTrackSection(second,nodes)]:[t]);
+    next.routes = next.routes.map(route=>({...route,track_section_ids:route.track_section_ids?.flatMap(id=>id===track.id?[first.id,second.id]:[id])}));
+    this.commit(next, "Разделить участок " + track.id);
+    this.setSelection("node", nodeId);
+  }
+
+  mergeSelectedTracks(): void {
+    if (!this.selectedTrackId) throw new Error("Сначала выберите участок");
+    if (!this.mergeTrackId) { this.mergeTrackId = this.selectedTrackId; this.setSelection("track", this.selectedTrackId); return; }
+    const firstId = this.mergeTrackId, secondId = this.selectedTrackId;
+    if (firstId === secondId) throw new Error("Выберите второй участок");
+    const next = structuredClone(this.options.getNetwork());
+    const a = next.track_sections.find(t=>t.id===firstId), b = next.track_sections.find(t=>t.id===secondId);
+    if (!a || !b || a.end_node_id !== b.start_node_id) throw new Error("Участки должны соединяться концом в начало");
+    const merged = normalizeTrackSection({ ...a, id:firstId+"-merged", end_node_id:b.end_node_id, length_km:a.length_km+b.length_km }, new Map(next.track_nodes.map(n=>[n.id,n])));
+    next.track_sections = next.track_sections.filter(t=>t.id!==firstId&&t.id!==secondId);
+    next.track_sections.push(merged);
+    next.routes = next.routes.map(route=>({...route,track_section_ids:route.track_section_ids?.flatMap(id=>id===firstId||id===secondId?[merged.id]:[id])}));
+    this.commit(next, "Объединить участки");
+    this.mergeTrackId = null;
+    this.setSelection("track", merged.id);
   }
 
   deleteNode(nodeId: string): void {
