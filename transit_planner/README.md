@@ -208,27 +208,37 @@ Transit Planner не моделирует жизненный цикл строи
 
 ### Этап 1 — Полное удаление fallback
 
-Статус: 🔄 завершается
+Статус: ✅ завершён (`8ad8352`, `94782a0`)
 
 Правило после этапа: если обязательный источник/расчёт недоступен — выдаётся явная ошибка. Никакого молчаливого перехода на упрощённую модель.
 
-Удалено в frontend (commit `8ad8352`):
+Frontend:
 
-- fallback маршрутизации: подмена Overture-маршрута прямой линией (`routeGeoJSON` → `emptyRouteGeoJSON`, ошибка при недоступности расчёта);
+- fallback маршрутизации: подмена Overture-маршрута прямой линией удалена (`routeGeoJSON` → `emptyRouteGeoJSON`), ошибка при недоступности расчёта;
 - synthetic demand: стаб `toDemandInput` (плоские 1000 поездок) удалён, `runRuntimePreview` требует authoritative OD и бросает явную ошибку;
-- fallback evaluation: `runClientPreview` без воркера переименован в честный `networkCounts`, reference-модель `/data/model.json` больше не декоgraded в `{}`;
+- fallback evaluation: `runClientPreview` без воркера переименован в честный `networkCounts`, reference-модель `/data/model.json` больше не деградирует в `{}`;
 - fallback сборки: хеш-бандл `/assets/evaluation.worker-jRuvxHc_.js` заменён статическим импортом `evaluation-runtime.js` (Vite переименовывает чанк сам);
 - дублирующие TS-реализации: удалены 15 мёртвых модулей (~1000 строк), включая `rraptor.ts` с битым импортом, дубли валидаторов, редакторов и кэшей;
 - worker-контракты: `matrix/routing/demand-choice` workers изолированы (`export {}`), устранены глобальные коллизии;
+- storage: повреждённый или бесформенный JSON настроек даёт явную ошибку; реальная ошибка IndexedDB при восстановлении проекта выводится в статус;
+- timetable/fleet/routing: отсутствующий headway = пустое расписание/нулевой парк, отсутствующий period = явная ошибка (не 20 мин и не 0–1440);
+- mode cost: `DEFAULT_ROW_COST` индексируется `TransitMode` и компиляторно исчерпывающ, подмена `?? 1` и мёртвые ветки row-классификации удалены;
 - резервные артефакты: удалены осиротевшие бандлы из `public/` и второй `model.json` (эталон в `reference/` сохранён).
 
-Осталось:
+Python:
 
-- Python: `_add_fallback_segment` в `road_builder.py` (деградация топологии при <2 connector refs), параметр `fallback` в `_effective_speed_kph` (overture.py);
-- Overture release discovery: зафиксированный `DEFAULT_RELEASE = "2026-09-23.1"` должен приходить в manifest city pack (Этап 2), а не подменяться константой runtime;
-- storage: молчаливый возврат UI-settings к defaults при отсутствующем значении; повреждённый JSON должен давать явную ошибку;
-- mode choice/cost: `DEFAULT_ROW_COST[route.mode] ?? 1` и мёртвые ветки row-классификации в `simulation/preview.ts`;
-- старые profiles/modes и дублирующие Python/TS расчёты — финальная ревизия после Этапов 2–8.
+- `build_road_graph()` удалён целиком (не-топологический путь); `_add_fallback_segment` удалён — сегмент с <2 connector refs бросает `ValueError`, а не деградирует в одно слитное ребро;
+- `load_roads()` собирает сегменты без полной коннекторной топологии и падает явной ошибкой со списком id;
+- `_effective_speed_kph`: параметр `fallback` переименован в обязательный `class_speed_kph`, без скрытого дефолта;
+- `api.py` (star-shim над `api_strict.py`) свёрнут в один модуль — дублирующий API-слой удалён;
+- мёртвый `coordinate_precision` убран.
+
+Перенесено дальше по карте (не блокирует правило Этапа 1):
+
+- `DEFAULT_RELEASE` фиксируется в manifest city pack на Этапе 2, вместо runtime-константы;
+- `operating_cost_per_km or profile.opex_per_vehicle_km` в `analytics.py` — reference-evaluation semantics, меняется вместе с parity-тестами на Этапе 8;
+- старые profiles/modes и дубли Python/TS — финальная ревизия на Этапе 17.
+
 
 ### Этап 2 — City Pack v1
 
