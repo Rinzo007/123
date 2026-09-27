@@ -1,11 +1,11 @@
 import type { NetworkPayload } from "../types";
 
-export type ReferenceEvaluationResult = {
+export type EvaluationResult = {
   result: unknown;
   wallMs: number;
 };
 
-export type ReferenceDemandBatch = {
+export type DemandBatch = {
   counts: Uint8Array;
   costs: Float64Array;
   frequencies: Float64Array;
@@ -15,26 +15,26 @@ export type ReferenceDemandBatch = {
   transfer: Float64Array;
 };
 
-export type ReferenceDemandOutput = {
+export type DemandOutput = {
   activeCounts: Uint8Array;
   order: Uint8Array;
   totals: Float64Array;
   computeMs: number;
 };
 
-export type ReferenceMatrixInput = {
+export type MatrixInput = {
   stops: number;
   offsets: Int32Array;
   targets: Int32Array;
   costs: Float64Array;
 };
 
-export type ReferenceMatrixOutput = {
+export type MatrixOutput = {
   times: Float64Array;
   previous: Int32Array;
 };
 
-let referenceRequestId = 0;
+let requestId = 0;
 
 function fingerprint(value: unknown): string {
   const json = JSON.stringify(value);
@@ -63,9 +63,9 @@ async function loadRuntimeModel(): Promise<Record<string, unknown> | null> {
   return runtimeModelPromise;
 }
 
-export class ReferenceEvaluationClient {
+export class EvaluationClient {
   private readonly workers: Worker[] = [];
-  private readonly tasks = new Map<number, { resolve: (value: ReferenceEvaluationResult) => void; reject: (error: Error) => void }>();
+  private readonly tasks = new Map<number, { resolve: (value: EvaluationResult) => void; reject: (error: Error) => void }>();
   private nextId = 1;
   private nextWorker = 0;
   private epoch = -1;
@@ -100,9 +100,9 @@ export class ReferenceEvaluationClient {
   }
 
   private cachedRunKey: string | null = null;
-  private cachedRunResult: ReferenceEvaluationResult | null = null;
+  private cachedRunResult: EvaluationResult | null = null;
 
-  run(lines: unknown, geoms: unknown, useBaseline = false, fare = 0): Promise<ReferenceEvaluationResult> {
+  run(lines: unknown, geoms: unknown, useBaseline = false, fare = 0): Promise<EvaluationResult> {
     if (!this.workers.length) return Promise.reject(new Error("reference evaluation worker unavailable"));
     const key = fingerprint({ epoch: this.epoch, lines, geoms, useBaseline, fare });
     if (key === this.cachedRunKey && this.cachedRunResult) return Promise.resolve(this.cachedRunResult);
@@ -137,11 +137,11 @@ export class ReferenceEvaluationClient {
   }
 }
 
-export function solveDemand(batch: ReferenceDemandBatch): Promise<ReferenceDemandOutput> {
+export function solveDemand(batch: DemandBatch): Promise<DemandOutput> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./demand-choice.worker.ts", import.meta.url), { type: "module" });
-    const id = `demand-${Date.now()}-${referenceRequestId++}`;
-      worker.onmessage = (event: MessageEvent<{ id: string; output: Omit<ReferenceDemandOutput, "computeMs">; computeMs: number }>) => {
+    const id = `demand-${Date.now()}-${requestId++}`;
+      worker.onmessage = (event: MessageEvent<{ id: string; output: Omit<DemandOutput, "computeMs">; computeMs: number }>) => {
       if (event.data.id !== id) return;
       worker.terminate();
       resolve({ ...event.data.output, computeMs: event.data.computeMs });
@@ -162,7 +162,7 @@ export function solveDemand(batch: ReferenceDemandBatch): Promise<ReferenceDeman
   });
 }
 
-export async function solveMatrix(input: ReferenceMatrixInput): Promise<ReferenceMatrixOutput> {
+export async function solveMatrix(input: MatrixInput): Promise<MatrixOutput> {
   const workerCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 2, input.stops));
   const workers = Array.from({ length: workerCount }, () => new Worker(new URL("./matrix.worker.ts", import.meta.url), { type: "module" }));
   const times = new Float64Array(input.stops * input.stops);
@@ -190,7 +190,7 @@ export async function solveMatrix(input: ReferenceMatrixInput): Promise<Referenc
   return { times, previous };
 }
 
-export function closeEvaluation(client: ReferenceEvaluationClient | null): void {
+export function closeEvaluation(client: EvaluationClient | null): void {
   client?.close();
 }
 
@@ -199,7 +199,7 @@ export function networkForRuntime(network: NetworkPayload): NetworkPayload {
 }
 
 
-export type ReferenceLine = {
+export type ModelLine = {
   id: string;
   mode: "bus" | "tram" | "metro" | "rail";
   stops: Array<[number, number]>;
@@ -208,7 +208,7 @@ export type ReferenceLine = {
   closed?: boolean;
 };
 
-export type ReferenceDemandLayer = {
+export type DemandLayer = {
   purpose: string;
   label: string;
   od: Array<[number, number, number, number]>;
@@ -217,10 +217,10 @@ export type ReferenceDemandLayer = {
   baseT?: number[][];
 };
 
-export type ReferenceDemand = {
+export type DemandInput = {
   pts: Array<[number, number, number, number]>;
   od: Array<[number, number, number, number]>;
-  layers?: ReferenceDemandLayer[];
+  layers?: DemandLayer[];
   model?: Record<string, unknown>;
 };
 
@@ -233,7 +233,7 @@ function fromLocalMeters(x: number, y: number, lon0: number, lat0: number): [num
   ];
 }
 
-export function toReferenceDemand(network: NetworkPayload, trips = 1000): ReferenceDemand {
+export function toDemandInput(network: NetworkPayload, trips = 1000): DemandInput {
   const lon0 = network.origin_lon ?? 39.2;
   const lat0 = network.origin_lat ?? 51.67;
   const pts: Array<[number, number, number, number]> = network.stops.map((stop) => {
@@ -248,7 +248,7 @@ export function toReferenceDemand(network: NetworkPayload, trips = 1000): Refere
   };
 }
 
-export function toReferenceLines(network: NetworkPayload): ReferenceLine[] {
+export function toModelLines(network: NetworkPayload): ModelLine[] {
   const byId = new Map(network.stops.map((stop) => [stop.id, stop]));
   return network.routes.map((route) => {
     const service = network.services.find((item) => item.route_id === route.id);
@@ -270,14 +270,14 @@ export function toReferenceLines(network: NetworkPayload): ReferenceLine[] {
   });
 }
 
-export function toReferenceGeometries(
+export function toGeometries(
   network: NetworkPayload,
 ): Array<{
   stops: Array<[number, number]>;
   cum: number[];
   segCostMul?: number[];
 }> {
-  return toReferenceLines(network).map((line) => {
+  return toModelLines(network).map((line) => {
     const cum = [0];
     for (let i = 1; i < line.stops.length; i += 1) {
       const [lon1, lat1] = line.stops[i - 1];
@@ -293,16 +293,16 @@ export function toReferenceGeometries(
   });
 }
 
-export type ReferenceCityDemand = ReferenceDemand & {
+export type CityDemandInput = DemandInput & {
   baselineT?: number[][];
 };
 
 export async function runRuntimePreview(
-  client: ReferenceEvaluationClient,
+  client: EvaluationClient,
   network: NetworkPayload,
-  demandInput?: ReferenceCityDemand,
-): Promise<ReferenceEvaluationResult> {
-  const demand = demandInput ?? toReferenceDemand(network);
+  demandInput?: CityDemandInput,
+): Promise<EvaluationResult> {
+  const demand = demandInput ?? toDemandInput(network);
   const runtimeModel = await loadRuntimeModel();
   const mergedDemand = {
     ...demand,
@@ -322,5 +322,5 @@ export async function runRuntimePreview(
     demand.layers ?? [],
     network.origin_lat ?? 51.67,
   );
-  return client.run(toReferenceLines(network), toReferenceGeometries(network), false, 0);
+  return client.run(toModelLines(network), toGeometries(network), false, 0);
 }
