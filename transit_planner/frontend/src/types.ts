@@ -39,6 +39,7 @@ export interface TrackSectionPayload {
   start_elevation_m?: number;
   end_elevation_m?: number;
   max_slope_percent?: number | null;
+  slope_percent?: number;
   curve_radius_m?: number | null;
   track_count?: number;
   direction?: SignalDirection;
