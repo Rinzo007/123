@@ -570,6 +570,22 @@ async function buildRoadRoute(): Promise<void> {
   }
 }
 
+function runPlanningPreview(): void {
+  network = keepNetwork(network, buildNetworkPayload());
+  lastPlanningPreview = planningPreview(network);
+  lastProbeDelta = scenarioBase ? probe(scenarioBase.network, network).delta : null;
+  setStatus(
+    "Быстрый расчёт: " +
+    lastPlanningPreview.routeLengthKm.toFixed(2) +
+    " км · " +
+    lastPlanningPreview.dailyDepartures +
+    " отправлений · парк " +
+    lastPlanningPreview.fleetEstimate,
+  );
+  renderResults();
+  render();
+}
+
 async function runPreview(): Promise<void> {
   if (stops.length < 2) return;
   busy = true;
@@ -967,6 +983,7 @@ shell.addEventListener("click", (event) => {
     case "load-city": void loadCityData(); break;
     case "build-road": void buildRoadRoute(); break;
     case "draw": drawMode = !drawMode; render(); break;
+    case "planning-preview": runPlanningPreview(); break;
     case "preview": void runPreview(); break;
     case "economics": void runEconomics(); break;
     case "city-assignment": void runCityAssignment(); break;
