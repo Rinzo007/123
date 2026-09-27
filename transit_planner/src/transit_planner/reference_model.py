@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from json import load
 from math import exp
+from pathlib import Path
+
+_MODEL_DATA = load(open(Path(__file__).with_name("model.json"), encoding="utf-8"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,12 +18,8 @@ class ReferencePeriod:
     return_share: float
 
 
-REFERENCE_PERIODS = (
-    ReferencePeriod("early", 240, 360, 0.06, 0.01),
-    ReferencePeriod("am", 360, 540, 0.60, 0.06),
-    ReferencePeriod("mid", 540, 900, 0.20, 0.18),
-    ReferencePeriod("pm", 900, 1140, 0.10, 0.55),
-    ReferencePeriod("eve", 1140, 1440, 0.04, 0.20),
+REFERENCE_PERIODS = tuple(
+    ReferencePeriod(*row) for row in _MODEL_DATA["periods"]
 )
 
 
@@ -46,52 +46,11 @@ class ReferencePurposeLayer:
             raise ValueError("max_destinations must be positive")
 
 
-REFERENCE_PURPOSE_LAYERS = (
+REFERENCE_PURPOSE_LAYERS = tuple(
     ReferencePurposeLayer(
-        "edu",
-        "School or campus",
-        0.16,
-        1600.0,
-        6,
-        (0.04, 0.76, 0.14, 0.05, 0.01),
-        (0.00, 0.02, 0.60, 0.32, 0.06),
-    ),
-    ReferencePurposeLayer(
-        "health",
-        "Hospital or clinic",
-        0.06,
-        3000.0,
-        6,
-        (0.08, 0.34, 0.36, 0.16, 0.06),
-        (0.04, 0.12, 0.36, 0.32, 0.16),
-    ),
-    ReferencePurposeLayer(
-        "shop",
-        "Shops",
-        0.34,
-        2000.0,
-        6,
-        (0.01, 0.07, 0.44, 0.36, 0.12),
-        (0.01, 0.03, 0.36, 0.42, 0.18),
-    ),
-    ReferencePurposeLayer(
-        "air",
-        "Airport",
-        0.03,
-        14000.0,
-        2,
-        (0.18, 0.24, 0.26, 0.20, 0.12),
-        (0.06, 0.14, 0.26, 0.28, 0.26),
-    ),
-    ReferencePurposeLayer(
-        "night",
-        "Bar, café or venue",
-        0.22,
-        3000.0,
-        6,
-        (0.00, 0.02, 0.14, 0.32, 0.52),
-        (0.02, 0.02, 0.08, 0.24, 0.64),
-    ),
+        row[0], row[1], row[2], row[3], row[4], tuple(row[5]), tuple(row[6])
+    )
+    for row in _MODEL_DATA["purposes"]
 )
 
 
@@ -178,13 +137,19 @@ class ReferenceMobilityProfile:
             raise ValueError("two_wheel_per_km_eur cannot be negative")
 
 
-REFERENCE_VOT_S_PER_EUR = 360.0
-REFERENCE_TRANSFER = ReferenceTransferProfile()
-REFERENCE_CAR = ReferenceCarProfile()
-REFERENCE_MOBILITY = ReferenceMobilityProfile()
+REFERENCE_VOT_S_PER_EUR = float(_MODEL_DATA["vot_s_per_eur"])
+_modes = _MODEL_DATA["modes"]
 
-# Standalone reference calibration constant used by the compatibility tests.
-REFERENCE_NO_CAR_EFFECTIVENESS = 0.78
+REFERENCE_TRANSFER = ReferenceTransferProfile(**_MODEL_DATA["transfer"])
+REFERENCE_CAR = ReferenceCarProfile(
+    cost_per_km_eur=float(_MODEL_DATA["car"]["cost_per_km_eur"]),
+    parking_eur=float(_MODEL_DATA["car"]["parking_eur"]),
+    parking_s=float(_MODEL_DATA["car"]["parking_s"]),
+    circuity=float(_MODEL_DATA["car"]["circuity"]),
+)
+REFERENCE_MOBILITY = ReferenceMobilityProfile(**_MODEL_DATA["mobility"])
+REFERENCE_NO_CAR_EFFECTIVENESS = float(_MODEL_DATA["no_car_effectiveness"])
+
 
 
 def headway_unevenness_factor(
@@ -277,54 +242,35 @@ def minimum_track_headway_min(
 
 
 REFERENCE_MODE_PROFILES = {
-    "bus": ReferenceModeProfile(
-        90, 5.0, 250.0, 20.0, 2.0, 90.0, 60.0, 90.0,
-        500.0, 3, 6.0, 0.0, 0.0, 1.2, 15.0, 8.0,
-        {
-            TrackRow.MIXED: ReferenceRowProfile(18.0, 0.4),
-            TrackRow.RESERVED: ReferenceRowProfile(23.0, 2.5),
+    mode: ReferenceModeProfile(
+        capacity=int(data["capacity"]),
+        opex_per_vehicle_km=float(data["opex_per_vehicle_km"]),
+        vehicle_cost_day=float(data["vehicle_cost_day"]),
+        dwell_s=float(data["dwell_s"]),
+        dwell_per_passenger_s=float(data["dwell_per_passenger_s"]),
+        jitter_s=float(data["jitter_s"]),
+        turnback_s=float(data["turnback_s"]),
+        track_capacity_per_hour=float(data["track_capacity_per_hour"]),
+        access_m=float(data["access_m"]),
+        max_class=int(data["max_class"]),
+        passenger_per_square_m=float(data["passenger_per_square_m"]),
+        platform_m=float(data["platform_m"]),
+        platform_cost_per_m=float(data["platform_cost_per_m"]),
+        acceleration_mps2=float(data["acceleration_mps2"]),
+        comfortable_radius_m=float(data["comfortable_radius_m"]),
+        minimum_radius_m=float(data["minimum_radius_m"]),
+        rows={
+            TrackRow(row): ReferenceRowProfile(float(values[0]), float(values[1]))
+            for row, values in data["rows"].items()
         },
-        TrackRow.MIXED,
-        lateral_acceleration_mps2=1.1,
-        infill_m=0.4,
-    ),
-    "tram": ReferenceModeProfile(
-        250, 9.0, 900.0, 25.0, 0.6, 60.0, 90.0, 40.0,
-        600.0, 2, 6.5, 40.0, 0.031, 1.2, 30.0, 18.0,
-        {
-            TrackRow.MIXED: ReferenceRowProfile(19.0, 9.0),
-            TrackRow.RESERVED: ReferenceRowProfile(25.0, 18.0),
-            TrackRow.GRADE: ReferenceRowProfile(33.0, 85.0),
-        },
-        TrackRow.MIXED,
-        lateral_acceleration_mps2=0.9,
-        infill_m=2.5,
-    ),
-    "metro": ReferenceModeProfile(
-        750, 14.0, 3200.0, 30.0, 0.15, 15.0, 150.0, 30.0,
-        800.0, 3, 8.0, 100.0, 0.3, 1.0, 150.0, 90.0,
-        {
-            TrackRow.RESERVED: ReferenceRowProfile(70.0, 32.0),
-            TrackRow.ELEVATED: ReferenceRowProfile(70.0, 62.0),
-            TrackRow.GRADE: ReferenceRowProfile(70.0, 120.0),
-        },
-        TrackRow.RESERVED,
-        lateral_acceleration_mps2=0.8,
-        infill_m=60.0,
-    ),
-    "rail": ReferenceModeProfile(
-        1000, 22.0, 5200.0, 45.0, 0.3, 25.0, 300.0, 20.0,
-        1500.0, 3, 7.0, 140.0, 0.125, 0.8, 400.0, 150.0,
-        {
-            TrackRow.RESERVED: ReferenceRowProfile(58.0, 22.0),
-            TrackRow.ELEVATED: ReferenceRowProfile(78.0, 48.0),
-            TrackRow.GRADE: ReferenceRowProfile(78.0, 95.0),
-        },
-        TrackRow.RESERVED,
-        lateral_acceleration_mps2=0.65,
-        infill_m=35.0,
-    ),
+        default_row=TrackRow(data["default_row"]),
+        lateral_acceleration_mps2=float(data["lateral_acceleration_mps2"]),
+        infill_m=float(data["infill_m"]),
+    )
+    for mode, data in _modes.items()
 }
+
+
 
 
 CROWDED_LOAD_RATIO = 1.0
