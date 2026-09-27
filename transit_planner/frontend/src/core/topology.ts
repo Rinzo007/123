@@ -7,6 +7,11 @@ export function validateTopology(network: NetworkPayload): TopologyIssue[] {
   const issues: TopologyIssue[] = [];
   const nodeIds = new Set(network.track_nodes.map(node => node.id));
   const trackIds = new Set(network.track_sections.map(track => track.id));
+  const seenTrackIds = new Set<string>();
+  for (const track of network.track_sections) {
+    if (seenTrackIds.has(track.id)) issues.push({ severity: "error", code: "duplicate_track_id", message: "Дублирующийся участок " + track.id, objectId: track.id });
+    seenTrackIds.add(track.id);
+  }
 
   for (const track of network.track_sections) {
     if (track.start_node_id && !nodeIds.has(track.start_node_id)) issues.push({ severity:"error", code:"missing_start_node", message:"Участок " + track.id + ": начальный узел не найден", objectId:track.id });
@@ -29,7 +34,28 @@ export function validateTopology(network: NetworkPayload): TopologyIssue[] {
     if (block.minimum_headway_seconds <= 0) issues.push({ severity:"error", code:"invalid_headway", message:"Сигнальный блок " + block.id + ": headway должен быть положительным", objectId:block.id });
   }
 
-  const crossoverKeys = new Set<string>();\n  for (const crossover of network.crossovers) {\n    const key = [crossover.from_track_id, crossover.to_track_id].sort().join("::") + "@" + crossover.position.toFixed(6);\n    if (crossoverKeys.has(key)) issues.push({ severity:"warning", code:"duplicate_crossover", message:"Повторяющийся стрелочный перевод " + crossover.id, objectId:crossover.id });\n    crossoverKeys.add(key);\n  }\n\n  for (const trackId of trackIds) {\n    const blocks = network.signal_blocks.filter(b => b.track_section_id === trackId).sort((a,b) => a.start_position-b.start_position);\n    for (let i=1;i<blocks.length;i++) if (blocks[i].start_position < blocks[i-1].end_position) issues.push({ severity:"warning", code:"overlapping_signal_blocks", message:"Перекрывающиеся сигнальные блоки на участке " + trackId, objectId:blocks[i].id });\n  }\n\n  for (const route of network.routes) {\n    const ids = route.track_section_ids ?? [];\n    for (let i=1;i<ids.length;i++) {\n      const prev = network.track_sections.find(t=>t.id===ids[i-1]);\n      const curr = network.track_sections.find(t=>t.id===ids[i]);\n      if (prev && curr && prev.end_node_id && curr.start_node_id && prev.end_node_id !== curr.start_node_id) issues.push({ severity:"error", code:"disconnected_route", message:"Маршрут " + route.id + ": участки " + ids[i-1] + " и " + ids[i] + " не соединены", objectId:route.id });\n    }\n  }\n\n  for (const route of network.routes) {
+  const crossoverKeys = new Set<string>();
+  for (const crossover of network.crossovers) {
+    const key = [crossover.from_track_id, crossover.to_track_id].sort().join("::") + "@" + crossover.position.toFixed(6);
+    if (crossoverKeys.has(key)) issues.push({ severity:"warning", code:"duplicate_crossover", message:"Повторяющийся стрелочный перевод " + crossover.id, objectId:crossover.id });
+    crossoverKeys.add(key);
+  }
+
+  for (const trackId of trackIds) {
+    const blocks = network.signal_blocks.filter(b => b.track_section_id === trackId).sort((a,b) => a.start_position-b.start_position);
+    for (let i=1;i<blocks.length;i++) if (blocks[i].start_position < blocks[i-1].end_position) issues.push({ severity:"warning", code:"overlapping_signal_blocks", message:"Перекрывающиеся сигнальные блоки на участке " + trackId, objectId:blocks[i].id });
+  }
+
+  for (const route of network.routes) {
+    const ids = route.track_section_ids ?? [];
+    for (let i=1;i<ids.length;i++) {
+      const prev = network.track_sections.find(t=>t.id===ids[i-1]);
+      const curr = network.track_sections.find(t=>t.id===ids[i]);
+      if (prev && curr && prev.end_node_id && curr.start_node_id && prev.end_node_id !== curr.start_node_id) issues.push({ severity:"error", code:"disconnected_route", message:"Маршрут " + route.id + ": участки " + ids[i-1] + " и " + ids[i] + " не соединены", objectId:route.id });
+    }
+  }
+
+  for (const route of network.routes) {
     for (const trackId of route.track_section_ids ?? []) {
       if (!trackIds.has(trackId)) issues.push({ severity:"error", code:"dangling_route_track", message:"Маршрут " + route.id + " ссылается на отсутствующий участок " + trackId, objectId:route.id });
     }
