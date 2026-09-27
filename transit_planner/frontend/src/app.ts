@@ -557,16 +557,13 @@ async function loadCityData(): Promise<void> {
     urbanMultipliersKey = "";
     const populationKey = datasetCacheKey("population-zones", b);
     const cachedPopulation = await loadDataset<FeatureCollection>(populationKey);
-    if (cachedPopulation) populationZones = cachedPopulation;
-    else {
-      try {
-        populationZones = await loadPopulationZones(b.south, b.west, b.north, b.east);
-        await saveDataset(populationKey, populationZones);
-      } catch {
-        populationZones = null;
-      }
+    if (cachedPopulation) {
+      populationZones = cachedPopulation;
+    } else {
+      populationZones = await loadPopulationZones(b.south, b.west, b.north, b.east);
+      await saveDataset(populationKey, populationZones);
     }
-    setStatus(`${cached ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`);
+    setStatus(`${cachedMeta && cachedRoads ? "Кэш Overture" : "Overture"} ${data.release}: ${data.counts.roads} участков, ${data.counts.connectors} коннекторов, ${data.counts.stops} остановок`);
     syncMapGeoJson();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "Ошибка загрузки Overture");
