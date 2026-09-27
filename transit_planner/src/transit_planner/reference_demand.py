@@ -360,7 +360,6 @@ def generate_reference_purpose_layer(
         demand=TemporalDemandMatrix(tuple(period_rows)),
         od_pairs=tuple(result),
     )
-    )
 
 
 def build_reference_demand_layers(
