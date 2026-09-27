@@ -35,7 +35,7 @@ def test_operating_economics():
     assert result.annual_operating_cost == result.daily_operating_cost * 365
 
 
-def test_reference_fleet_cost_is_calculated():
+def test_fleet_cost_is_zero_without_vehicle_acquisition_cost():
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0)))
     network.add_stop(Stop("b", "B", Point(1000, 0)))
@@ -55,7 +55,7 @@ def test_reference_fleet_cost_is_calculated():
         config=EconomicsConfig(period_id="peak"),
     )
 
-    assert result.daily_fleet_cost == 250.0
-    assert result.annual_fleet_cost == 250.0 * 365
+    assert result.daily_fleet_cost == 0.0
+    assert result.annual_fleet_cost == 0.0
 
 
