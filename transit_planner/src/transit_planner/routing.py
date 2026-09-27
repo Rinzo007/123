@@ -76,6 +76,9 @@ class _RaptorParent:
     ready_time: float
     arrival_time: float
     direction: int = 1
+    board_local: int = -1
+    alight_local: int = -1
+    pattern_size: int = 0
 
 
 class TransitRouter:
@@ -306,6 +309,9 @@ class TransitRouter:
                         ready_time=ready_time,
                         arrival_time=running,
                         direction=direction,
+                        board_local=board_index,
+                        alight_local=local_index,
+                        pattern_size=len(pattern.stops),
                     )
 
             self._apply_footpaths(next_arrival, parent)
@@ -396,40 +402,34 @@ class TransitRouter:
                 continue
 
             route = self.network.routes[service.route_id]
-            forward_stops = route.stop_ids
+            segment_count = len(route.segment_pairs())
+            base_stops = route.stop_ids + ((route.stop_ids[0],) if route.closed else ())
             forward_times = tuple(
                 self.network.route_segment_run_time_min(route, index)
-                for index in range(len(route.segment_pairs()))
+                for index in range(segment_count)
             )
             patterns.append(
                 _RaptorPattern(
                     route.id,
                     service.id,
-                    forward_stops,
+                    base_stops,
                     departures,
                     forward_times,
                 )
             )
 
             if route.both_ways:
+                reverse_stops = (
+                    tuple(reversed(route.stop_ids))
+                    + ((route.stop_ids[-1],) if route.closed else ())
+                )
                 patterns.append(
                     _RaptorPattern(
                         route.id,
                         service.id,
-                        tuple(reversed(forward_stops)),
+                        reverse_stops,
                         departures,
                         tuple(reversed(forward_times)),
-                    )
-                )
-
-            if route.closed and not route.both_ways:
-                patterns.append(
-                    _RaptorPattern(
-                        route.id,
-                        service.id,
-                        tuple(route.stop_ids),
-                        departures,
-                        forward_times,
                     )
                 )
 
@@ -507,33 +507,39 @@ class TransitRouter:
                 continue
 
             route_id = record.route_id
-            if route_id is None or record.previous_stop not in self.network.stops:
+            if route_id is None:
                 return None
 
             route = self.network.routes[route_id]
-            route_stops = route.stop_ids
-            board_index = route_stops.index(record.previous_stop)
-            alight_index = route_stops.index(current)
-
-            indices: range
-            if record.direction >= 0 and alight_index >= board_index:
-                indices = range(board_index, alight_index)
-            elif record.direction < 0 and alight_index <= board_index:
-                indices = range(board_index, alight_index, -1)
-            else:
+            size = record.pattern_size
+            if size < 2 or record.board_local < 0 or record.alight_local < 0:
                 return None
 
-            first_segment = True
-            for index in indices:
-                if record.direction >= 0:
-                    from_id = route_stops[index]
-                    to_id = route_stops[index + 1]
-                    segment_index = index
-                else:
-                    from_id = route_stops[index]
-                    to_id = route_stops[index - 1]
-                    segment_index = index - 1
+            local_step = 1 if record.direction >= 0 else -1
+            if record.direction >= 0 and record.alight_local < record.board_local:
+                return None
+            if record.direction < 0 and record.alight_local > record.board_local:
+                return None
 
+            local = record.board_local
+            first_segment = True
+            route_count = len(route.stop_ids)
+            while local != record.alight_local:
+                next_local = local + local_step
+                if record.direction >= 0:
+                    from_original = local % route_count
+                    to_original = next_local % route_count
+                else:
+                    from_original = (route_count - 1 - local) % route_count
+                    to_original = (route_count - 1 - next_local) % route_count
+
+                from_id = route.stop_ids[from_original]
+                to_id = route.stop_ids[to_original]
+                segment_index = (
+                    from_original
+                    if record.direction >= 0
+                    else (from_original - 1) % route_count
+                )
                 duration = self.network.route_segment_run_time_min(
                     route,
                     segment_index,
@@ -554,6 +560,7 @@ class TransitRouter:
                     )
                 )
                 first_segment = False
+                local = next_local
 
             current = record.previous_stop
             current_round -= 1
