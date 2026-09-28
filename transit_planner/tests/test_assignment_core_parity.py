@@ -517,6 +517,34 @@ def test_assign_once_matches_python(tmp_path: Path) -> None:
         assert (actual[0], actual[1]) == (expected[0], expected[1])
         assert abs(actual[2] - expected[2]) <= TOLERANCE
 
+    # Обратная связь: целевые штрафы, их смешивание с damping и величина
+    # изменения. Без этих проверок замена смешивания на прямую подстановку
+    # осталась бы незамеченной — итоговые метрики на коротком прогоне те же.
+    network_for_feedback = _build_network()
+    config = AssignmentConfig(period_id="am")
+    sections = _assign_once(
+        network_for_feedback, demand, _FixedRouter(), config, ZONES, ZONE_STOPS, {}, {},
+    ).section_loads
+    target = _segment_crowding_penalties(network_for_feedback, sections, config)
+    blended = {
+        key: 0.0 * config.damping + value * (1.0 - config.damping)
+        for key, value in target.items()
+    }
+    delta = _max_penalty_delta({}, target)
+    for key, value in target.items():
+        joined = "|".join(key)
+        assert any(
+            actual[0] == joined and abs(actual[1] - value) <= TOLERANCE
+            for actual in ts["crowdingTargets"]
+        ), f"целевой штраф {key} не совпал: {ts['crowdingTargets']}"
+        assert any(
+            actual[0] == joined and abs(actual[1] - blended[key]) <= TOLERANCE
+            for actual in ts["crowdingBlended"]
+        ), f"смешанный штраф {key} не совпал: {ts['crowdingBlended']}"
+    assert abs(ts["delta"] - delta) <= TOLERANCE, (
+        f"величина изменения {ts['delta']} != {delta}"
+    )
+
 
 def test_strict_fit_boarding_reports_denied() -> None:
     """Ограниченная вместимость обязана дать отказ в посадке, а не тишину."""

@@ -21,6 +21,9 @@ from transit_planner.reference_model import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 ROUTING_TS = ROOT / "frontend" / "src" / "workers" / "routing.ts"
+# Логика RAPTOR живёт в ядре, а routing.worker.ts — тонкая обёртка: веса
+# проверяются там, где они действительно применяются.
+KERNEL_TS = ROOT / "frontend" / "src" / "workers" / "routing-kernel.ts"
 WORKER_TS = ROOT / "frontend" / "src" / "workers" / "routing.worker.ts"
 
 
@@ -60,9 +63,17 @@ def test_ts_presets_match_model_json() -> None:
 
 
 def test_worker_takes_weights_by_injection() -> None:
-    source = WORKER_TS.read_text(encoding="utf-8")
+    kernel = KERNEL_TS.read_text(encoding="utf-8")
     for literal in ("1.65", "1.72", "1.39", "1.37"):
-        assert literal not in source, f"воркер содержит захардкоженный вес {literal}"
-    assert "input.walkWeight" in source
-    assert "input.waitWeight" in source
-    assert "input.shiftWeight" in source
+        assert literal not in kernel, f"ядро содержит захардкоженный вес {literal}"
+    assert "input.walkWeight" in kernel
+    assert "input.waitWeight" in kernel
+    assert "input.shiftWeight" in kernel
+
+
+def test_worker_wrapper_delegates_to_the_kernel() -> None:
+    """Обёртка не должна содержать собственной логики маршрутизации."""
+    wrapper = WORKER_TS.read_text(encoding="utf-8")
+    assert "routeSingle" in wrapper and "routeAlternatives" in wrapper
+    for literal in ("1.65", "1.72", "1.39", "1.37"):
+        assert literal not in wrapper, f"обёртка содержит захардкоженный вес {literal}"

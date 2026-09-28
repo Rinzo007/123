@@ -294,6 +294,7 @@ def _ts_out(tmp_path: Path) -> dict | None:
             node, str(TSC_JS),
             str(SRC / "workers" / "routing.ts"),
             str(SRC / "workers" / "routing.worker.ts"),
+            str(SRC / "workers" / "routing-kernel.ts"),
             str(SRC / "journey-alternatives.ts"),
             str(SRC / "planning" / "timetable.ts"),
             str(SRC / "types.ts"),
@@ -310,8 +311,8 @@ def _ts_out(tmp_path: Path) -> dict | None:
     for compiled in tmp_path.rglob("*.js"):
         text = compiled.read_text(encoding="utf-8")
         for target in (
-            "./journey-alternatives", "./routing", "../journey-alternatives",
-            "../types", "../planning/timetable",
+            "./journey-alternatives", "./routing", "./routing-kernel",
+            "../journey-alternatives", "../types", "../planning/timetable",
         ):
             text = text.replace(f'from "{target}"', f'from "{target}.js"')
         compiled.write_text(text, encoding="utf-8")
