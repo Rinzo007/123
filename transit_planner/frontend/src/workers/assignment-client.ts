@@ -127,6 +127,17 @@ export function demandStreetsFromLoads(
 
 /** Maps the worker result onto the API shape the UI already renders. */
 function toAssignmentResponse(result: AssignmentWorkerResult): AssignmentResponse {
+  // NaN в метриках означает, что где-то вверху потерялась величина. Показывать
+  // «NaN%» в интерфейсе нельзя: это выглядит как результат. Лучше явная ошибка
+  // с указанием проблемного поля.
+  const bad = Object.entries(result.metrics).filter(
+    ([, value]) => !Number.isFinite(value),
+  );
+  if (bad.length > 0) {
+    throw new Error(
+      `Assignment вернул нечисловые метрики: ${bad.map(([key]) => key).join(", ")}`,
+    );
+  }
   return {
     // Ёмкости шин считаются в браузере, но таблица трекова у UI остаётся от
     // серверного контракта: без неё раздел не рисуется, а пустой массив там же

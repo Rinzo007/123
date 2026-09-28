@@ -67,40 +67,58 @@ export interface ReferenceDemandBuilt {
   temporal: ReferenceDemandTemporalPair[];
 }
 
+/**
+ * Zone columns for the demand response and for assignment.
+ *
+ * `pts` has always been per zone (as the Python `/api/v1/demand/reference`
+ * endpoint does), and its fourth field is the attraction weight
+ * `max(jobs, population)`, not the raw jobs count.
+ */
+function zoneColumnsFromInput(input: DemandWorkerRequestInput): {
+  pts: Array<[number, number, number, number]>;
+  zones: ReferenceDemandZoneColumn[];
+} {
+  const pts: Array<[number, number, number, number]> = [];
+  const zones: ReferenceDemandZoneColumn[] = [];
+  input.zones.ids.forEach((id, index) => {
+    const [lon, lat] = fromLocalMeters(
+      input.zones.x[index],
+      input.zones.y[index],
+      input.originLon,
+      input.originLat,
+    );
+    const population = input.zones.population[index];
+    const jobs = input.zones.jobs[index];
+    pts.push([lon, lat, population, Math.max(jobs, population)]);
+    zones.push({
+      id,
+      centroid_x: input.zones.x[index],
+      centroid_y: input.zones.y[index],
+      population,
+      jobs,
+      no_car_share: input.zones.noCarShare[index] ?? 0,
+    });
+  });
+  return { pts, zones };
+}
+
 export function buildReferenceDemand(
   input: DemandWorkerRequestInput,
 ): Promise<ReferenceDemandBuilt> {
   const worker = new Worker(new URL("./demand.worker.ts", import.meta.url), { type: "module" });
   const job = ++requestId;
+  // Колонки зон собираются ДО отправки воркеру: массивы передаются с
+  // transfer и после этого отсоединяются, чтение на главном потоке даёт
+  // undefined, а из него — NaN во всех метриках assignment.
+  const zoneColumns = zoneColumnsFromInput(input);
+
   return new Promise((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<DemandWorkerResult>) => {
       if (event.data.job !== job) return;
       worker.terminate();
       const result = event.data;
       const zoneCount = input.zones.ids.length;
-      // Zone centroids, not places: the place columns are a different array and
-      // the response `pts` has always been per zone (as the Python endpoint does).
-      const pts: Array<[number, number, number, number]> = [];
-      const zones: ReferenceDemandZoneColumn[] = [];
-      input.zones.ids.forEach((id, index) => {
-        const [lon, lat] = fromLocalMeters(
-          input.zones.x[index],
-          input.zones.y[index],
-          input.originLon,
-          input.originLat,
-        );
-        const population = input.zones.population[index];
-        const jobs = input.zones.jobs[index];
-        pts.push([lon, lat, population, Math.max(jobs, population)]);
-        zones.push({
-          id,
-          centroid_x: input.zones.x[index],
-          centroid_y: input.zones.y[index],
-          population,
-          jobs,
-          no_car_share: input.zones.noCarShare[index] ?? 0,
-        });
-      });
+      const { pts, zones } = zoneColumns;
       const zoneId = (index: number) => input.zones.ids[index] ?? `zone-${index}`;
       const od: Array<[number, number, number, number]> = [];
       for (let index = 0; index < result.odOrigin.length; index += 1) {
@@ -188,6 +206,7 @@ export function buildReferenceDemand(
         input.zones.y.buffer,
         input.zones.population.buffer,
         input.zones.jobs.buffer,
+        input.zones.noCarShare.buffer,
         input.zones.attractions.buffer,
         input.places.lon.buffer,
         input.places.lat.buffer,
