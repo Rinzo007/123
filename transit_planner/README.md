@@ -144,7 +144,7 @@ Demand и assignment используют единый поток расчёта
 - максимальная загрузка;
 - неназначенный спрос.
 
-Расчётная часть использует существующий backend и каноническую модель спроса; frontend не дублирует алгоритмы assignment.
+Расчётная часть переносится в браузер по мере готовности (Этапы 6, 7, 6.5); Python остаётся эталоном и источником паритет-тестов, а не вторым runtime-путём.
 
 ### Архитектура frontend
 
@@ -371,7 +371,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Статус: 🔄 частично готов
 
-Уже перенесено: commuter demand; purpose layers; Overture places; purpose generators; периоды; WGS84 точки; reference generator En(). Typed-array представление, передача OD через ArrayBuffer, полный reference demand pipeline в worker.
+Уже перенесено: commuter demand; purpose layers; Overture places; purpose generators; периоды; WGS84 точки; reference generator En(). Typed-array представление, передача OD через ArrayBuffer, полный reference demand pipeline в worker; mode choice (Этап 7); ядро и сетевой слой assignment (Этап 6.5).
 
 Сделано в этой итерации:
 
@@ -381,9 +381,9 @@ Overture streets → street graph → compressed binary graph → routing worker
 - Паритет `gravityOd()` ↔ `gravity_od()` закреплён в `tests/test_demand_parity.py` (состав пар, поездки, базовое время, сохранение производств).
 - Попутно исправлен баг: `pts` в `buildReferenceDemand()` брался из координат мест Overture по индексу зоны вместо центроидов зон.
 
-Осталось: убрать Python как runtime dependency для самого расчёта пассажиропотоков (`/api/v1/assignment`) и для `runEconomics()`, которые до сих пор используют синтетическую пару; строгая провязка спроса к reference-периодам вместо daily-матрицы (Этап 7).
+Осталось: убрать Python как runtime dependency для самого расчёта пассажиропотоков (`/api/v1/assignment`) и для `runEconomics()`, которые до сих пор используют синтетическую пару; строгая провязка спроса к reference-периодам вместо daily-матрицы (Этап 7). Перенос assignment-движка идёт в Этапе 6.5.
 
-Проверено: `python -m pytest tests -q` → 216 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
+Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
 
 ### Этап 7 — Mode Choice
 
@@ -392,6 +392,33 @@ Overture streets → street graph → compressed binary graph → routing worker
 Перенести основной nested logit: car; transit; walk; bike / two-wheel.
 
 Сделать: инкрементальный nested logit; frequency-based insertion (референс: `demand-choice.worker.ts`); per-mode generalized cost; mobility constraints; typed-array output; incremental recalculation.
+
+Перенесено в TS (`frontend/src/choice.ts`): `ChoiceConfig` с полной валидацией; `transitGeneralizedMinutes` с нелинейной нагрузкой от пересадок; `utilities` для пяти режимов (car/transit/walk/bike/rest) с корректной обработкой `-Infinity`; `probabilities` (multinomial logit с долей households без автомобиля и ограничением доступности режимов); `alternativeProbabilities` — split транзитного спроса по обобщённой стоимости.
+
+Паритет закреплён в `tests/test_choice_parity.py`: 6 сценариев (нулевые расстояния, недоступный транзит, вело без расстояния, пересадки, тариф, поездка дальше `bike_reach_m`) × 4 набора доступности; константы сверяются с `model.json`.
+
+Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0.
+
+Не перенесено: инкрементальный nested logit и frequency-based insertion из `demand-choice.worker.ts` — они относятся к отдельному слою выбора и не нужны assignment-движку, который считает распределение по одному набору обобщённых стоимостей.
+
+### Этап 6.5 — Assignment в браузере
+
+Статус: 🔄 в работе
+
+Цель: убрать `/api/v1/assignment` из рантайма, чтобы серверная реализация не была вторым runtime-путём для тех же алгоритмов (см. принцип в Этапе 14).
+
+Перенесено и покрыто паритом с Python:
+
+- `frontend/src/assignment-model.ts` — ядро расчёта потоков: `assignOnce` (mode split, strict-fit boarding, потоки по маршрутам/остановкам/секциям, классификация потерь), `segmentCrowdingPenalties`, `blendFeedback`, `maxFeedbackDelta`, профили режимов, уровни переполненности, `crowdingTimeMultiplier`, `headwayUnevennessFactor`.
+- `frontend/src/assignment-network.ts` — сетевой слой: `sectionCapacityAndPlatforms` (с разделением общей физической шины между сервисами), `stopDwellCoefficients`, `nearestStopId` с ограничением по `access_m` режима, `serviceHeadwayFactors`, `serviceDepartures`, `segmentRunTimes`.
+
+Ключевое решение по париту: роутеры у TS и Python различаются намеренно, поэтому journey **инъецируются** в ядро, а сравнивается сам расчёт потоков. Вместимости, времена в пути и dwell подаются из эталона — их порт впереди по цепочке.
+
+Тесты: `tests/test_assignment_core_parity.py`, `tests/test_assignment_network_parity.py`. Оба проверены мутациями: сценарии специально включают высадку, совпадающую с посадкой, и рельс, где предел профиля режима реально ограничивает вместимость — иначе соответствующие ветки остаются непроверенными.
+
+Осталось: альтернативы в `routing.worker.ts` (штрафы за переполненность, интервальные множители, diversity, Pareto-фильтр); цикл итераций и `assignment.worker.ts`; переключение `runPreview` и `runEconomics` с Python.
+
+Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
 
 ### Этап 8 — Network Evaluation Worker
 
