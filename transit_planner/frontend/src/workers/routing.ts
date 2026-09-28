@@ -69,7 +69,14 @@ function departures(start: number, end: number, headway: number, offset: number)
   return result;
 }
 
-function pack(
+/**
+ * Builds the packed worker input for a network and period.
+ *
+ * Exported so the assignment worker can pack once per iteration with fresh
+ * headway factors instead of duplicating the layout here, and so tests can
+ * drive the kernel directly without spawning a browser worker.
+ */
+export function packRaptorInput(
   network: NetworkPayload,
   periodId: string,
   accessTimeMin: Float64Array,
@@ -267,6 +274,11 @@ function pack(
       walkWeight: weights.walk,
       waitWeight: weights.wait,
       shiftWeight: weights.shift,
+      routePenalties: new Float64Array(routePatterns.length),
+      bannedRoutes: new Uint8Array(routePatterns.length),
+      segmentPenalties: new Float64Array(routeSegmentTimes.length),
+      maxAlternatives: 1,
+      diversityPenaltyMin: 15,
     },
     // Копия нужна для геометрии маршрута: routeStops уходит в воркер по
     // transfer и в главном потоке обнуляется. Воркеру она не нужна, поэтому
@@ -297,7 +309,7 @@ export function routeWithRaptor(
   maxTransfers = 4,
   weights: RaptorChoiceWeights = JOURNEY_CHOICE_TABLE5,
 ): Promise<RaptorRouteResult> {
-  const { input, patterns } = pack(
+  const { input, patterns } = packRaptorInput(
     network,
     periodId,
     accessTimeMin,

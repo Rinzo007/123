@@ -1,3 +1,21 @@
+/**
+ * rRAPTOR kernel with crowding/penalty support and alternative selection.
+ *
+ * One `routeOnce` call is a full RAPTOR sweep for a given penalty state; the
+ * handler then repeats it with growing route penalties and banned patterns,
+ * exactly like `routing.py::shortest_alternatives`, and keeps the
+ * Pareto-optimal survivors.
+ *
+ * All penalties arrive already expanded per pattern or per segment: the worker
+ * stays a pure kernel, the caller owns the (route, from, to) key mapping. That
+ * also lets a two-way route be banned in both directions, which a per-pattern
+ * penalty loop cannot express on its own.
+ *
+ * Reported in-vehicle times are the *true* segment times, never the inflated
+ * ones: crowding must steer the choice without corrupting the utility.
+ */
+import { paretoFilterJourneys, type AlternativeJourney } from "../journey-alternatives";
+
 type RaptorRequest = {
   type: "route";
   job: number;
@@ -21,7 +39,59 @@ type RaptorRequest = {
   walkWeight: number;
   waitWeight: number;
   shiftWeight: number;
+  /** Extra generalized cost per pattern; 0 when unused. */
+  routePenalties: Float64Array;
+  /** 1 marks a pattern the caller has ruled out. */
+  bannedRoutes: Uint8Array;
+  /** Extra in-vehicle minutes per segment; 0 when unused. */
+  segmentPenalties: Float64Array;
+  /** Alternatives to look for; 1 keeps the historical single-journey shape. */
+  maxAlternatives: number;
+  diversityPenaltyMin: number;
 };
+
+interface RaptorRide {
+  pattern: number;
+  boardStop: number;
+  alightStop: number;
+  boardLocal: number;
+  alightLocal: number;
+  inVehicleMin: number;
+  waitMin: number;
+}
+
+interface SingleJourney {
+  found: boolean;
+  arrivalMin: number;
+  generalizedMin: number;
+  transfers: number;
+  rides: RaptorRide[];
+  patterns: Int32Array;
+  boards: Int32Array;
+  alights: Int32Array;
+  accessStop: number;
+  egressStop: number;
+  departureMin: Float64Array;
+  arrivalByLegMin: Float64Array;
+  walkToMin: number;
+  walkFromMin: number;
+  waitMin: number;
+  departureShiftMin: number;
+}
+
+interface AlternativeResult extends AlternativeJourney {
+  patternIds: number[];
+  arrivalMin: number;
+  generalizedMin: number;
+  inVehicleMin: number;
+  walkToMin: number;
+  walkFromMin: number;
+  transfers: number;
+  durationMin: number;
+  waitMin: number;
+  shiftMin: number;
+  rides: RaptorRide[];
+}
 
 const TRANSFER_PENALTY_MIN = 405 / 60;
 
@@ -41,10 +111,16 @@ function firstDeparture(
   return left < end ? left : -1;
 }
 
-self.onmessage = (event: MessageEvent<RaptorRequest>) => {
-  const input = event.data;
-  if (input.type !== "route") return;
-
+/**
+ * One full sweep: every departure in the range, best journey by generalized
+ * cost. Penalties are applied here and nowhere else.
+ */
+function routeOnce(
+  input: RaptorRequest,
+  routePenalties: Float64Array,
+  bannedRoutes: Uint8Array,
+  segmentPenalties: Float64Array,
+): SingleJourney {
   const infinity = Number.POSITIVE_INFINITY;
   const rounds = input.maxTransfers + 2;
   const stops = input.stopCount;
@@ -56,10 +132,10 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
   let bestWalkFrom = 0;
   let bestWait = 0;
   let bestShift = 0;
-
-  let bestRouteIds = new Int32Array(0);
-  let bestBoardStops = new Int32Array(0);
-  let bestAlightStops = new Int32Array(0);
+  let bestRides: RaptorRide[] = [];
+  let bestPatterns = new Int32Array(0);
+  let bestBoards = new Int32Array(0);
+  let bestAlights = new Int32Array(0);
   let bestAccessStop = -1;
   let bestEgressStop = -1;
   let bestDepartures = new Float64Array(0);
@@ -67,38 +143,17 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
 
   // Carried-forward labels per round (RAPTOR Algorithm 1, stage 1) plus
   // provenance so reconstruction can jump straight to the previous round.
-  const arrivalByRound = Array.from(
-    { length: rounds },
-    () => new Float64Array(stops).fill(infinity),
-  );
-  const routeByRound = Array.from(
-    { length: rounds },
-    () => new Int32Array(stops).fill(-1),
-  );
-  const boardByRound = Array.from(
-    { length: rounds },
-    () => new Int32Array(stops).fill(-1),
-  );
-  const departureByRound = Array.from(
-    { length: rounds },
-    () => new Float64Array(stops).fill(infinity),
-  );
-  const prevStopByRound = Array.from(
-    { length: rounds },
-    () => new Int32Array(stops).fill(-1),
-  );
-  const prevRoundByRound = Array.from(
-    { length: rounds },
-    () => new Int32Array(stops).fill(-1),
-  );
-  const accessSourceByRound = Array.from(
-    { length: rounds },
-    () => new Int32Array(stops).fill(-1),
-  );
+  const arrivalByRound = Array.from({ length: rounds }, () => new Float64Array(stops).fill(infinity));
+  const routeByRound = Array.from({ length: rounds }, () => new Int32Array(stops).fill(-1));
+  const boardByRound = Array.from({ length: rounds }, () => new Int32Array(stops).fill(-1));
+  const departureByRound = Array.from({ length: rounds }, () => new Float64Array(stops).fill(infinity));
+  const prevStopByRound = Array.from({ length: rounds }, () => new Int32Array(stops).fill(-1));
+  const prevRoundByRound = Array.from({ length: rounds }, () => new Int32Array(stops).fill(-1));
+  const accessSourceByRound = Array.from({ length: rounds }, () => new Int32Array(stops).fill(-1));
   const labelRound = new Int32Array(stops).fill(-1);
 
   const reconstruct = (departureMin: number, target: number, targetRound: number) => {
-    const routes: number[] = [];
+    const patterns: number[] = [];
     const boards: number[] = [];
     const alights: number[] = [];
     const departures: number[] = [];
@@ -117,13 +172,13 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       if (fromStop < 0 || fromRound < 0) return null;
       if (routeId >= 0) {
         const board = boardByRound[r][cursor];
-        const scheduledDeparture = departureByRound[r][cursor];
-        routes.push(routeId);
+        const scheduled = departureByRound[r][cursor];
+        patterns.push(routeId);
         boards.push(board);
         alights.push(cursor);
-        departures.push(scheduledDeparture);
+        departures.push(scheduled);
         arrivals.push(arrivalByRound[r][cursor]);
-        wait += Math.max(0, scheduledDeparture - arrivalByRound[fromRound][board]);
+        wait += Math.max(0, scheduled - arrivalByRound[fromRound][board]);
       }
       cursor = fromStop;
       r = fromRound;
@@ -132,7 +187,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
     // Цепочка без транзитных ног (чистая ходьба от доступа) здесь не
     // считается найденным маршрутом: планировщик транзита такие результаты
     // помечает not-found (см. journey.ts).
-    if (routes.length === 0) return null;
+    if (patterns.length === 0) return null;
     const accessStop = accessSourceByRound[0][cursor];
     const access = accessStop >= 0 ? input.accessTimeMin[accessStop] : Number.POSITIVE_INFINITY;
     const walkFrom = input.egressTimeMin[target];
@@ -140,21 +195,54 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       return null;
     }
 
-    const transfers = Math.max(0, routes.length - 1);
+    const transfers = Math.max(0, patterns.length - 1);
     const shift = Math.max(0, departureMin - input.departureMin);
     const arrivalWithEgress = finalArrival + walkFrom;
-    const generalized =
-      (arrivalWithEgress - departureMin) +
-      input.waitWeight * wait +
-      input.walkWeight * (access + walkFrom) +
-      input.shiftWeight * shift +
-      TRANSFER_PENALTY_MIN * transfers;
+    let generalized = (arrivalWithEgress - departureMin)
+      + input.waitWeight * wait
+      + input.walkWeight * (access + walkFrom)
+      + input.shiftWeight * shift
+      + TRANSFER_PENALTY_MIN * transfers;
 
-    routes.reverse();
+    patterns.reverse();
     boards.reverse();
     alights.reverse();
     departures.reverse();
     arrivals.reverse();
+
+    // Штрафы маршрутов начисляются на выбранную связку, а не на весь путь.
+    for (const pattern of patterns) {
+      generalized += Math.max(0, routePenalties[pattern] ?? 0);
+    }
+
+    // Ноги собираются из настоящих времён сегментов: раздутые штрафом переполненности
+    // времена влияют на выбор, но не должны попадать в полезность поездки.
+    const rides: RaptorRide[] = [];
+    let inVehicle = 0;
+    for (let i = 0; i < patterns.length; i += 1) {
+      const pattern = patterns[i];
+      const start = input.routeOffsets[pattern];
+      const count = input.routeStopCounts[pattern];
+      const segmentStart = input.routeSegmentOffsets[pattern];
+      const boardLocal = indexOfStop(input.routeStops, start, count, boards[i]);
+      const alightLocal = indexOfStop(input.routeStops, start, count, alights[i]);
+      if (boardLocal < 0 || alightLocal < 0 || alightLocal <= boardLocal) return null;
+      let legMinutes = 0;
+      for (let local = boardLocal; local < alightLocal; local += 1) {
+        legMinutes += input.segmentTimes[segmentStart + local];
+      }
+      inVehicle += legMinutes;
+      rides.push({
+        pattern,
+        boardStop: boards[i],
+        alightStop: alights[i],
+        boardLocal,
+        alightLocal,
+        inVehicleMin: legMinutes,
+        waitMin: Math.max(0, departures[i] - arrivals[i - 1 < 0 ? 0 : i - 1]),
+      });
+    }
+
     return {
       generalized,
       arrivalWithEgress,
@@ -165,11 +253,13 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       walkFrom,
       wait,
       shift,
-      routeIds: Int32Array.from(routes),
-      boardStops: Int32Array.from(boards),
-      alightStops: Int32Array.from(alights),
+      patterns: Int32Array.from(patterns),
+      boards: Int32Array.from(boards),
+      alights: Int32Array.from(alights),
       departures: Float64Array.from(departures),
       arrivals: Float64Array.from(arrivals),
+      rides,
+      inVehicle,
     };
   };
 
@@ -199,7 +289,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       const current = arrivalByRound[round];
       const next = arrivalByRound[round + 1];
 
-      // Stage 1: carry forward previous-round labels (and provenance).
+      // Stage 1: carry forward labels (and provenance).
       next.set(current);
       routeByRound[round + 1].set(routeByRound[round]);
       boardByRound[round + 1].set(boardByRound[round]);
@@ -208,16 +298,17 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       prevRoundByRound[round + 1].set(prevRoundByRound[round]);
       accessSourceByRound[round + 1].set(accessSourceByRound[round]);
 
-      // Stage 2: scan each route, boarding the trip that minimizes
+      // Stage 2: scan each pattern, boarding the trip that minimizes
       // departureTime - cumulativeRunningTime (paper Section 3).
-      for (let route = 0; route < input.routeCount; route += 1) {
-        const routeStart = input.routeOffsets[route];
-        const routeLength = input.routeStopCounts[route];
+      for (let pattern = 0; pattern < input.routeCount; pattern += 1) {
+        if (bannedRoutes[pattern]) continue;
+        const routeStart = input.routeOffsets[pattern];
+        const routeLength = input.routeStopCounts[pattern];
         if (routeLength < 2) continue;
 
-        const departureStart = input.routeDepartureOffsets[route];
-        const departureEnd = input.routeDepartureOffsets[route + 1];
-        const segmentStart = input.routeSegmentOffsets[route];
+        const departureStart = input.routeDepartureOffsets[pattern];
+        const departureEnd = input.routeDepartureOffsets[pattern + 1];
+        const segmentStart = input.routeSegmentOffsets[pattern];
 
         let bestKey = infinity;
         let boardDeparture = infinity;
@@ -229,10 +320,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           const arrivalAtStop = current[stop];
           if (Number.isFinite(arrivalAtStop)) {
             const departureIndex = firstDeparture(
-              input.departures,
-              departureStart,
-              departureEnd,
-              arrivalAtStop,
+              input.departures, departureStart, departureEnd, arrivalAtStop,
             );
             if (departureIndex >= 0) {
               const scheduled = input.departures[departureIndex];
@@ -249,7 +337,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
             const candidate = bestKey + cumulativeTime;
             if (candidate < next[stop]) {
               next[stop] = candidate;
-              routeByRound[round + 1][stop] = route;
+              routeByRound[round + 1][stop] = pattern;
               boardByRound[round + 1][stop] = boardStop;
               departureByRound[round + 1][stop] = boardDeparture;
               prevStopByRound[round + 1][stop] = boardStop;
@@ -260,13 +348,14 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           }
 
           if (local < routeLength - 1) {
-            cumulativeTime += input.segmentTimes[segmentStart + local];
+            cumulativeTime += input.segmentTimes[segmentStart + local]
+              + Math.max(0, segmentPenalties[segmentStart + local] ?? 0);
           }
         }
       }
 
       // Stage 3: foot-paths. Walking does not increase the trip count.
-      for (let from = 0; from < input.stopCount; from += 1) {
+      for (let from = 0; from < stops; from += 1) {
         const fromArrival = next[from];
         if (!Number.isFinite(fromArrival)) continue;
         for (
@@ -308,9 +397,10 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
         bestWalkFrom = journey.walkFrom;
         bestWait = journey.wait;
         bestShift = journey.shift;
-        bestRouteIds = journey.routeIds;
-        bestBoardStops = journey.boardStops;
-        bestAlightStops = journey.alightStops;
+        bestRides = journey.rides;
+        bestPatterns = journey.patterns;
+        bestBoards = journey.boards;
+        bestAlights = journey.alights;
         bestDepartures = journey.departures;
         bestArrivals = journey.arrivals;
       }
@@ -322,36 +412,152 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
     evaluateDeparture(departure);
   }
 
-  self.postMessage(
-    {
-      type: "result",
-      job: input.job,
-      result: {
-        found: Number.isFinite(bestGeneralized),
-        arrivalMin: bestArrival,
-        generalizedMin: bestGeneralized,
-        transfers: bestTransfers,
-        routeIds: bestRouteIds,
-        boardStops: bestBoardStops,
-        alightStops: bestAlightStops,
-        accessStop: bestAccessStop,
-        egressStop: bestEgressStop,
-        departureMin: bestDepartures,
-        arrivalByLegMin: bestArrivals,
-        walkToMin: bestWalkTo,
-        walkFromMin: bestWalkFrom,
-        waitMin: bestWait,
-        departureShiftMin: bestShift,
+  return {
+    found: Number.isFinite(bestGeneralized),
+    arrivalMin: bestArrival,
+    generalizedMin: bestGeneralized,
+    transfers: bestTransfers,
+    rides: bestRides,
+    patterns: bestPatterns,
+    boards: bestBoards,
+    alights: bestAlights,
+    accessStop: bestAccessStop,
+    egressStop: bestEgressStop,
+    departureMin: bestDepartures,
+    arrivalByLegMin: bestArrivals,
+    walkToMin: bestWalkTo,
+    walkFromMin: bestWalkFrom,
+    waitMin: bestWait,
+    departureShiftMin: bestShift,
+  };
+}
+
+function indexOfStop(stops: Int32Array, start: number, count: number, target: number): number {
+  for (let i = 0; i < count; i += 1) {
+    if (stops[start + i] === target) return i;
+  }
+  return -1;
+}
+
+self.onmessage = (event: MessageEvent<RaptorRequest>) => {
+  const input = event.data;
+  if (input.type !== "route") return;
+
+  if (input.maxAlternatives <= 1) {
+    const single = routeOnce(input, input.routePenalties, input.bannedRoutes, input.segmentPenalties);
+    self.postMessage(
+      {
+        type: "result",
+        job: input.job,
+        result: {
+          found: single.found,
+          arrivalMin: single.arrivalMin,
+          generalizedMin: single.generalizedMin,
+          transfers: single.transfers,
+          routeIds: single.patterns,
+          boardStops: single.boards,
+          alightStops: single.alights,
+          accessStop: single.accessStop,
+          egressStop: single.egressStop,
+          departureMin: single.departureMin,
+          arrivalByLegMin: single.arrivalByLegMin,
+          walkToMin: single.walkToMin,
+          walkFromMin: single.walkFromMin,
+          waitMin: single.waitMin,
+          departureShiftMin: single.departureShiftMin,
+        },
       },
-    },
-    {
-      transfer: [
-        bestRouteIds.buffer,
-        bestBoardStops.buffer,
-        bestAlightStops.buffer,
-        bestDepartures.buffer,
-        bestArrivals.buffer,
-      ],
-    },
-  );
+      {
+        transfer: [
+          single.patterns.buffer,
+          single.boards.buffer,
+          single.alights.buffer,
+          single.departureMin.buffer,
+          single.arrivalByLegMin.buffer,
+        ],
+      },
+    );
+    return;
+  }
+
+  // Diversity loop: re-route with growing penalties on the patterns already
+  // used, then keep the Pareto-optimal survivors.
+  const penalties = Float64Array.from(input.routePenalties);
+  const basePenalties = Float64Array.from(input.routePenalties);
+  const banned = Uint8Array.from(input.bannedRoutes);
+  const collected: AlternativeResult[] = [];
+  const seen = new Set<string>();
+  const weights = { walk: input.walkWeight, wait: input.waitWeight, transferPenaltyMin: TRANSFER_PENALTY_MIN };
+
+  for (let rank = 0; rank < input.maxAlternatives; rank += 1) {
+    const single = routeOnce(input, penalties, banned, input.segmentPenalties);
+    if (!single.found) break;
+    const patterns = single.rides.map((ride) => ride.pattern);
+    const sequence = patterns.join("|");
+    if (seen.has(sequence)) break;
+    seen.add(sequence);
+
+    const legs = [
+      { kind: "walk" as const, fromId: "", toId: "", durationMin: single.walkToMin, waitMin: 0 },
+      ...single.rides.map((ride) => ({
+        kind: "transit" as const,
+        routeId: String(ride.pattern),
+        fromId: String(ride.boardStop),
+        toId: String(ride.alightStop),
+        durationMin: ride.inVehicleMin,
+        waitMin: ride.waitMin,
+      })),
+      { kind: "walk" as const, fromId: "", toId: "", durationMin: single.walkFromMin, waitMin: 0 },
+    ];
+    const inVehicleMin = single.rides.reduce((sum, ride) => sum + ride.inVehicleMin, 0);
+    collected.push({
+      routeIds: patterns.map(String),
+      legs,
+      transfers: single.transfers,
+      durationMin: single.arrivalMin - input.departureMin,
+      perceivedTimeMin: inVehicleMin
+        + weights.walk * (single.walkToMin + single.walkFromMin)
+        + weights.wait * single.waitMin
+        + weights.transferPenaltyMin * single.transfers,
+      patternIds: patterns,
+      arrivalMin: single.arrivalMin,
+      generalizedMin: single.generalizedMin,
+      inVehicleMin,
+      walkToMin: single.walkToMin,
+      walkFromMin: single.walkFromMin,
+      waitMin: single.waitMin,
+      shiftMin: single.departureShiftMin,
+      rides: single.rides,
+    });
+
+    const increment = input.diversityPenaltyMin * (rank + 1);
+    for (const pattern of patterns) {
+      const next = Math.max(
+        penalties[pattern] ?? 0,
+        (basePenalties[pattern] ?? 0) + increment,
+      );
+      penalties[pattern] = next;
+      banned[pattern] = 1;
+    }
+  }
+
+  const kept = paretoFilterJourneys(collected, weights);
+  self.postMessage({
+    type: "alternatives",
+    job: input.job,
+    passes: collected.length,
+    alternatives: kept.map((journey) => ({
+      patternIds: journey.patternIds,
+      transfers: journey.transfers,
+      durationMin: journey.durationMin,
+      arrivalMin: journey.arrivalMin,
+      generalizedMin: journey.generalizedMin,
+      inVehicleMin: journey.inVehicleMin,
+      waitMin: journey.waitMin,
+      walkToMin: journey.walkToMin,
+      walkFromMin: journey.walkFromMin,
+      shiftMin: journey.shiftMin,
+      rides: journey.rides,
+    })),
+  });
 };
