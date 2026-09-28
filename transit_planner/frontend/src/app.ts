@@ -1,16 +1,15 @@
 import { Map as MapLibreMap, NavigationControl, type GeoJSONSource, type MapMouseEvent } from "maplibre-gl";
 import type { FeatureCollection, LineString, Point as GeoJSONPoint } from "./geojson";
 import {
-  calculateAssignment,
   calculateCityAssignment,
   calculateEconomics,
   compareScenarios,
   createTimetable,
-  loadDemandStreets,
   loadOvertureNetwork,
   loadOvertureGraph,
   loadPopulationZones,
   validateNetwork,
+  type AssignmentResponse,
   type EconomicsResult,
   type OvertureNetworkResponse,
   type ScenarioPayload,
@@ -28,6 +27,8 @@ import {
   saveUiSettings,
 } from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, networkCounts } from "./workers";
+import { assignDemandInWorker, demandStreetsFromLoads } from "./workers/assignment-client";
+import type { AssignmentPair, AssignmentZone } from "./assignment-model";
 import { runRuntimePreview } from "./workers/reference-runtime";
 import { buildReferenceDemand, referenceDemandWorkerRequest } from "./workers/demand";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
@@ -118,7 +119,13 @@ let cityStops: FeatureCollection | null = null;
 let cityPlaces: FeatureCollection | null = null;
 let populationZones: FeatureCollection | null = null;
 let demandStreets: FeatureCollection | null = null;
-let assignmentResult: Awaited<ReturnType<typeof calculateAssignment>> | null = null;
+let assignmentResult: AssignmentResponse | null = null;
+/** Спрос и зоны последнего расчёта пассажиропотоков; на них же строится экономика. */
+let lastDemand: {
+  periodId: string;
+  pairs: AssignmentPair[];
+  zones: AssignmentZone[];
+} | null = null;
 let cityAssignmentMeta: Awaited<ReturnType<typeof calculateCityAssignment>>["data"] | null = null;
 let cityAssignmentPeriods: Awaited<ReturnType<typeof calculateCityAssignment>>["periods"] = [];
 let economicsResult: { scenario_id: string; name: string; economics: EconomicsResult } | null = null;
@@ -671,15 +678,6 @@ function datasetCacheKey(prefix: string, b: Bounds): string {
 }
 
 
-function previewZones() {
-  const origin = stops[0];
-  if (!origin) return [];
-  return stops.map((stop) => {
-    const point = toLocalMeters(stop.lon, stop.lat, origin.lon, origin.lat);
-    return { id: stop.id, centroid_x: point.x, centroid_y: point.y };
-  });
-}
-
 async function loadCityData(): Promise<void> {
   if (!map) return;
   busy = true;
@@ -961,25 +959,49 @@ async function runPreview(): Promise<void> {
       }),
     );
     await runRuntimePreview(evaluationClient, network, built.response);
-    // Реальная матрица gravity по зонам населения и слои purpose из воркера
-    // вместо синтетической пары «первая остановка → последняя».
-    const demand = built.daily.map((pair) => ({
-      origin_zone_id: pair.originZoneId,
-      destination_zone_id: pair.destinationZoneId,
-      trips_per_day: pair.tripsPerDay,
-      purpose: pair.purpose,
+    // Спрос выбранного периода, а не суточная матрица: период задаёт расписание,
+    // и считать пассажиропоток по всем суткам сразу нельзя.
+    const period = PERIODS.find((item) => item.id === journeyPeriodId);
+    if (!period) throw new Error(`Период ${journeyPeriodId} не найден`);
+    const periodPairs = built.temporal
+      .filter((row) => row.periodId === period.id && row.trips > 0)
+      .map((row) => ({
+        originZoneId: row.originZoneId,
+        destinationZoneId: row.destinationZoneId,
+        tripsPerDay: row.trips,
+        baseTimeMin: null,
+      }));
+    if (periodPairs.length === 0) {
+      throw new Error(`В периоде ${period.id} модель спроса не вернула ни одной пары зон`);
+    }
+    const zones = built.zones.map((zone) => ({
+      id: zone.id,
+      centroidX: zone.centroid_x,
+      centroidY: zone.centroid_y,
+      population: zone.population,
+      jobs: zone.jobs,
+      noCarShare: zone.no_car_share,
     }));
-    if (demand.length === 0) throw new Error("Модель спроса не вернула ни одной пары зон");
-    assignmentResult = await calculateAssignment(network, demand, built.zones, "am");
-    demandStreets = await loadDemandStreets(
-      demand,
-      built.zones,
-      stops[0].lon,
-      stops[0].lat,
+    const periodDeparture = parseClockToMinute(journeyDepartureClock);
+    if (periodDeparture < period.start_minute || periodDeparture >= period.end_minute) {
+      throw new Error(
+        `Время отправления ${journeyDepartureClock} вне периода ${period.id}`,
+      );
+    }
+    const assigned = await assignDemandInWorker(
+      network,
+      period.id,
+      periodPairs,
+      zones,
+      { departureMin: periodDeparture },
     );
+    assignmentResult = assigned;
+    lastDemand = { periodId: period.id, pairs: periodPairs, zones };
+    demandStreets = demandStreetsFromLoads(network, assigned.section_loads);
     setStatus(
-      `Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}%` +
-      ` · пар зон ${demand.length} · периодов ${new Set(built.temporal.map((row) => row.periodId)).size}` +
+      `Пассажиропоток рассчитан: transit ${(assigned.metrics.transit_share * 100).toFixed(1)}%` +
+      ` · пар зон ${periodPairs.length} · период ${period.id}` +
+      ` · итераций ${assigned.iterations}` +
       ` · изменено сегментов ${changed.length}`,
     );
     renderResults();
@@ -1026,16 +1048,30 @@ async function runEconomics(): Promise<void> {
   setStatus("Расчёт экономики…");
   try {
     network = buildNetworkPayload();
+    // Экономика считается по тому же спросу, что и пассажиропотоки. Синтетическая
+    // пара «первая остановка → последняя» была фикцией: она давала правдоподобные
+    // деньги для несуществующего спроса.
+    if (!lastDemand) {
+      throw new Error(
+        "Сначала рассчитайте пассажиропотоки: экономике нужен реальный спрос по зонам",
+      );
+    }
     economicsResult = await calculateEconomics(
       network,
-      [{
-        origin_zone_id: stops[0].id,
-        destination_zone_id: stops[stops.length - 1].id,
-        trips_per_day: previewTrips,
+      lastDemand.pairs.map((pair) => ({
+        origin_zone_id: pair.originZoneId,
+        destination_zone_id: pair.destinationZoneId,
+        trips_per_day: pair.tripsPerDay,
         purpose: "all",
-      }],
-      previewZones(),
-      "am",
+      })),
+      lastDemand.zones.map((zone) => ({
+        id: zone.id,
+        centroid_x: zone.centroidX,
+        centroid_y: zone.centroidY,
+        population: zone.population,
+        jobs: zone.jobs,
+      })),
+      lastDemand.periodId,
       farePerTransitTrip,
       annualDays,
     );

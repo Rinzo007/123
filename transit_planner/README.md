@@ -381,9 +381,9 @@ Overture streets → street graph → compressed binary graph → routing worker
 - Паритет `gravityOd()` ↔ `gravity_od()` закреплён в `tests/test_demand_parity.py` (состав пар, поездки, базовое время, сохранение производств).
 - Попутно исправлен баг: `pts` в `buildReferenceDemand()` брался из координат мест Overture по индексу зоны вместо центроидов зон.
 
-Осталось: убрать Python как runtime dependency для самого расчёта пассажиропотоков (`/api/v1/assignment`) и для `runEconomics()`, которые до сих пор используют синтетическую пару; строгая провязка спроса к reference-периодам вместо daily-матрицы (Этап 7). Перенос assignment-движка идёт в Этапе 6.5.
+Осталось: строгая провязка спроса к reference-периодам во всех сценариях, а не только в предпросмотре. Пассажиропотоки и экономика больше не ходят в Python — см. Этап 6.5.
 
-Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
+Проверено: `python -m pytest tests -q` → 272 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
 
 ### Этап 7 — Mode Choice
 
@@ -397,7 +397,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Паритет закреплён в `tests/test_choice_parity.py`: 6 сценариев (нулевые расстояния, недоступный транзит, вело без расстояния, пересадки, тариф, поездка дальше `bike_reach_m`) × 4 набора доступности; константы сверяются с `model.json`.
 
-Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0.
+Проверено: `python -m pytest tests -q` → 272 passed; `npx tsc --noEmit` → 0.
 
 Не перенесено: инкрементальный nested logit и frequency-based insertion из `demand-choice.worker.ts` — они относятся к отдельному слою выбора и не нужны assignment-движку, который считает распределение по одному набору обобщённых стоимостей.
 
@@ -416,9 +416,22 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Тесты: `tests/test_assignment_core_parity.py`, `tests/test_assignment_network_parity.py`. Оба проверены мутациями: сценарии специально включают высадку, совпадающую с посадкой, и рельс, где предел профиля режима реально ограничивает вместимость — иначе соответствующие ветки остаются непроверенными.
 
-Осталось: альтернативы в `routing.worker.ts` (штрафы за переполненность, интервальные множители, diversity, Pareto-фильтр); цикл итераций и `assignment.worker.ts`; переключение `runPreview` и `runEconomics` с Python.
+Осталось: `/api/v1/demand/streets` для батчей, `compareScenarios` и `calculateCityAssignment` всё ещё смотрят в сервер; строгая провязка остальных сценариев к reference-периодам.
 
-Проверено: `python -m pytest tests -q` → 234 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
+Сделано в этой итерации:
+
+- `frontend/src/workers/routing-kernel.ts` — ядро rRAPTOR вынесено из воркера в обычный модуль: `routeSingle` и `routeAlternatives` (diversity-цикл + Pareto). `routing.worker.ts` стал тонкой обёрткой, а assignment импортирует ядро напрямую — перемаршрутизировать каждую пару на каждой итерации через вложенный воркер неподъёмно.
+- `packRaptorInput` принимает интервальные множители и пересчитывает отправления: `headway *= max(1, factor)`, как в `TransitRouter._patterns`. Множители меньше единицы игнорируются.
+- `frontend/src/workers/assignment-runtime.ts` — цикл итераций `assign_demand`: повтор `assignOnce`, смешивание штрафов переполненности и интервальных множителей с `damping`, выход по `convergence_tolerance`. Рейсы роутера разворачиваются в ноги по секциям, как в эталоне.
+- `frontend/src/workers/assignment-client.ts` — вызов воркера и отображение на snake_case-контракт, который уже рендерит UI, плюс `demandStreetsFromLoads`.
+- `app.ts`: `runPreview` считает пассажиропотоки **в браузере** по спросу выбранного периода (не за сутки) и строит оверлей demand streets локально; `runEconomics` использует тот же спрос вместо синтетической пары и даёт явную ошибку, если расчёт пассажиропотоков ещё не выполнялся.
+- Доля households без автомобиля приходит из подвижностного профиля модели, а не из литерала в воркере.
+
+Попутно исправлен баг: `waitMin` первой ноги считался как `departures[0] - arrivals[-1]`, то есть `NaN`. Теперь ожидание берётся от фактического времени готовности к посадке (время доступа у первой ноги, время пересадки у следующих).
+
+Покрыто: `tests/test_routing_kernel.py` (ядро роутера — ранее не было покрыто вовсе), `tests/test_journey_alternatives_parity.py` (perceived time, Pareto, diversity-цикл), `tests/test_assignment_loop.py` (сходимость, damping, ожидание, согласованность потоков), `tests/test_assignment_wiring.py` (оверлей и запрет возврата к серверному assignment). Каждый набор проверен мутациями.
+
+Проверено: `python -m pytest tests -q` → 272 passed; `npx tsc --noEmit` → 0; `npx vite build` → `assignment.worker` 29.7 kB; `uvx vulture . --min-confidence 80` → чисто.
 
 ### Этап 8 — Network Evaluation Worker
 

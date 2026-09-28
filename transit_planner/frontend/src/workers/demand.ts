@@ -4,6 +4,7 @@ import { fromLocalMeters, toLocalMeters } from "../projection";
 import {
   CITY_DEMAND_DECAY,
   CITY_DEMAND_REFERENCE_SPEED_KPH,
+  REFERENCE_MOBILITY_NO_CAR_SHARE,
   CITY_DEMAND_TRIP_RATE,
   REFERENCE_PERIODS,
   REFERENCE_PURPOSES,
@@ -55,6 +56,8 @@ export interface ReferenceDemandZoneColumn {
   centroid_y: number;
   population: number;
   jobs: number;
+  /** Share of households without a car; drives mode choice for this zone. */
+  no_car_share: number;
 }
 
 export interface ReferenceDemandBuilt {
@@ -95,6 +98,7 @@ export function buildReferenceDemand(
           centroid_y: input.zones.y[index],
           population,
           jobs,
+          no_car_share: input.zones.noCarShare[index] ?? 0,
         });
       });
       const zoneId = (index: number) => input.zones.ids[index] ?? `zone-${index}`;
@@ -273,6 +277,7 @@ export function populationZonesToWorkerInput(
   const y = new Float64Array(count);
   const population = new Float64Array(count);
   const jobs = new Float64Array(count);
+  const noCarShare = new Float64Array(count);
   const attractions = new Float64Array(count * attractionKeys.length);
   const ids: string[] = [];
   features.forEach((feature, index) => {
@@ -283,13 +288,18 @@ export function populationZonesToWorkerInput(
     y[index] = local.y;
     population[index] = Number(properties.population ?? 0);
     jobs[index] = Number(properties.jobs ?? 0);
+    // WorldPop не несёт доли без автомобиля, поэтому берётся подвижностный
+    // профиль модели, а не выдуманное число.
+    noCarShare[index] = Number(
+      properties.no_car_share ?? REFERENCE_MOBILITY_NO_CAR_SHARE,
+    );
     const zoneAttractions = (properties.purpose_attractions ?? {}) as Record<string, unknown>;
     attractionKeys.forEach((key, keyIndex) => {
       attractions[index * attractionKeys.length + keyIndex] = Number(zoneAttractions[key] ?? 0);
     });
     ids.push(String(properties.id ?? `zone-${index}`));
   });
-  return { ids, x, y, population, jobs, attractionKeys, attractions };
+  return { ids, x, y, population, jobs, noCarShare, attractionKeys, attractions };
 }
 
 export function placesToWorkerInput(places: FeatureCollection): DemandPlaceInput {

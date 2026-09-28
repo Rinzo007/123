@@ -14,6 +14,8 @@ export interface DemandZoneInput {
   y: Float64Array;
   population: Float64Array;
   jobs: Float64Array;
+  /** Share of households without a car, per zone. */
+  noCarShare: Float64Array;
   attractionKeys: string[];
   attractions: Float64Array;
 }
@@ -98,7 +100,7 @@ function toDemandZones(input: DemandZoneInput): DemandZone[] {
       population: input.population[index],
       jobs: input.jobs[index],
       attractions,
-      noCarShare: 0.35,
+      noCarShare: input.noCarShare[index] ?? 0,
     });
   }
   return zones;
