@@ -344,6 +344,15 @@
     "parking_weight": 1.6,
     "source": "Wardman et al. (2026) TR-A meta-analysis Table 5 means: walk 1.65, wait 1.72 (vs legacy 2.0 convention); departure shift consistent with displacement-time evidence; parking_search per same meta-analysis."
   },
+  "journey_choice_table8": {
+    "ride_weight": 1,
+    "walk_weight": 1.39,
+    "wait_weight": 1.37,
+    "departure_shift_weight": 0.4,
+    "driving_congestion_weight": 1.33,
+    "parking_weight": 1.6,
+    "source": "Wardman et al. (2026) TR-A meta-analysis Table 8 segment values (walk 1.39, wait 1.37) as quoted in the Borough Studio metro-maker4 bundle PATHFINDING_RULES_SPEC; not verified against the paper, kept as a named alternative preset to the Table 5 default."
+  },
   "city_simulation": {
     "income_dependent_mode_choice": true,
     "real_home_workplace_pairing": false,

@@ -201,6 +201,13 @@ REFERENCE_JOURNEY_CHOICE = ReferenceJourneyChoiceProfile(
         if key != "source"
     }
 )
+REFERENCE_JOURNEY_CHOICE_TABLE8 = ReferenceJourneyChoiceProfile(
+    **{
+        key: value
+        for key, value in _MODEL_DATA.get("journey_choice_table8", {}).items()
+        if key != "source"
+    }
+)
 REFERENCE_TRANSIT_BURDENS = ReferenceTransitBurdenProfile(
     **{
         key: value

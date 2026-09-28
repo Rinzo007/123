@@ -19,6 +19,21 @@ export interface RaptorJourney {
   departureShiftMin: number;
 }
 
+export interface RaptorChoiceWeights {
+  walk: number;
+  wait: number;
+  shift: number;
+}
+
+/**
+ * Table 5 default (model.json journey_choice): the planner's standard
+ * generalized-cost weights. Kept literal here so the parity test can assert
+ * them against model.json instead of trusting an import chain.
+ */
+export const JOURNEY_CHOICE_TABLE5: RaptorChoiceWeights = { walk: 1.65, wait: 1.72, shift: 0.4 };
+/** Table 8 alternative preset (model.json journey_choice_table8). */
+export const JOURNEY_CHOICE_TABLE8: RaptorChoiceWeights = { walk: 1.39, wait: 1.37, shift: 0.4 };
+
 const MODE_SPEED_KPH: Record<TransitMode, number> = {
   bus: 18,
   tram: 19,
@@ -62,6 +77,7 @@ function pack(
   departureMin: number,
   rangeWindowMin: number,
   maxTransfers: number,
+  weights: RaptorChoiceWeights = JOURNEY_CHOICE_TABLE5,
 ) {
   const stopCount = network.stops.length;
   const routePatterns: Array<{
@@ -82,6 +98,15 @@ function pack(
   }
   if (!egressTimeMin.some((value) => Number.isFinite(value))) {
     throw new Error("No transit stop can reach the destination on foot");
+  }
+  if (!Number.isFinite(weights.walk) || weights.walk <= 0) {
+    throw new Error("Choice weight walk must be positive");
+  }
+  if (!Number.isFinite(weights.wait) || weights.wait <= 0) {
+    throw new Error("Choice weight wait must be positive");
+  }
+  if (!Number.isFinite(weights.shift) || weights.shift < 0) {
+    throw new Error("Choice weight shift must be non-negative");
   }
 
   let patternsWithoutHeadway = 0;
@@ -239,6 +264,9 @@ function pack(
       routeSegmentOffsets,
       segmentTimes: routeSegmentTimes,
       departureMin,
+      walkWeight: weights.walk,
+      waitWeight: weights.wait,
+      shiftWeight: weights.shift,
     },
     // Копия нужна для геометрии маршрута: routeStops уходит в воркер по
     // transfer и в главном потоке обнуляется. Воркеру она не нужна, поэтому
@@ -267,6 +295,7 @@ export function routeWithRaptor(
   departureMin = 420,
   rangeWindowMin = 30,
   maxTransfers = 4,
+  weights: RaptorChoiceWeights = JOURNEY_CHOICE_TABLE5,
 ): Promise<RaptorRouteResult> {
   const { input, patterns } = pack(
     network,
@@ -276,6 +305,7 @@ export function routeWithRaptor(
     departureMin,
     rangeWindowMin,
     maxTransfers,
+    weights,
   );
 
   const worker = new Worker(new URL("./routing.worker.ts", import.meta.url), { type: "module" });

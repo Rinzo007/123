@@ -18,11 +18,11 @@ type RaptorRequest = {
   routeSegmentOffsets: Int32Array;
   segmentTimes: Float64Array;
   departureMin: number;
+  walkWeight: number;
+  waitWeight: number;
+  shiftWeight: number;
 };
 
-const WALK_WEIGHT = 1.65;
-const WAIT_WEIGHT = 1.72;
-const SHIFT_WEIGHT = 0.4;
 const TRANSFER_PENALTY_MIN = 405 / 60;
 
 function firstDeparture(
@@ -145,9 +145,9 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
     const arrivalWithEgress = finalArrival + walkFrom;
     const generalized =
       (arrivalWithEgress - departureMin) +
-      WAIT_WEIGHT * wait +
-      WALK_WEIGHT * (access + walkFrom) +
-      SHIFT_WEIGHT * shift +
+      input.waitWeight * wait +
+      input.walkWeight * (access + walkFrom) +
+      input.shiftWeight * shift +
       TRANSFER_PENALTY_MIN * transfers;
 
     routes.reverse();

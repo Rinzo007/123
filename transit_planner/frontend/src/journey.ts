@@ -7,7 +7,7 @@ import {
   type StreetDoorAccess,
 } from "./street-walk";
 import type { NetworkPayload, TransitMode } from "./types";
-import { routeWithRaptor, type RaptorRoutePattern } from "./workers/routing";
+import { routeWithRaptor, type RaptorChoiceWeights, type RaptorRoutePattern } from "./workers/routing";
 
 export const JOURNEY_SNAP_MAX_M = 500;
 export const JOURNEY_CACHE_LIMIT = 32;
@@ -60,6 +60,8 @@ export interface JourneyRequest {
   maxTransfers?: number;
   walkingSpeedKph?: number;
   accessRadiusM?: number;
+  /** Generalized-cost preset; default is Table 5 (JOURNEY_CHOICE_TABLE5). */
+  choiceWeights?: RaptorChoiceWeights;
 }
 
 /**
@@ -287,6 +289,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     maxTransfers = 4,
     walkingSpeedKph,
     accessRadiusM,
+    choiceWeights,
   } = request;
   if (!streetGraph) {
     throw new Error("Для маршрута door-to-door нужен уличный граф: тихого отката к остановкам нет");
@@ -304,6 +307,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     maxTransfers,
     walkingSpeedKph ?? "",
     accessRadiusM ?? "",
+    choiceWeights ? `${choiceWeights.walk}|${choiceWeights.wait}|${choiceWeights.shift}` : "",
   ].join("|");
   const cache = cacheFor(streetGraph);
   const cached = cache.get(key);
@@ -331,6 +335,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     departureMin,
     rangeWindowMin,
     maxTransfers,
+    choiceWeights,
   );
   const plan = buildPlan(network, door, journey, patterns, origin, destination);
   cache.set(key, plan);
