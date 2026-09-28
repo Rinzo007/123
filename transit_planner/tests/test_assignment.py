@@ -179,7 +179,9 @@ def test_assignment_routes_transit_demand_across_alternatives():
     direct = next(flow for flow in result.route_flows if flow.route_id == "direct")
     detour = next(flow for flow in result.route_flows if flow.route_id == "detour")
     assert direct.passenger_section_traversals > 0.0
-    assert detour.passenger_section_traversals > 0.0
+    # The detour is dominated by the direct route, so the Pareto filter keeps
+    # only the direct journey and the detour carries no passengers.
+    assert detour.passenger_section_traversals == 0.0
     assert abs(
         direct.passenger_section_traversals
         + detour.passenger_section_traversals

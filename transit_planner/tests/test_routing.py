@@ -3,7 +3,7 @@ import pytest
 from transit_planner.geo import Point
 from transit_planner.network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
 from transit_planner.road import RoadEdge, RoadGraph, RoadNode
-from transit_planner.routing import RouterConfig, TransitRouter
+from transit_planner.routing import Journey, JourneyLeg, RouterConfig, TransitRouter, pareto_filter_journeys
 
 
 def make_network() -> Network:
@@ -200,12 +200,77 @@ def test_router_can_return_route_diverse_alternatives():
         max_alternatives=2,
     )
 
-    assert len(alternatives) == 2
-    sequences = [
-        tuple(leg.route_id for leg in journey.legs if leg.kind == "transit")
-        for journey in alternatives
-    ]
-    assert sequences[0] != sequences[1]
+    # The detour is dominated by the direct route (same transfers, worse on
+    # every axis), so the Pareto filter keeps only the direct journey.
+    assert len(alternatives) == 1
+    assert tuple(
+        leg.route_id for leg in alternatives[0].legs if leg.kind == "transit"
+    ) == ("direct", "direct")
+
+
+def test_pareto_filter_drops_dominated_alternative() -> None:
+    network = Network()
+    for stop_id, x, y in (("a", 0, 0), ("b", 1000, 0), ("c", 1000, 1000), ("d", 2000, 0)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, y)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("direct", "Direct", TransitMode.BUS, ("a", "b", "d")))
+    network.add_route(Route("detour", "Detour", TransitMode.BUS, ("a", "c", "d")))
+    network.add_service(Service("direct-service", "direct", "bus", {"am": 10}))
+    network.add_service(Service("detour-service", "detour", "bus", {"am": 10}))
+
+    router = TransitRouter(network)
+    all_alternatives = router.shortest_alternatives(
+        network.stops["a"],
+        network.stops["d"],
+        period_id="am",
+        max_alternatives=3,
+    )
+    # Force a dominated candidate: same route, worse on every axis.
+    best = all_alternatives[0]
+    dominated = Journey(
+        best.origin_stop_id,
+        best.destination_stop_id,
+        best.duration_min + 5.0,
+        best.transfers + 1,
+        best.legs,
+    )
+    kept = pareto_filter_journeys(
+        (*all_alternatives, dominated),
+        perceived_time=router._perceived_time_minutes,
+    )
+
+    assert dominated not in kept
+    assert best in kept
+
+
+def test_pareto_filter_keeps_tradeoff_alternative() -> None:
+    # Fewer transfers but worse perceived time: not dominated, must survive.
+    fast_many = Journey(
+        "a",
+        "d",
+        20.0,
+        1,
+        (
+            JourneyLeg("transit", "a", "b", 20.0, "r1", service_id="s1"),
+            JourneyLeg("walk", "b", "c", 3.0),
+            JourneyLeg("transit", "c", "d", 5.0, "r2", service_id="s2"),
+        ),
+    )
+    slow_few = Journey(
+        "a",
+        "d",
+        30.0,
+        0,
+        (JourneyLeg("transit", "a", "d", 30.0, "r3", service_id="s3"),),
+    )
+    router = TransitRouter(Network())
+    kept = pareto_filter_journeys(
+        (fast_many, slow_few),
+        perceived_time=router._perceived_time_minutes,
+    )
+
+    assert set(kept) == {fast_many, slow_few}
 
 
 def test_router_applies_service_headway_feedback_factor():

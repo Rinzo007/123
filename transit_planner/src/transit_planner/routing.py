@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import hypot, inf, isfinite
+from typing import Callable
 
 from .geo import Point
 from .network import Network, Stop
-from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_TRANSFER
+from .reference_model import (
+    REFERENCE_JOURNEY_CHOICE,
+    REFERENCE_MODE_PROFILES,
+    REFERENCE_TRANSFER,
+)
 from .road import RoadGraph
 from .snap import StopSnap, snap_stops_to_road_graph
 from .spatial import GridPointIndex, IndexedPoint
@@ -219,6 +224,24 @@ class TransitRouter:
             )
         return access, egress
 
+    def _perceived_time_minutes(self, candidate: Journey) -> float:
+        """Generalized perceived time without artificial route penalties."""
+        in_vehicle = sum(
+            leg.duration_min for leg in candidate.legs if leg.kind == "transit"
+        )
+        wait = sum(
+            leg.wait_min for leg in candidate.legs if leg.kind == "transit"
+        )
+        walk = sum(
+            leg.duration_min for leg in candidate.legs if leg.kind == "walk"
+        )
+        return (
+            in_vehicle
+            + REFERENCE_JOURNEY_CHOICE.walk_weight * walk
+            + self.config.wait_weight * wait
+            + self.config.transfer_penalty_min * candidate.transfers
+        )
+
     def _score_candidate(self, candidate: Journey, route_penalties: dict[str, float]) -> float:
         used_routes = {
             leg.route_id
@@ -420,7 +443,10 @@ class TransitRouter:
                     base_penalties.get(route_id, 0.0) + increment,
                 )
 
-        return tuple(results)
+        return pareto_filter_journeys(
+            tuple(results),
+            perceived_time=self._perceived_time_minutes,
+        )
 
     def _raptor_once(
         self,
@@ -1075,5 +1101,52 @@ def _adjust_connection_waits(
         transfer_walk = 0.0
 
     return tuple(result)
+
+
+def _dominates(
+    left: tuple[float, int, float],
+    right: tuple[float, int, float],
+) -> bool:
+    """True when *left* is at least as good on every axis and strictly better on one."""
+    better_or_equal = (
+        left[0] <= right[0] and left[1] <= right[1] and left[2] <= right[2]
+    )
+    strictly_better = (
+        left[0] < right[0] or left[1] < right[1] or left[2] < right[2]
+    )
+    return better_or_equal and strictly_better
+
+
+def pareto_filter_journeys(
+    journeys: tuple[Journey, ...],
+    *,
+    perceived_time: Callable[[Journey], float],
+) -> tuple[Journey, ...]:
+    """Keep only journeys not dominated on (perceived time, transfers, duration).
+
+    Port of the Borough Studio commute model's ``selectBestPaths`` Pareto
+    dominance on ``(perceivedTime, transfers, arrivalTime)``. Duration is used
+    instead of arrival because ``Journey`` does not store the departure
+    minute; for a fixed origin/destination/period the two orderings coincide.
+
+    Identical metric tuples do not dominate each other, so exact duplicates
+    are all kept — de-duplication is the caller's job (the diversity loop in
+    ``shortest_alternatives`` already filters identical route sequences).
+    """
+    if len(journeys) <= 1:
+        return journeys
+    metrics = tuple(
+        (perceived_time(journey), journey.transfers, journey.duration_min)
+        for journey in journeys
+    )
+    kept: list[Journey] = []
+    for index, journey in enumerate(journeys):
+        if not any(
+            _dominates(metrics[other], metrics[index])
+            for other in range(len(journeys))
+            if other != index
+        ):
+            kept.append(journey)
+    return tuple(kept)
 
 

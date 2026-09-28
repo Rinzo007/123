@@ -103,7 +103,7 @@ from .road_builder import (
     RoadGraphBuildResult,
     build_topological_road_graph,
 )
-from .routing import Journey, JourneyLeg, RouterConfig, TransitRouter
+from .routing import Journey, JourneyLeg, RouterConfig, TransitRouter, pareto_filter_journeys
 from .scenario import (
     MetricDelta,
     ScenarioComparison,
@@ -246,6 +246,7 @@ __all__ = [
     "JourneyLeg",
     "RouterConfig",
     "TransitRouter",
+    "pareto_filter_journeys",
     "MetricDelta",
     "ScenarioComparison",
     "ScenarioDefinition",
