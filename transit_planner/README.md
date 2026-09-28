@@ -169,6 +169,7 @@ frontend/src/
 │   └── routing.worker.ts
 ├── journey.ts
 ├── projection.ts
+├── spatial.ts
 ├── map-network-editor.ts
 ├── network-editor.ts
 ├── line-cache.ts
@@ -296,7 +297,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Сделано (frontend):
 
-- `street-graph.ts`: декодер TKST v2 (little-endian, полный mirror формата), CSR-строитель, `nearestGraphNode()` (линейный поиск с порогом 150 м, cos-коррекция), `assembleRouteCoordinates()`;
+- `street-graph.ts`: декодер TKST v2 (little-endian, полный mirror формата), CSR-строитель, `nearestGraphNode()` (порог снаппинга 150 м), `assembleRouteCoordinates()`;
 - CSR-семантика: `RoadEdge` в Python — уже направленная дуга, поэтому каждое ребро даёт ровно одну дугу `edgeA → edgeB`; `edgeDirection` — информативный признак, а не правило обхода (иначе терялись односторонние рёбра и появлялись фантомные обратные дуги);
 - `speedKph === 0` — явная ошибка, а не подстановка 30 (Python `add_edge`/`travel_time_minutes` отбрасывают такие рёбра, паритет поведения);
 - `workers/street.worker.ts`: Dijkstra на CSR, отмена по job-номеру, бинарная куча, `postMessage` с transfer ArrayBuffer; воркер отдаёт цепочку узлов, поэтому геометрия собирается с учётом проезда против направления ребра;
@@ -307,7 +308,6 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Не сделано (сознательно, дальше по карте):
 
-- индекс пространственного поиска в TS: `nearestGraphNode` и `nearestStopIndex` линейные (O(V) на точку) — на городских графах десятки тысяч узлов это приемлемо, но заменяются на grid/R-tree; матрицы для этого не требуются, см. Этапы 4 и 5;
 - отображение street graph отдельным слоем карты (сейчас слой дорог остаётся на GeoJSON из `/overture/network`, граф используется для маршрутизации).
 
 ### Этап 4 — Matrix Worker
@@ -347,11 +347,11 @@ Overture streets → street graph → compressed binary graph → routing worker
 - инвалидация результата централизована в `markDirty()`/`invalidateJourneyPlan()`: ранее перетаскивание узлов карты и undo/redo меняли сеть без `markDirty()`, `projectRevision` не рос и из кэша возвращался устаревший маршрут;
 - `projection.ts` — общие `toLocalMeters()`/`fromLocalMeters()` для редактора и планировщика;
 - паритет расписания с Python: формула первого отправления в JS использовала отрицательный остаток и давала отправление **до** начала периода, а `planning/timetable.ts` считала `start + offset` и расходилась с `timetable.py` при `offset > headway`. Обе TS-реализации переведены на общий `firstDepartureMinute()`, тест `tests/test_frontend_timetable_parity.py` собирает настоящий `planning/timetable.ts` и сверяет его с `timetable.py` (пропускается без node/typescript);
+- `spatial.ts` — точный grid для `nearestGraphNode()` и `nearestStopIndex()`; вместо `Math.hypot` используется `sqrt(dx²+dy²)`, чтобы расстояния совпадали с `spatial.py` побитово. Индексы кэшируются через WeakMap. Тест `tests/test_spatial_parity.py` сверяет настоящий TS с Python и с полным перебором; радиус границ теперь включительный в обеих реализациях;
 - `formatMinuteOfDay(1440)` показывает `24:00`, а не `00:00` — иначе конец периода «вечер» подписан полночью следующего дня.
 
 Не сделано (сознательно):
 
-- spatial index для snap: `nearestStopIndex` остаётся O(N) по числу остановок; для текущего размера сети это дешевле поддержки индекса, но при росте сети потребуется grid/R-tree. Матрица для этого по-прежнему не нужна;
 - access/egress и walking legs: их нет и в Python-эталоне — маршрут начинается и заканчивается на остановках, пересадка считается прямой линией 500 м / 5 км/ч. Чтобы это заработало, нужен отдельный этап вместе с Этапом 4-подобным доступом к графу.
 
 ### Этап 6 — Demand Worker

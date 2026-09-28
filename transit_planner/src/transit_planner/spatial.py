@@ -59,9 +59,9 @@ class GridPointIndex:
 
         center_x, center_y = self._cell(x, y)
         best: IndexedPoint | None = None
-        best_distance = (
-            max_radius if max_radius is not None else float("inf")
-        )
+        # Предел идёт в паре с best и означает «уже найденное расстояние».
+        # Он же отсекает кандидатов, поэтому best_distance строго уменьшается.
+        best_distance = float("inf")
 
         if max_radius is not None:
             radius_cells = int(max_radius // self.cell_size) + 1
@@ -75,11 +75,11 @@ class GridPointIndex:
                         best_distance,
                     )
                     if candidate is not None:
-                        candidate_point, candidate_distance = candidate
-                        if candidate_distance <= best_distance:
-                            best = candidate_point
-                            best_distance = candidate_distance
-            return best
+                        best, best_distance = candidate
+            if best is not None and best_distance <= max_radius:
+                # Граница включительная: точка ровно на max_radius подходит.
+                return best
+            return None
 
         assert self._min_cell is not None and self._max_cell is not None
         max_ring = max(
@@ -102,10 +102,7 @@ class GridPointIndex:
                         best_distance,
                     )
                     if candidate is not None:
-                        candidate_point, candidate_distance = candidate
-                        if candidate_distance < best_distance:
-                            best = candidate_point
-                            best_distance = candidate_distance
+                        best, best_distance = candidate
 
             if best is not None and ring < max_ring:
                 next_ring = ring + 1
@@ -116,7 +113,7 @@ class GridPointIndex:
                     x,
                     y,
                 )
-                if lower_bound >= best_distance:
+                if lower_bound > best_distance:
                     break
 
         return best

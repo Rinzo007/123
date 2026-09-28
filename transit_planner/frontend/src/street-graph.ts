@@ -1,3 +1,5 @@
+import { buildGridIndex, gridNearest, type GridIndex } from "./spatial";
+
 const STREETS_MAGIC = 0x54534b54; // "TKST" little-endian
 export const STREETS_VERSION = 2;
 const HEADER_BYTES = 24;
@@ -294,26 +296,48 @@ export function assembleRouteCoordinates(
 }
 
 const SNAP_METERS = 150.0;
+const NODE_CELL_METERS = 250.0;
+
+interface StreetNodeIndex {
+  grid: GridIndex;
+  refLat: number;
+}
+
+const nodeIndexes = new WeakMap<StreetGraph, StreetNodeIndex>();
+
+/**
+ * Grid over graph nodes in metres, cached per graph.
+ *
+ * The reference latitude is the mean latitude of the graph, so the metric is
+ * identical for building the index and for every query. Using the query
+ * latitude instead (as the previous linear scan did) would give each query a
+ * slightly different metric, which makes exact ring pruning impossible.
+ */
+function streetNodeIndex(graph: StreetGraph): StreetNodeIndex {
+  const cached = nodeIndexes.get(graph);
+  if (cached) return cached;
+  let sumLat = 0;
+  for (let index = 0; index < graph.vertexCount; index += 1) sumLat += graph.lat[index];
+  const refLat = graph.vertexCount > 0 ? sumLat / graph.vertexCount / 1e6 : 0;
+  const cosLat = Math.cos((refLat * Math.PI) / 180);
+  const xs = new Float64Array(graph.vertexCount);
+  const ys = new Float64Array(graph.vertexCount);
+  for (let index = 0; index < graph.vertexCount; index += 1) {
+    xs[index] = (graph.lon[index] / 1e6) * 111320 * cosLat;
+    ys[index] = (graph.lat[index] / 1e6) * 110574;
+  }
+  const index: StreetNodeIndex = { grid: buildGridIndex(xs, ys, NODE_CELL_METERS), refLat };
+  nodeIndexes.set(graph, index);
+  return index;
+}
 
 export function nearestGraphNode(
   graph: StreetGraph,
   lon: number,
   lat: number,
 ): number | null {
-  const microLon = Math.round(lon * 1e6);
-  const microLat = Math.round(lat * 1e6);
-  const cosLat = Math.cos((lat * Math.PI) / 180);
-  let best = -1;
-  let bestMeters = Infinity;
-  for (let index = 0; index < graph.vertexCount; index += 1) {
-    const dx = ((graph.lon[index] - microLon) * 111320 * cosLat) / 1e6;
-    const dy = ((graph.lat[index] - microLat) * 110574) / 1e6;
-    const meters = Math.hypot(dx, dy);
-    if (meters < bestMeters) {
-      bestMeters = meters;
-      best = index;
-    }
-  }
-  if (best < 0 || bestMeters > SNAP_METERS) return null;
-  return best;
+  const { grid, refLat } = streetNodeIndex(graph);
+  const cosLat = Math.cos((refLat * Math.PI) / 180);
+  const found = gridNearest(grid, lon * 111320 * cosLat, lat * 110574, SNAP_METERS);
+  return found === null ? null : found.index;
 }

@@ -1,4 +1,5 @@
 import { fromLocalMeters, toLocalMeters } from "./projection";
+import { buildGridIndex, gridNearest, type GridIndex } from "./spatial";
 import type { NetworkPayload, TransitMode } from "./types";
 import { routeWithRaptor, type RaptorRoutePattern } from "./workers/routing";
 
@@ -56,27 +57,37 @@ export function nearestStopIndex(
   point: { lon: number; lat: number },
   maxDistanceM: number = JOURNEY_SNAP_MAX_M,
 ): { index: number; distanceM: number } {
-  const stops = network.stops;
-  if (stops.length === 0) throw new Error("В сети нет остановок");
   const local = toLocalMeters(point.lon, point.lat, network.origin_lon, network.origin_lat);
-  let bestIndex = -1;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < stops.length; index += 1) {
-    const distance = Math.hypot(
-      stops[index].location.x - local.x,
-      stops[index].location.y - local.y,
-    );
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestIndex = index;
-    }
-  }
-  if (bestIndex < 0 || bestDistance > maxDistanceM) {
+  if (network.stops.length === 0) throw new Error("В сети нет остановок");
+  const grid = stopGrid(network);
+  const found = gridNearest(grid, local.x, local.y, maxDistanceM);
+  if (!found) {
+    const fallback = gridNearest(grid, local.x, local.y);
+    const distanceM = fallback ? fallback.distance : Number.POSITIVE_INFINITY;
     throw new Error(
-      `Ближайшая остановка в ${Math.round(bestDistance)} м, допустимо не более ${maxDistanceM} м`,
+      `Ближайшая остановка в ${Math.round(distanceM)} м, допустимо не более ${maxDistanceM} м`,
     );
   }
-  return { index: bestIndex, distanceM: bestDistance };
+  return { index: found.index, distanceM: found.distance };
+}
+
+const STOP_CELL_METERS = 250.0;
+const stopGrids = new WeakMap<NetworkPayload["stops"], GridIndex>();
+
+/** Grid over stop positions, cached per stop array. */
+function stopGrid(network: NetworkPayload): GridIndex {
+  const cached = stopGrids.get(network.stops);
+  if (cached) return cached;
+  const count = network.stops.length;
+  const xs = new Float64Array(count);
+  const ys = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    xs[index] = network.stops[index].location.x;
+    ys[index] = network.stops[index].location.y;
+  }
+  const grid = buildGridIndex(xs, ys, STOP_CELL_METERS);
+  stopGrids.set(network.stops, grid);
+  return grid;
 }
 
 function legStopIndices(

@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from transit_planner.timetable import generate_service_timetable  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
-TS_MODULE = FRONTEND / "src" / "planning" / "timetable.ts"
+SRC = FRONTEND / "src"
+TS_MODULE = SRC / "planning" / "timetable.ts"
 TSC_JS = FRONTEND / "node_modules" / "typescript" / "lib" / "tsc.js"
 
 # start, end, offset, headway: подобраны так, чтобы старые реализации
@@ -61,7 +62,7 @@ def _ts_departures(tmp_path: Path) -> list[list[float]] | None:
             "--outDir",
             str(tmp_path),
             "--rootDir",
-            str(TS_MODULE.parents[1]),
+            str(SRC),
             "--module",
             "esnext",
             "--target",
