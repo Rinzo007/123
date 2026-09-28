@@ -430,6 +430,52 @@ def build_temporal_demand(
 
     return TemporalDemandMatrix(tuple(rows) + build_demand_layers(zones).combined().pairs)
 
+
+def build_temporal_demand_two_sided(
+    zones: tuple[DemandZone, ...],
+    *,
+    trip_rate: float = 0.12,
+    decay: float = 0.08,
+    speed_kph: float = 30.0,
+) -> TemporalDemandMatrix:
+    """Temporal demand with separate production/attraction multipliers.
+
+    The reference model averages outbound and return shares per period, which
+    hides the AM/PM asymmetry: outbound peaks in the morning, return peaks in
+    the evening. This variant weights each period by max(outbound, return) so
+    the dominant direction drives the period total, matching the two-sided
+    TOD multipliers of the Borough Studio commute model. Total daily trips
+    are preserved.
+    """
+    commuter = gravity_od(
+        zones,
+        parameters=GravityParameters(speed_kph=speed_kph, decay=decay),
+        trip_rate=trip_rate,
+    )
+    rows: list[PeriodODPairDemand] = []
+    dominant_share = tuple(
+        max(period.outbound_share, period.return_share) for period in REFERENCE_PERIODS
+    )
+    total_share = sum(dominant_share)
+    if total_share <= 0:
+        raise ValueError("Period shares must sum to a positive value")
+    normalized = tuple(share / total_share for share in dominant_share)
+    for pair in commuter.pairs:
+        for period, share in zip(REFERENCE_PERIODS, normalized):
+            trips = pair.trips_per_day * share
+            if trips > 0:
+                rows.append(
+                    PeriodODPairDemand(
+                        pair.origin_zone_id,
+                        pair.destination_zone_id,
+                        period.key,
+                        trips,
+                        "work",
+                        pair.base_time_min,
+                    )
+                )
+    return TemporalDemandMatrix(tuple(rows) + build_demand_layers(zones).combined().pairs)
+
 def build_daily_demand(
     zones: tuple[DemandZone, ...],
     *,

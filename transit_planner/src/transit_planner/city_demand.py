@@ -11,6 +11,7 @@ from .reference_demand import (
     build_daily_demand,
     build_demand_layers,
     build_temporal_demand,
+    build_temporal_demand_two_sided,
 )
 
 
@@ -127,6 +128,28 @@ def build_city_temporal_demand(
         origin_lat=origin_lat,
     )
     return build_temporal_demand(
+        enriched_zones,
+        trip_rate=config.trip_rate,
+        decay=config.decay,
+        speed_kph=config.reference_speed_kph,
+    )
+
+
+def build_city_temporal_demand_two_sided(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...] = (),
+    *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
+    config: CityDemandConfig = CityDemandConfig(),
+) -> TemporalDemandMatrix:
+    enriched_zones = _enrich_zones(
+        zones,
+        places,
+        origin_lon=origin_lon,
+        origin_lat=origin_lat,
+    )
+    return build_temporal_demand_two_sided(
         enriched_zones,
         trip_rate=config.trip_rate,
         decay=config.decay,

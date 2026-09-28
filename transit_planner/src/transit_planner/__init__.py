@@ -30,6 +30,7 @@ from .city_demand import (
     build_city_demand,
     build_city_demand_layers,
     build_city_temporal_demand,
+    build_city_temporal_demand_two_sided,
 )
 from .data import (
     ConnectorRecord,
@@ -156,6 +157,7 @@ __all__ = [
     "build_city_daily_demand",
     "build_city_demand_layers",
     "build_city_temporal_demand",
+    "build_city_temporal_demand_two_sided",
     "DemandZone",
     "CityPlace",
     "PlacePurpose",
