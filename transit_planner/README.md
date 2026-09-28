@@ -302,14 +302,14 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Сделано (frontend):
 
-- `street-graph.ts`: декодер TKST v2 (little-endian, полный mirror формата), CSR-строитель, `nearestGraphNode()` (порог снаппинга 150 м), `assembleRouteCoordinates()`;
+- `street-graph.ts`: декодер TKST v2 (little-endian, полный mirror формата), CSR-строитель, `nearestGraphNode()` (grid-индекс `spatial.ts`, порог снаппинга 150 м), `assembleRouteCoordinates()`;
 - CSR-семантика: `RoadEdge` в Python — уже направленная дуга, поэтому каждое ребро даёт ровно одну дугу `edgeA → edgeB`; `edgeDirection` — информативный признак, а не правило обхода (иначе терялись односторонние рёбра и появлялись фантомные обратные дуги);
 - `speedKph === 0` — явная ошибка, а не подстановка 30 (Python `add_edge`/`travel_time_minutes` отбрасывают такие рёбра, паритет поведения);
 - `workers/street.worker.ts`: Dijkstra на CSR, отмена по job-номеру, бинарная куча, `postMessage` с transfer ArrayBuffer; воркер отдаёт цепочку узлов, поэтому геометрия собирается с учётом проезда против направления ребра;
 - `buildRoadRoute()` переведён на локальный граф: снаппинг остановок → пакет запросов в воркер → координаты; граф грузится один раз на bbox и кэшируется в IndexedDB как бинарник; серверный `/overture/route` фронтендом больше не используется и остаётся только как API;
 - без fallback: `streetGraph === null` или точка дальше 150 м от графа — явная ошибка в статусе, тихого возврата к серверному маршруту нет.
 
-Проверено: `python -m pytest tests -q` → 172 passed; `npx tsc --noEmit` → 0; `npx vite build` → собран `street.worker` (2.26 kB).
+Проверено: `python -m pytest tests -q` → 211 passed; `npx tsc --noEmit` → 0; `npx vite build` → собран `street.worker` (2.26 kB).
 
 Не сделано (сознательно, дальше по карте):
 
@@ -332,7 +332,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 - `/api/v1/data/overture/graph` отдаёт `X-Overture-Release`, клиент требует этот заголовок и сверяет его с релизом, из которого загружена сеть — расхождение это явная ошибка, а не тихая подмена;
 - повреждённая запись кэша декодируется с одной попыткой перезапроса у источника; вторая неудача остаётся явной ошибкой.
 
-Проверено: `python -m pytest tests -q` → 173 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно.
+Проверено: `python -m pytest tests -q` → 211 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно.
 
 Не сделано (сознательно):
 
@@ -360,7 +360,8 @@ Overture streets → street graph → compressed binary graph → routing worker
 - shared trunk'и: `trunks.detect_shared_trunks()` — пары маршрутов по длинному общему коридору (нормализованное перекрытие по длине, bearing-гейт 20°, минимум общих пар сегментов); только пары, без мега-мерджей. Упрощение относительно игры: вместо turf-буферов и RBush — точное сравнение пар остановок и длин сегментов.
 - двусторонние TOD-множители: `build_temporal_demand_two_sided()` берёт `max(outbound, return)` по периоду вместо усреднения, сумма дневных поездок сохраняется; `build_city_temporal_demand_two_sided()` — обёртка для города.
 - сглаживание парка: `fleet_required_at_minute()` (Python) и `fleetRequiredAt()` (TS) — в пределах ±cycle от границы периода линейная интерполяция между соседними периодами вместо ступеньки; паритет в `tests/test_fleet_blending.py`.
-- strict-fit boarding: `SectionLoad.denied_boardings` и `AssignmentMetrics.denied_boardings` — избыток спроса над свободной вместимостью секции считается отдельно, а не теряется молча.
+- strict-fit boarding: `SectionLoad.denied_boardings` и `AssignmentMetrics.denied_boardings` — избыток спроса над свободной вместимостью секции считается отдельно, а не теряется молча;
+- Pareto-фильтр альтернатив: `pareto_filter_journeys()` оставляет только недоминируемые на (perceived time, transfers, duration); `shortest_alternatives` применяет его к выходу diversity-цикла. Идентичные метрические кортежи не доминируют друг друга.
 
 Не сделано (сознательно):
 
