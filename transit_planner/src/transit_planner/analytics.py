@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, sqrt
+from math import ceil, isfinite, sqrt
 
 from .assignment import AssignmentResult
 from .city import DemandZone
-from .network import Network
+from .network import Network, ServicePeriod
 from .reference_model import (
     REFERENCE_MODE_PROFILES,
     minimum_station_headway_min,
@@ -368,6 +368,61 @@ def calculate_accessibility(
 
 def _share(numerator: float, denominator: float) -> float:
     return 0.0 if denominator <= 0 else numerator / denominator
+
+
+def _period_fleet_value(
+    periods: tuple[ServicePeriod, ...],
+    headway_by_period: dict[str, float],
+    cycle_min: float,
+    minute: float,
+) -> float:
+    for period in periods:
+        if period.start_minute <= minute < period.end_minute:
+            headway = headway_by_period.get(period.id, 0.0)
+            if headway <= 0:
+                return 0.0
+            return float(ceil(cycle_min / headway))
+    return 0.0
+
+
+def fleet_required_at_minute(
+    periods: tuple[ServicePeriod, ...],
+    headway_by_period: dict[str, float],
+    cycle_min: float,
+    minute: float,
+) -> float:
+    """Vehicles needed at an exact minute, blending across period boundaries.
+
+    A step change at a period boundary is operationally impossible (vehicles
+    finish their cycles), so within ±cycle_min of a boundary the requirement
+    ramps linearly between the adjacent periods' ceil(cycle/headway) values.
+    Outside every window the value is the containing period's integer
+    requirement; outside all periods it is 0.0. With overlapping windows the
+    nearest boundary wins, keeping the result deterministic.
+    """
+    if cycle_min <= 0:
+        raise ValueError("cycle_min must be positive")
+    if not isfinite(minute):
+        raise ValueError("minute must be finite")
+    ordered = tuple(sorted(periods, key=lambda period: period.start_minute))
+    base = _period_fleet_value(ordered, headway_by_period, cycle_min, minute)
+    boundaries = sorted(
+        {period.start_minute for period in ordered}
+        | {period.end_minute for period in ordered}
+    )
+    nearest: float | None = None
+    for boundary in boundaries:
+        distance = abs(minute - boundary)
+        if distance < cycle_min and (nearest is None or distance < abs(minute - nearest)):
+            nearest = float(boundary)
+    if nearest is None:
+        return base
+    epsilon = 1e-9
+    before = _period_fleet_value(ordered, headway_by_period, cycle_min, nearest - epsilon)
+    after = _period_fleet_value(ordered, headway_by_period, cycle_min, nearest + epsilon)
+    progress = (minute - (nearest - cycle_min)) / (2.0 * cycle_min)
+    progress = min(1.0, max(0.0, progress))
+    return before * (1.0 - progress) + after * progress
 
 
 def _track_capacity_analytics(

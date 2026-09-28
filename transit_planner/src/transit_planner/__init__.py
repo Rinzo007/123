@@ -5,6 +5,7 @@ from .analytics import (
     StopAnalytics,
     analyze_network,
     calculate_accessibility,
+    fleet_required_at_minute,
 )
 from .assignment import (
     AssignmentConfig,
@@ -135,6 +136,7 @@ __all__ = [
     "StopAnalytics",
     "analyze_network",
     "calculate_accessibility",
+    "fleet_required_at_minute",
     "AssignmentConfig",
     "AssignmentMetrics",
     "DemandLoss",

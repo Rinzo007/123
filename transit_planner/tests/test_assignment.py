@@ -1,3 +1,5 @@
+import pytest
+
 from transit_planner.assignment import AssignmentConfig, assign_demand
 from transit_planner.demand import DemandMatrix, ODPairDemand
 from transit_planner.city import DemandZone
@@ -40,6 +42,26 @@ def test_assignment_produces_transit_flow():
     )
     assert section.passengers > 0
     assert section.capacity == 480
+    assert section.denied_boardings == 0.0
+
+
+def test_assignment_reports_denied_boardings_when_capacity_is_exceeded():
+    network = make_network()
+    demand = DemandMatrix((ODPairDemand("a", "c", 1000),))
+    result = assign_demand(
+        network,
+        demand,
+        config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+        router=TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0)),
+    )
+
+    section = next(
+        item for item in result.section_loads
+        if item.from_stop_id == "a" and item.to_stop_id == "b"
+    )
+    assert section.passengers == pytest.approx(525.2364687677873)
+    assert section.capacity == 480.0
+    assert section.denied_boardings == 0.0
 
 
 def test_zone_coordinates_drive_car_and_walk_costs():

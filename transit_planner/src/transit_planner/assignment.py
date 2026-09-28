@@ -26,6 +26,7 @@ class SectionLoad:
     to_stop_id: str
     passengers: float
     capacity: float
+    denied_boardings: float = 0.0
 
     @property
     def load_ratio(self) -> float:
@@ -72,6 +73,7 @@ class AssignmentMetrics:
     bike_trips: float = 0.0
     average_wait_time_min: float = 0.0
     rest_trips: float = 0.0
+    denied_boardings: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +243,7 @@ def _assign_once(
     service_headway_factors: dict[str, float],
 ) -> _FlowSnapshot:
     section_flow: dict[tuple[str, str, str], float] = {}
+    section_denied: dict[tuple[str, str, str], float] = {}
     service_stop_boardings: dict[tuple[str, str], float] = {}
     section_capacity, stop_platform_m = _section_capacity_and_platforms(
         network,
@@ -252,6 +255,7 @@ def _assign_once(
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
     total_transit = total_car = total_walk = total_bike = total_rest = 0.0
+    denied_boardings = 0.0
     weighted_transit_time = weighted_transfers = weighted_wait = 0.0
     unserved = 0.0
     loss_reasons: dict[str, float] = {}
@@ -422,6 +426,14 @@ def _assign_once(
                     if leg.kind != "transit" or leg.route_id is None:
                         continue
                     key = (leg.route_id, leg.from_id, leg.to_id)
+                    segment_capacity = next(
+                        (
+                            item_capacity
+                            for route_id, _from, _to, item_capacity in section_capacity
+                            if route_id == leg.route_id and _from == leg.from_id and _to == leg.to_id
+                        ),
+                        0.0,
+                    )
                     section_flow[key] = section_flow.get(key, 0.0) + candidate_trips
                     if leg.service_id is not None:
                         service_key = (leg.service_id, leg.from_id)
@@ -476,6 +488,22 @@ def _assign_once(
                                 + candidate_trips
                             )
 
+                    # Strict-fit boarding: a vehicle cannot take more than its
+                    # free capacity after alighting. Excess demand is denied
+                    # boarding and reported separately; it is not silently
+                    # dropped from the assignment totals.
+                    if not previous_same_route:
+                        alighting_here = (
+                            stop_alightings.get(leg.from_id, 0.0)
+                            if leg.from_id in stop_alightings
+                            else 0.0
+                        )
+                        free_capacity = max(0.0, segment_capacity - alighting_here)
+                        if candidate_trips > free_capacity:
+                            denied = candidate_trips - free_capacity
+                            denied_boardings += denied
+                            section_denied[key] = section_denied.get(key, 0.0) + denied
+
     section_loads = tuple(
         SectionLoad(
             route_id=route_id,
@@ -483,6 +511,7 @@ def _assign_once(
             to_stop_id=to_id,
             passengers=section_flow.get((route_id, from_id, to_id), 0.0),
             capacity=capacity,
+            denied_boardings=section_denied.get((route_id, from_id, to_id), 0.0),
         )
         for route_id, from_id, to_id, capacity in section_capacity
     )
@@ -522,9 +551,10 @@ def _assign_once(
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
         bike_trips=total_bike,
         average_wait_time_min=(
-            0.0 if total_transit <= 0 else weighted_wait / total_transit
+            0.0 if total_transit == 0 else weighted_wait / total_transit
         ),
         rest_trips=total_rest,
+        denied_boardings=denied_boardings,
     )
     losses = tuple(
         DemandLoss(reason, trips)
