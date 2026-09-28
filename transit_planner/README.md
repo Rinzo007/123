@@ -164,7 +164,6 @@ frontend/src/
 │   ├── reference-runtime.ts
 │   ├── evaluation-runtime.js
 │   ├── evaluation.worker.ts
-│   ├── matrix.worker.ts
 │   ├── demand-choice.worker.ts
 │   ├── routing.ts
 │   └── routing.worker.ts
@@ -311,11 +310,26 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 ### Этап 4 — Matrix Worker
 
-Статус: 🔄 начат
+Статус: ✅ завершён
 
-Ядро уже есть: `matrix.worker.ts` — Dijkstra на typed arrays, 4-ary heap, пакет `[start,end)`, transferable ArrayBuffer, отмена по job-номеру.
+Матрица stop×stop в проекте **не нужна**, и это проверено по коду, а не по предположению:
 
-Осталось: кэширование матриц; инвалидация по версии street graph; вход матрицы строго через ArrayBuffer (без post-структур); transferable-возврат previous-массива в main.
+- авторская модель (`routing.py::_build_walking_neighbors`) строит пешеходные пересадки по прямой линии между остановками с радиусом 500 м и скоростью 5 км/ч; walk access/egress в ней отсутствует — `origin`/`destination` это сами остановки. Frontend-пакер делает ровно то же (0.5 км / 5 км/ч = 6 мин), поэтому расхождения в фиделити нет;
+- `assignment.py::_walk_minutes` для zone→stop использует прямую линию так же, поэтому street-distance walk не улучшает паритет с Python, а меняет метод;
+- единственный живой матричный путь — внутри транспилированного `evaluation-runtime.js`: свой пул из `public/assets/reference-matrix.worker.js` (собственный CSR, кэш `routePools`/`warmLoads`, гейт `stops >= 1200` и whitelist hostname). Он не строит матрицу по Overture TKST;
+- собственный `matrix.worker.ts` вместе с `solveMatrix`/`solveRoadMatrix` **не имел ни одного вызова**, то есть был мёртвым близнецом вендоренного воркера. Удалён.
+
+Вместо несуществующей матрицы закрыта реальная дыра Этапа 3 — инвалидация кэша street graph:
+
+- ключ кэша `graph.bin` теперь включает версию формата (`STREETS_VERSION`, экспортирована из декодера) и релиз Overture: смена релиза или формата автоматически инвалидирует запись, устаревший TKST больше не отдаётся вечно;
+- `/api/v1/data/overture/graph` отдаёт `X-Overture-Release`, клиент требует этот заголовок и сверяет его с релизом, из которого загружена сеть — расхождение это явная ошибка, а не тихая подмена;
+- повреждённая запись кэша декодируется с одной попыткой перезапроса у источника; вторая неудача остаётся явной ошибкой.
+
+Проверено: `python -m pytest tests -q` → 173 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно.
+
+Не сделано (сознательно):
+
+- `demand-choice.worker.ts` / `solveDemand` — тоже без вызовов (0 ссылок), но это faithful Wardman mode-share из Этапа 1, а покрытие mode choice вендоренным рантаймом не проверено; удаление требует отдельного решения, а не побочного tidy-up в Этапе 4.
 
 ### Этап 5 — Routing Worker
 

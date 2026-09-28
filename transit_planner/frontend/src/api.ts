@@ -117,12 +117,18 @@ export function loadOvertureNetwork(
   );
 }
 
+export interface OvertureGraphPayload {
+  buffer: ArrayBuffer;
+  release: string;
+}
+
 export async function loadOvertureGraph(
   south: number,
   west: number,
   north: number,
   east: number,
-): Promise<ArrayBuffer> {
+  release?: string,
+): Promise<OvertureGraphPayload> {
   const response = await fetch(
     "/api/v1/data/overture/graph?" +
       new URLSearchParams({
@@ -130,12 +136,17 @@ export async function loadOvertureGraph(
         west: String(west),
         north: String(north),
         east: String(east),
+        ...(release ? { release } : {}),
       }),
   );
   if (!response.ok) {
     throw new Error((await response.text()) || "Не удалось получить street graph");
   }
-  return response.arrayBuffer();
+  const graphRelease = response.headers.get("X-Overture-Release");
+  if (!graphRelease) {
+    throw new Error("Street graph получен без заголовка X-Overture-Release");
+  }
+  return { buffer: await response.arrayBuffer(), release: graphRelease };
 }
 
 export interface TimetableResponse {

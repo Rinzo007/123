@@ -18,6 +18,7 @@ import {
 } from "./api";
 import type { NetworkPayload, StopDraft, TransitMode, TrackType } from "./types";
 import {
+  clearDataset,
   loadBinaryDataset,
   loadDataset,
   loadProject,
@@ -36,6 +37,7 @@ import { generateServiceTimetable } from "./planning/timetable";
 import { validateTopology } from "./core/topology";
 import { decodeLines, encodeLines } from "./line-cache";
 import {
+  STREETS_VERSION,
   assembleRouteCoordinates,
   decodeStreets,
   nearestGraphNode,
@@ -716,20 +718,43 @@ async function loadCityData(): Promise<void> {
     cityStops = data.stops;
     cityPlaces = data.places;
 
-    const graphKey = key + ":graph-bin";
-    const cachedGraph = await loadBinaryDataset(graphKey);
-    try {
-      const graphBuffer = cachedGraph ?? (await loadOvertureGraph(b.south, b.west, b.north, b.east));
-      if (!cachedGraph) await saveBinaryDataset(graphKey, graphBuffer);
-      streetGraph = decodeStreets(graphBuffer);
-    } catch (error) {
+    // Ключ привязан к версии формата и релизу Overture: смена релиза или
+    // формата автоматически инвалидирует кэш, без устаревших streets.bin.
+    const graphKey = `${key}:graph-bin:s${STREETS_VERSION}:${data.release}`;
+    let graphError: string | null = null;
+    // Две попытки: повреждённый кэш один раз отбрасывается с перезапросом.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const cachedGraph = await loadBinaryDataset(graphKey);
+      if (cachedGraph) {
+        try {
+          streetGraph = decodeStreets(cachedGraph);
+          graphError = null;
+          break;
+        } catch {
+          await clearDataset(graphKey);
+        }
+      }
+      try {
+        const payload = await loadOvertureGraph(b.south, b.west, b.north, b.east, data.release);
+        if (payload.release !== data.release) {
+          throw new Error(
+            `Street graph собран из Overture ${payload.release}, а сеть загружена из ${data.release}`,
+          );
+        }
+        streetGraph = decodeStreets(payload.buffer);
+        await saveBinaryDataset(graphKey, payload.buffer);
+        graphError = null;
+        break;
+      } catch (error) {
+        graphError = error instanceof Error ? error.message : "Street graph недоступен";
+      }
+    }
+    if (graphError) {
       streetGraph = null;
-      setStatus(
-        `${error instanceof Error ? error.message : "Street graph недоступен"}`,
-      );
+      setStatus(graphError);
     }
 
-      const populationKey = datasetCacheKey("population-zones", b);
+    const populationKey = datasetCacheKey("population-zones", b);
     const cachedPopulation = await loadDataset<FeatureCollection>(populationKey);
     if (cachedPopulation) {
       populationZones = cachedPopulation;

@@ -23,18 +23,6 @@ export type DemandOutput = {
   computeMs: number;
 };
 
-export type MatrixInput = {
-  stops: number;
-  offsets: Int32Array;
-  targets: Int32Array;
-  costs: Float64Array;
-};
-
-export type MatrixOutput = {
-  times: Float64Array;
-  previous: Int32Array;
-};
-
 let requestId = 0;
 
 function fingerprint(value: unknown): string {
@@ -169,34 +157,6 @@ export function solveDemand(batch: DemandBatch): Promise<DemandOutput> {
       batch.transfer.buffer,
     ]);
   });
-}
-
-export async function solveMatrix(input: MatrixInput): Promise<MatrixOutput> {
-  const workerCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 2, input.stops));
-  const workers = Array.from({ length: workerCount }, () => new Worker(new URL("./matrix.worker.ts", import.meta.url), { type: "module" }));
-  const times = new Float64Array(input.stops * input.stops);
-  times.fill(Number.POSITIVE_INFINITY);
-  const previous = new Int32Array(input.stops * input.stops * 2);
-  previous.fill(-1);
-  const job = Date.now();
-  await Promise.all(workers.map((worker, index) => new Promise<void>((resolve, reject) => {
-    const start = Math.floor(index * input.stops / workerCount);
-    const end = Math.floor((index + 1) * input.stops / workerCount);
-    worker.onmessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; job?: number; start?: number; times?: Float64Array; previous?: Int32Array };
-      if (data.type !== "solved" || data.job !== job) return;
-      if (data.times && data.start != null) times.set(data.times, data.start * input.stops);
-      if (data.previous && data.start != null) previous.set(data.previous, data.start * input.stops * 2);
-      worker.terminate();
-      resolve();
-    };
-    worker.onerror = (event) => { worker.terminate(); reject(new Error(event.message || "model matrix worker failed")); };
-    worker.postMessage({
-      type: "solve", job, start, end, stops: input.stops,
-      offsets: input.offsets, targets: input.targets, costs: input.costs,
-    });
-  })));
-  return { times, previous };
 }
 
 export type ModelLine = {

@@ -1,5 +1,5 @@
 const STREETS_MAGIC = 0x54534b54; // "TKST" little-endian
-const STREETS_VERSION = 2;
+export const STREETS_VERSION = 2;
 const HEADER_BYTES = 24;
 
 export interface StreetGraph {

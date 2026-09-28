@@ -5,11 +5,8 @@ import { routeWithRaptor, type RaptorJourney } from "./routing";
 import {
   EvaluationClient,
   solveDemand,
-  solveMatrix,
   type DemandBatch,
   type DemandOutput,
-  type MatrixInput,
-  type MatrixOutput,
 } from "./reference-runtime";
 
 export type EvaluationSummary = {
@@ -39,18 +36,11 @@ export function networkCounts(network: NetworkPayload): NetworkCounts {
 }
 
 export type DemandBatchResult = DemandOutput;
-export type MatrixResult = MatrixOutput;
 
 export function solveDemandStrategy(
   batch: DemandBatch,
 ): Promise<DemandBatchResult> {
   return solveDemand(batch);
-}
-
-export function solveRoadMatrix(
-  input: MatrixInput,
-): Promise<MatrixResult> {
-  return solveMatrix(input);
 }
 
 export function createEvaluationClient(workerCount?: number): EvaluationClient {

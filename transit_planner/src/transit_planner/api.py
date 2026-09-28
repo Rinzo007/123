@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from .analytics import _service_analytics, _track_capacity_analytics
 from .assignment import AssignmentConfig, assign_demand
+from .binary_pack import STREETS_VERSION
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city import DemandZone
 from .city_demand import CityDemandConfig, build_city_temporal_demand
@@ -67,13 +68,13 @@ def load(provider,method,s,w,n,e,r):
 def roads(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):return roads_to_geojson(load(OvertureTransportationProvider,"load_roads",south,west,north,east,release))
 @app.get("/api/v1/data/overture/graph")
 def graph(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):
-    b=bounds(south,west,north,east)
+    b=bounds(south,west,north,east); s=src(release)
     try:
-        n=OvertureNetworkProvider(source=src(release),bbox=b,snap_max_distance_m=150.0).load(include_connectors=True,include_stops=False,include_places=False)
+        n=OvertureNetworkProvider(source=s,bbox=b,snap_max_distance_m=150.0).load(include_connectors=True,include_stops=False,include_places=False)
     except (OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
     from .city_pack import streets_bin_for_graph
     payload,stats=streets_bin_for_graph(n.graph,origin_lon=n.origin_lon,origin_lat=n.origin_lat)
-    return Response(content=payload,media_type="application/octet-stream",headers={"X-Streets-Version":"2","X-Nodes":str(stats["nodes"]),"X-Edges":str(stats["edges"]),"X-Components":str(stats["components"])})
+    return Response(content=payload,media_type="application/octet-stream",headers={"X-Streets-Version":str(STREETS_VERSION),"X-Nodes":str(stats["nodes"]),"X-Edges":str(stats["edges"]),"X-Components":str(stats["components"]),"X-Overture-Release":s.release})
 @app.get("/api/v1/data/overture/connectors")
 def connectors(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):return connectors_to_geojson(load(OvertureConnectorProvider,"load_connectors",south,west,north,east,release))
 @app.get("/api/v1/data/overture/stops")

@@ -158,6 +158,7 @@ def test_overture_graph_endpoint_streams_tkst(monkeypatch):
     assert response.headers["X-Nodes"] == "3"
     assert response.headers["X-Edges"] == "2"
     assert response.headers["X-Components"] == "1"
+    assert response.headers["X-Overture-Release"] == api_module.RELEASE
 
     payload = bytes(response.body)
     assert int.from_bytes(payload[:4], "little") == STREETS_MAGIC
@@ -167,6 +168,47 @@ def test_overture_graph_endpoint_streams_tkst(monkeypatch):
     assert decoded["vertex_count"] == 3
     assert decoded["edge_count"] == 2
     assert len(set(decoded["component"])) == 1
+
+
+def test_overture_graph_endpoint_echoes_requested_release(monkeypatch):
+    import transit_planner.api as api_module
+    from transit_planner.data import ConnectorRef, RoadRecord
+    from transit_planner.geo import LineString, Point
+    from transit_planner.overture_network import build_overture_network
+
+    built = build_overture_network(
+        (
+            RoadRecord(
+                "r1",
+                LineString((Point(39.2000, 51.6700), Point(39.2010, 51.6700))),
+                40.0,
+                road_type="secondary",
+                oneway=True,
+                connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 0.5), ConnectorRef("c2", 1.0)),
+                length_m=140.0,
+            ),
+        ),
+        (),
+        (),
+        origin_lon=39.2010,
+        origin_lat=51.6700,
+        snap_max_distance_m=500.0,
+    )
+
+    class _Provider:
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, **_kwargs):
+            return built
+
+    monkeypatch.setattr(api_module, "OvertureNetworkProvider", _Provider)
+
+    response = api_module.graph(
+        south=51.669, west=39.199, north=51.671, east=39.202, release="2025-11-19.0"
+    )
+    # Клиент кэширует graph.bin по этому значению, поэтому эхо обязано быть точным.
+    assert response.headers["X-Overture-Release"] == "2025-11-19.0"
 
 
 def test_overture_graph_endpoint_reports_source_failure(monkeypatch):
