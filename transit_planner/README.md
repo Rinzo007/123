@@ -371,9 +371,19 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Статус: 🔄 частично готов
 
-Уже перенесено: commuter demand; purpose layers; Overture places; purpose generators; периоды; WGS84 точки; reference generator En().
+Уже перенесено: commuter demand; purpose layers; Overture places; purpose generators; периоды; WGS84 точки; reference generator En(). Typed-array представление, передача OD через ArrayBuffer, полный reference demand pipeline в worker.
 
-Осталось: полностью перенести typed-array представление; убрать Python demand как runtime dependency; передавать OD через ArrayBuffer; реализовать полный reference demand pipeline в worker; synthetic/резервные demand paths удалены на Этапе 1.
+Сделано в этой итерации:
+
+- `app.ts` больше не ходит в `/api/v1/demand/reference`: матрица считается в `demand.worker.ts` из реальных WorldPop-зон и Overture-мест.
+- Воркер отдаёт наружу и суточную gravity-матрицу, и temporal-разбивку по периодам (`buildTemporalDemand` перестал теряться).
+- `calculateAssignment()` и `loadDemandStreets()` получают реальную матрицу по зонам населения и колоночные зоны, а не синтетическую пару `stops[0] → stops[last]` с `trips = previewTrips`.
+- Паритет `gravityOd()` ↔ `gravity_od()` закреплён в `tests/test_demand_parity.py` (состав пар, поездки, базовое время, сохранение производств).
+- Попутно исправлен баг: `pts` в `buildReferenceDemand()` брался из координат мест Overture по индексу зоны вместо центроидов зон.
+
+Осталось: убрать Python как runtime dependency для самого расчёта пассажиропотоков (`/api/v1/assignment`) и для `runEconomics()`, которые до сих пор используют синтетическую пару; строгая провязка спроса к reference-периодам вместо daily-матрицы (Этап 7).
+
+Проверено: `python -m pytest tests -q` → 216 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно; `uvx vulture . --min-confidence 80` → чисто.
 
 ### Этап 7 — Mode Choice
 
