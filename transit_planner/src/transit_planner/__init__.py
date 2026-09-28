@@ -126,6 +126,7 @@ from .timetable import (
     next_departure,
     wait_minutes,
 )
+from .trunks import Trunk, TrunkSegment, detect_shared_trunks
 from .zones import generate_grid_zones, generate_zones_from_population_raster, nearest_zone
 
 
@@ -182,6 +183,9 @@ __all__ = [
     "Route",
     "Service",
     "ServicePeriod",
+    "Trunk",
+    "TrunkSegment",
+    "detect_shared_trunks",
     "Stop",
     "TransitMode",
     "VehicleType",
