@@ -167,6 +167,8 @@ frontend/src/
 │   ├── demand-choice.worker.ts
 │   ├── routing.ts
 │   └── routing.worker.ts
+├── journey.ts
+├── projection.ts
 ├── map-network-editor.ts
 ├── network-editor.ts
 ├── line-cache.ts
@@ -218,7 +220,7 @@ Frontend:
 - fallback evaluation: `runClientPreview` без воркера переименован в честный `networkCounts`, reference-модель `/data/model.json` больше не деградирует в `{}`;
 - fallback сборки: хеш-бандл `/assets/evaluation.worker-jRuvxHc_.js` заменён статическим импортом `evaluation-runtime.js` (Vite переименовывает чанк сам);
 - дублирующие TS-реализации: удалены 15 мёртвых модулей (~1000 строк), включая `rraptor.ts` с битым импортом, дубли валидаторов, редакторов и кэшей;
-- worker-контракты: `matrix/routing/demand-choice` workers изолированы (`export {}`), устранены глобальные коллизии;
+- worker-контракты: `routing/demand-choice` workers изолированы (`export {}`), устранены глобальные коллизии;
 - storage: повреждённый или бесформенный JSON настроек даёт явную ошибку; реальная ошибка IndexedDB при восстановлении проекта выводится в статус;
 - timetable/fleet/routing: отсутствующий headway = пустое расписание/нулевой парк, отсутствующий period = явная ошибка (не 20 мин и не 0–1440);
 - mode cost: `DEFAULT_ROW_COST` индексируется `TransitMode` и компиляторно исчерпывающ, подмена `?? 1` и мёртвые ветки row-классификации удалены;
@@ -305,7 +307,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Не сделано (сознательно, дальше по карте):
 
-- индекс пространственного поиска в TS: `nearestGraphNode` линейный (O(V) на точку) — на городских графах десятки тысяч узлов это приемлемо, но заменяется на grid/R-tree вместе с кэшем матриц (Этап 4);
+- индекс пространственного поиска в TS: `nearestGraphNode` и `nearestStopIndex` линейные (O(V) на точку) — на городских графах десятки тысяч узлов это приемлемо, но заменяются на grid/R-tree; матрицы для этого не требуются, см. Этапы 4 и 5;
 - отображение street graph отдельным слоем карты (сейчас слой дорог остаётся на GeoJSON из `/overture/network`, граф используется для маршрутизации).
 
 ### Этап 4 — Matrix Worker
@@ -333,11 +335,24 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 ### Этап 5 — Routing Worker
 
-Статус: 🔄 начат
+Статус: ✅ завершён
 
-Ядро уже есть: `routing.worker.ts` — RAPTOR поверх packed typed arrays (route patterns, departures, transfers, access/egress), transferable buffers.
+Ядро: `routing.worker.ts` — RAPTOR поверх packed typed arrays (route patterns, departures, transfers), transferable buffers. Time-dependent поиск был в worker изначально: перебор отправлений по окну.
 
-Осталось: stop→stop поверх уличного графа Этапа 3; transit path и route geometry в результатах; time-dependent routing; route cache; incremental invalidation.
+Сделано на этом этапе:
+
+- `journey.ts` — единственная точка входа планировщика A→B: snap к ближайшей остановке (≤500 м), legs с board/alight, геометрия маршрута, LRU-кэш на 32 записи с ключом `projectRevision|period|from|to|параметры` и сброс при любой правке сети;
+- `routing.ts` — отдаёт из worker не только путь, но и копии route patterns для геометрии; добавлены явные ошибки вместо молчаливых `continue`: неизвестный период, выход индексов за границы, совпадающие endpoints, service без интервала в периоде, отсутствие отправлений в окне периода, route/stop ID, не встречающиеся в services, повреждённая геометрия маршрута;
+- UI — панель «Маршрут A→B» с выбором остановок, периода и времени отправления, слой геометрии на карте, текстовый itinerary;
+- инвалидация результата централизована в `markDirty()`/`invalidateJourneyPlan()`: ранее перетаскивание узлов карты и undo/redo меняли сеть без `markDirty()`, `projectRevision` не рос и из кэша возвращался устаревший маршрут;
+- `projection.ts` — общие `toLocalMeters()`/`fromLocalMeters()` для редактора и планировщика;
+- паритет расписания с Python: формула первого отправления в JS использовала отрицательный остаток и давала отправление **до** начала периода, а `planning/timetable.ts` считала `start + offset` и расходилась с `timetable.py` при `offset > headway`. Обе TS-реализации переведены на общий `firstDepartureMinute()`, тест `tests/test_frontend_timetable_parity.py` собирает настоящий `planning/timetable.ts` и сверяет его с `timetable.py` (пропускается без node/typescript);
+- `formatMinuteOfDay(1440)` показывает `24:00`, а не `00:00` — иначе конец периода «вечер» подписан полночью следующего дня.
+
+Не сделано (сознательно):
+
+- spatial index для snap: `nearestStopIndex` остаётся O(N) по числу остановок; для текущего размера сети это дешевле поддержки индекса, но при росте сети потребуется grid/R-tree. Матрица для этого по-прежнему не нужна;
+- access/egress и walking legs: их нет и в Python-эталоне — маршрут начинается и заканчивается на остановках, пересадка считается прямой линией 500 м / 5 км/ч. Чтобы это заработало, нужен отдельный этап вместе с Этапом 4-подобным доступом к графу.
 
 ### Этап 6 — Demand Worker
 

@@ -36,6 +36,8 @@ import { estimateFleetRequirement } from "./planning/fleet";
 import { generateServiceTimetable } from "./planning/timetable";
 import { validateTopology } from "./core/topology";
 import { decodeLines, encodeLines } from "./line-cache";
+import { clearJourneyCache, formatMinuteOfDay, planJourney, type JourneyPlan } from "./journey";
+import { fromLocalMeters, toLocalMeters } from "./projection";
 import {
   STREETS_VERSION,
   assembleRouteCoordinates,
@@ -384,9 +386,16 @@ function setStatus(next: string): void {
 }
 function markDirty(): void {
   projectRevision += 1;
+  // Любая правка сети обесценивает и показанный маршрут, и кэш расчётов.
+  invalidateJourneyPlan();
   saveStateElement.textContent = "Изменения не сохранены";
   saveStateElement.classList.add("dirty");
   scheduleProjectSave();
+}
+/** Сеть изменилась: прежний маршрут и кэш больше недействительны. */
+function invalidateJourneyPlan(): void {
+  journeyPlan = null;
+  clearJourneyCache();
 }
 function markClean(): void {
   saveStateElement.textContent = "Сохранено";
@@ -394,22 +403,6 @@ function markClean(): void {
 }
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
-}
-function toLocalMeters(lon: number, lat: number, lon0: number, lat0: number) {
-  const earthRadius = 6378137;
-  const cosLat = Math.cos((lat0 * Math.PI) / 180);
-  return {
-    x: ((lon - lon0) * Math.PI) / 180 * earthRadius * cosLat,
-    y: ((lat - lat0) * Math.PI) / 180 * earthRadius,
-  };
-}
-function fromLocalMeters(x: number, y: number, lon0: number, lat0: number): [number, number] {
-  const earthRadius = 6378137;
-  const cosLat = Math.cos((lat0 * Math.PI) / 180);
-  return [
-    lon0 + (x / Math.max(1e-9, earthRadius * cosLat)) * 180 / Math.PI,
-    lat0 + (y / earthRadius) * 180 / Math.PI,
-  ];
 }
 function bounds(): Bounds | null {
   if (!map) return null;
@@ -568,11 +561,37 @@ previousNetwork = network;
 let selectedTrackId: string | null = null;
 let mapNetworkEditor: MapNetworkEditor | null = null;
 let editorMode: MapEditorMode = "select";
+let journeyOriginStopId: string | null = null;
+let journeyDestinationStopId: string | null = null;
+let journeyPeriodId = "am";
+let journeyDepartureClock = "07:00";
+let journeyPlan: JourneyPlan | null = null;
+
+function journeyRouteGeoJSON(): FeatureCollection {
+  if (!journeyPlan || !journeyPlan.found || journeyPlan.coordinates.length < 2) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: journeyPlan.coordinates },
+      properties: {
+        source: "raptor-journey-worker",
+        transfers: journeyPlan.transfers,
+        arrive_min: journeyPlan.arriveMin,
+        generalized_min: journeyPlan.generalizedMin,
+        legs: journeyPlan.legs.length,
+      },
+    }],
+  };
+}
 
 function syncMapGeoJson(): void {
   if (!map || !mapReady) return;
   const source = (id: string) => map!.getSource(id) as GeoJSONSource | undefined;
   source("draft-route")?.setData(roadRoute ?? emptyRouteGeoJSON());
+  source("journey-route")?.setData(journeyRouteGeoJSON());
   source("draft-stops")?.setData(stopsGeoJSON());
   if (cityRoads) source("city-roads")?.setData(cityRoads);
   if (cityConnectors) source("city-connectors")?.setData(cityConnectors);
@@ -838,6 +857,66 @@ async function buildRoadRoute(): Promise<void> {
   }
 }
 
+function parseClockToMinute(clock: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(clock.trim());
+  if (!match) throw new Error(`Время отправления «${clock}» не понимается, ожидается ЧЧ:ММ`);
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) throw new Error(`Время отправления «${clock}» неверное`);
+  return hour * 60 + minute;
+}
+
+async function buildJourney(): Promise<void> {
+  if (stops.length < 2) return;
+  const originId = journeyOriginStopId ?? stops[0].id;
+  const destinationId = journeyDestinationStopId ?? stops[stops.length - 1].id;
+  const origin = stops.find((stop) => stop.id === originId);
+  const destination = stops.find((stop) => stop.id === destinationId);
+  if (!origin || !destination) {
+    throw new Error("Выбранные остановки маршрута не найдены в сети");
+  }
+  const period = PERIODS.find((item) => item.id === journeyPeriodId);
+  if (!period) throw new Error(`Период ${journeyPeriodId} не найден`);
+  const departureMin = parseClockToMinute(journeyDepartureClock);
+  if (departureMin < period.start_minute || departureMin >= period.end_minute) {
+    throw new Error(
+      `Время ${journeyDepartureClock} вне периода ${period.id} (${period.start_minute}–${period.end_minute} мин)`,
+    );
+  }
+
+  busy = true;
+  setStatus("Планирование маршрута rRAPTOR...");
+  try {
+    const plan = await planJourney({
+      network,
+      periodId: period.id,
+      origin: { lon: origin.lon, lat: origin.lat },
+      destination: { lon: destination.lon, lat: destination.lat },
+      revision: projectRevision,
+      departureMin,
+    });
+    journeyPlan = plan.found ? plan : null;
+    if (!plan.found) {
+      setStatus(`rRAPTOR не нашёл маршрут ${origin.name} → ${destination.name} в периоде ${period.id}`);
+    } else {
+      setStatus(
+        `Маршрут ${origin.name} → ${destination.name}: ` +
+        `${formatMinuteOfDay(plan.legs[0].departMin)}–${formatMinuteOfDay(plan.arriveMin)}, ` +
+        `${plan.legs.length} участк., ${plan.transfers} пересад., ожидание ${plan.waitMin.toFixed(1)} мин`,
+      );
+    }
+    syncMapGeoJson();
+    render();
+  } catch (error) {
+    journeyPlan = null;
+    setStatus(error instanceof Error ? error.message : "Ошибка планирования маршрута");
+    syncMapGeoJson();
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
 function runPlanningPreview(): void {
   network = keepNetwork(network, buildNetworkPayload());
   lastPlanningPreview = planningPreview(network);
@@ -1074,6 +1153,7 @@ function applyProject(project: ProjectFile): void {
   timetable = null;
   network = buildNetworkPayload();
   projectRevision += 1;
+  invalidateJourneyPlan();
   markClean();
   render();
   syncMapGeoJson();
@@ -1095,6 +1175,8 @@ function addStop(event: MapMouseEvent): void {
 function removeStop(id: string): void {
   stops = stops.filter((stop) => stop.id !== id);
   roadRoute = null;
+  if (journeyOriginStopId === id) journeyOriginStopId = null;
+  if (journeyDestinationStopId === id) journeyDestinationStopId = null;
   assignmentResult = null;
   demandStreets = null;
   scenarioComparison = null;
@@ -1106,6 +1188,8 @@ function removeStop(id: string): void {
 function clearRoute(): void {
   stops = [];
   roadRoute = null;
+  journeyOriginStopId = null;
+  journeyDestinationStopId = null;
   assignmentResult = null;
   demandStreets = null;
   economicsResult = null;
@@ -1228,8 +1312,41 @@ function renderResults(): void {
   if (timetable) {
     html += `<section class="analytics-panel"><h3>Расписание ${timetable.service_id}</h3>${timetable.periods.map((period) => `<div class="timetable-row"><strong>${period.period_id}</strong><span>${period.departures_minute.length} отправлений</span></div>`).join("")}</section>`;
   }
+  html += renderJourneyPanel();
   html += `<section class="analytics-panel"><button data-action="timetable" ${network.services.length ? "" : "disabled"}>Сформировать расписание</button></section>`;
   networkContent.innerHTML = html;
+}
+
+function renderJourneyPanel(): string {
+  if (stops.length < 2) return "";
+  const stopNameById = new Map(stops.map((stop) => [stop.id, stop.name]));
+  const from = stops.find((stop) => stop.id === journeyOriginStopId) ?? stops[0];
+  const to = stops.find((stop) => stop.id === journeyDestinationStopId) ?? stops[stops.length - 1];
+  const options = stops
+    .map((stop, index) => `<option value="${escapeHtml(stop.id)}" ${stop.id === from.id ? "selected" : ""}>${index + 1}. ${escapeHtml(stop.name)}</option>`)
+    .join("");
+  const optionsTo = stops
+    .map((stop, index) => `<option value="${escapeHtml(stop.id)}" ${stop.id === to.id ? "selected" : ""}>${index + 1}. ${escapeHtml(stop.name)}</option>`)
+    .join("");
+  const periodOptions = PERIODS
+    .map((period) => `<option value="${period.id}" ${period.id === journeyPeriodId ? "selected" : ""}>${period.id} (${formatMinuteOfDay(period.start_minute)}–${formatMinuteOfDay(period.end_minute)})</option>`)
+    .join("");
+  const legs = journeyPlan
+    ? journeyPlan.legs
+      .map((leg) => {
+        const stopName = (id: string) => stopNameById.get(id) ?? id;
+        return `<div class="period-card"><strong>${escapeHtml(leg.routeName)}</strong><span>${formatMinuteOfDay(leg.departMin)} → ${formatMinuteOfDay(leg.arriveMin)}</span><span>${escapeHtml(stopName(leg.fromStopId))} → ${escapeHtml(stopName(leg.toStopId))} · ${leg.stopIds.length} ост.</span></div>`;
+      })
+      .join("")
+    : "";
+  return `<section class="analytics-panel"><h3>Маршрут rRAPTOR</h3>
+    <label>Откуда<select data-journey-endpoint="origin">${options}</select></label>
+    <label>Куда<select data-journey-endpoint="destination">${optionsTo}</select></label>
+    <label>Период<select data-journey-field="period">${periodOptions}</select></label>
+    <label>Отправление<input data-journey-field="clock" type="time" value="${escapeHtml(journeyDepartureClock)}" /></label>
+    <button data-action="build-journey">Построить маршрут</button>
+    <p>${escapeHtml(from.name)} → ${escapeHtml(to.name)}</p>
+    ${legs}</section>`;
 }
 function renderStops(): void {
   stopCountElement.textContent = `(${stops.length})`;
@@ -1278,6 +1395,24 @@ function render(): void {
 
 shell.addEventListener("change", (event) => {
   const target = event.target as HTMLInputElement | HTMLSelectElement;
+  const endpoint = target.dataset.journeyEndpoint;
+  if (endpoint) {
+    // Смена любого адреса маршрута инвалидирует прежний результат: показывать
+    // старый маршрут для новых остановок было бы молчаливым расхождением.
+    journeyPlan = null;
+    if (endpoint === "origin") journeyOriginStopId = target.value;
+    else journeyDestinationStopId = target.value;
+    render();
+    return;
+  }
+  const journeyField = target.dataset.journeyField;
+  if (journeyField) {
+    journeyPlan = null;
+    if (journeyField === "period") journeyPeriodId = target.value;
+    else journeyDepartureClock = target.value;
+    render();
+    return;
+  }
   const field = target.dataset.trackField;
   if (!field) return;
   const track = network.track_sections.find((item) => item.id === selectedTrackId);
@@ -1316,6 +1451,7 @@ shell.addEventListener("click", (event) => {
     case "view-network": viewMode = "network"; render(); break;
     case "load-city": void loadCityData(); break;
     case "build-road": void buildRoadRoute(); break;
+  case "build-journey": void buildJourney().catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Ошибка планирования маршрута")); break;
     case "draw": drawMode = !drawMode; render(); break;
     case "planning-preview": runPlanningPreview(); break;
     case "preview": void runPreview(); break;
@@ -1370,6 +1506,7 @@ headwayContainer.addEventListener("change", (event) => {
   const input = (event.target as HTMLInputElement).closest<HTMLInputElement>("[data-headway]");
   if (!input) return;
   headways[input.dataset.headway!] = clampNumber(Number(input.value), 1, 120);
+  // Новый интервал меняет расписание, поэтому прежний маршрут недействителен.
   markDirty();
 });
 for (const [element, key] of toggleInputs) {
@@ -1447,10 +1584,12 @@ function initializeMap(): void {
     map!.addLayer({ id: "analysis-stop-loads", type: "circle", source: "analysis-stops", paint: { "circle-radius": ["interpolate", ["linear"], ["get", "boardings"], 0, 3, 100, 7, 500, 12, 1000, 18], "circle-color": "#111827", "circle-opacity": 0.72, "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     map!.addSource("draft-route", { type: "geojson", data: emptyRouteGeoJSON() });
     map!.addLayer({ id: "draft-route-line", type: "line", source: "draft-route", paint: { "line-width": 5, "line-opacity": 0.9, "line-color": "#2563eb" } });
+    map!.addSource("journey-route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map!.addLayer({ id: "journey-route-line", type: "line", source: "journey-route", paint: { "line-width": 6, "line-opacity": 0.95, "line-color": "#db2777", "line-dasharray": [2, 1] } });
     map!.addSource("draft-stops", { type: "geojson", data: stopsGeoJSON() });
     map!.addLayer({ id: "draft-stop-circles", type: "circle", source: "draft-stops", paint: { "circle-radius": 6, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     mapReady = true;
-    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); syncMapGeoJson(); render(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; editorSelection = { kind, id }; renderPropertyPanel(); render(); } });
+    mapNetworkEditor = new MapNetworkEditor(map!, { getNetwork: () => network, setNetwork: (next) => { network = next; previousNetwork = structuredClone(next); invalidateJourneyPlan(); syncMapGeoJson(); render(); }, getOrigin: () => ({ lon: network.origin_lon, lat: network.origin_lat }), markDirty, onSelection: (kind, id) => { selectedTrackId = kind === "track" ? id : null; editorSelection = { kind, id }; renderPropertyPanel(); render(); } });
     mapNetworkEditor.setMode(editorMode);
     syncMapGeoJson();
   });

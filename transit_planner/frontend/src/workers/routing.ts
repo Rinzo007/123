@@ -1,3 +1,4 @@
+import { firstDepartureMinute } from "../planning/timetable";
 import type { NetworkPayload, TransitMode } from "../types";
 
 export interface RaptorJourney {
@@ -43,7 +44,8 @@ function segmentTime(
 
 function departures(start: number, end: number, headway: number, offset: number): number[] {
   if (headway <= 0) return [];
-  const first = start + ((offset - start) % headway);
+  // Та же формула, что в timetable.py: остаток берётся неотрицательным.
+  const first = firstDepartureMinute(start, headway, offset);
   if (first >= end) return [];
   const result: number[] = [];
   for (let value = first; value < end; value += headway) result.push(value);
@@ -61,16 +63,31 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
   const index = new Map(network.stops.map((stop, i) => [stop.id, i]));
   const period = network.periods.find((item) => item.id === periodId);
   if (!period) throw new Error(`Period not found in network: ${periodId}`);
+  if (origin < 0 || origin >= stopCount) throw new Error(`Origin stop index out of range: ${origin}`);
+  if (destination < 0 || destination >= stopCount) throw new Error(`Destination stop index out of range: ${destination}`);
+  if (origin === destination) throw new Error("Origin and destination are the same stop");
+  if (network.services.length === 0) throw new Error("Network has no services: build a route before planning");
 
+  let patternsWithoutHeadway = 0;
   for (const service of network.services) {
     const route = network.routes.find((item) => item.id === service.route_id);
+    // Отсутствие маршрута или неизвестная остановка в маршруте — это порча
+    // данных, молча пропускать их нельзя.
+    if (!route) throw new Error(`Service ${service.id} references unknown route ${service.route_id}`);
     const headway = service.headway_by_period[periodId];
-    if (!route || !headway) continue;
+    // Маршрут может не ходить в этом периоде — это законно, но если не ходит
+    // никто, «нет соединения» не должно выглядеть как «нет расписания».
+    if (!headway) {
+      patternsWithoutHeadway += 1;
+      continue;
+    }
 
-    const stops = route.stop_ids
-      .map((id) => index.get(id))
-      .filter((value): value is number => value !== undefined);
-    if (stops.length < 2) continue;
+    const unknownStop = route.stop_ids.find((id) => !index.has(id));
+    if (unknownStop !== undefined) {
+      throw new Error(`Route ${route.id} references stop missing from network: ${unknownStop}`);
+    }
+    const stops = route.stop_ids.map((id) => index.get(id)!);
+    if (stops.length < 2) throw new Error(`Route ${route.id} has fewer than two stops`);
 
     const segmentTimes: number[] = [];
     for (let i = 0; i < route.stop_ids.length - 1; i += 1) {
@@ -107,6 +124,19 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
         segmentTimes: reverseTimes,
       });
     }
+  }
+
+  // Порядок важен: на пустом массиве every() истинно вакуумно, поэтому
+  // пустой набор паттернов проверяется первым и даёт точное сообщение.
+  if (routePatterns.length === 0) {
+    throw new Error(
+      patternsWithoutHeadway === network.services.length
+        ? `No service has a headway in period ${periodId}: set headways before planning`
+        : `No route pattern is usable in period ${periodId}`,
+    );
+  }
+  if (routePatterns.every((pattern) => pattern.departures.length === 0)) {
+    throw new Error(`No departure falls inside period ${periodId}: headways are longer than the period`);
   }
 
   const routeOffsets = new Int32Array(routePatterns.length + 1);
@@ -177,28 +207,46 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
   }
 
   return {
-    type: "route",
-    job: ++requestId,
-    stopCount,
-    routeCount: routePatterns.length,
-    maxTransfers,
-    rangeWindowMin,
-    accessTimeMin,
-    egressTimeMin,
-    transferOffsets,
-    transferTargets,
-    transferTimes,
-    routeOffsets,
-    routeStopCounts,
-    routeStops,
-    routeDepartureOffsets,
-    departures: routeDepartures,
-    routeSegmentOffsets,
-    segmentTimes: routeSegmentTimes,
-    origin,
-    destination,
-    departureMin,
+    input: {
+      type: "route",
+      job: ++requestId,
+      stopCount,
+      routeCount: routePatterns.length,
+      maxTransfers,
+      rangeWindowMin,
+      accessTimeMin,
+      egressTimeMin,
+      transferOffsets,
+      transferTargets,
+      transferTimes,
+      routeOffsets,
+      routeStopCounts,
+      routeStops,
+      routeDepartureOffsets,
+      departures: routeDepartures,
+      routeSegmentOffsets,
+      segmentTimes: routeSegmentTimes,
+      origin,
+      destination,
+      departureMin,
+    },
+    // Копия нужна для геометрии маршрута: routeStops уходит в воркер по
+    // transfer и в главном потоке обнуляется. Воркеру она не нужна, поэтому
+    // наружу не отправляется.
+    patterns: routePatterns.map((pattern) => ({
+      routeId: pattern.routeId,
+      stops: pattern.stops.slice(),
+    })),
   };
+}
+export interface RaptorRoutePattern {
+  routeId: string;
+  stops: number[];
+}
+
+export interface RaptorRouteResult {
+  journey: RaptorJourney;
+  patterns: RaptorRoutePattern[];
 }
 
 export function routeWithRaptor(
@@ -209,8 +257,8 @@ export function routeWithRaptor(
   departureMin = 420,
   rangeWindowMin = 30,
   maxTransfers = 4,
-): Promise<RaptorJourney> {
-  const input = pack(
+): Promise<RaptorRouteResult> {
+  const { input, patterns } = pack(
     network,
     periodId,
     origin,
@@ -225,7 +273,7 @@ export function routeWithRaptor(
     worker.onmessage = (event: MessageEvent<{ type?: string; job?: number; result?: RaptorJourney }>) => {
       if (event.data.type !== "result" || event.data.job !== input.job) return;
       worker.terminate();
-      resolve(event.data.result!);
+      resolve({ journey: event.data.result!, patterns });
     };
     worker.onerror = (event) => {
       worker.terminate();
