@@ -263,3 +263,32 @@ def test_directional_access_flags_build_only_allowed_direction():
     assert forward_path == ("forward-only:c0:c1",)
     assert backward_time == float("inf")
     assert backward_path == ()
+
+
+def test_road_graph_weakly_connected_components():
+    roads = (
+        RoadRecord(
+            "a",
+            LineString((Point(0, 0), Point(100, 0))),
+            30,
+            oneway=True,
+            connectors=(ConnectorRef("a0", 0.0), ConnectorRef("a1", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            LineString((Point(500, 0), Point(600, 0))),
+            30,
+            connectors=(ConnectorRef("b0", 0.0), ConnectorRef("b1", 1.0)),
+            length_m=100.0,
+        ),
+    )
+    graph = build_topological_road_graph(roads).graph
+    components = graph.weakly_connected_components()
+    assert len(set(components.values())) == 2
+    sizes = graph.component_sizes()
+    assert sorted(sizes.values()) == [2, 2]
+    assert graph.are_connected(graph.connector_nodes["a0"], graph.connector_nodes["a1"])
+    assert not graph.are_connected(
+        graph.connector_nodes["a0"], graph.connector_nodes["b1"]
+    )

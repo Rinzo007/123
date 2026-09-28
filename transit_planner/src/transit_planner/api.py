@@ -3,6 +3,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from .analytics import _service_analytics, _track_capacity_analytics
 from .assignment import AssignmentConfig, assign_demand
@@ -39,7 +40,7 @@ def bounds(s,w,n,e):
 
 def src(r): return OvertureSource(release=r.strip() if isinstance(r,str) and r.strip() else RELEASE)
 
-def econ(p, period, segments=None):
+def econ(p, period):
     r = p.get("economics_config", {})
     return EconomicsConfig(
         period_id=str(r.get("period_id", period)),
@@ -47,7 +48,6 @@ def econ(p, period, segments=None):
         annual_days=int(r.get("annual_days", 365)),
     )
 
-def ed(x): return asdict(x)
 def scenario(p,d):
     pairs=tuple(ODPairDemand(str(x["origin_zone_id"]),str(x["destination_zone_id"]),float(x["trips_per_day"]),str(x.get("purpose","all")),None if x.get("base_time_min") is None else float(x["base_time_min"])) for x in p.get("demand",[]))
     zones=tuple(DemandZone(str(x["id"]),float(x["centroid_x"]),float(x["centroid_y"]),population=float(x.get("population",0)),jobs=float(x.get("jobs",0)),no_car_share=float(x.get("no_car_share",REFERENCE_MOBILITY.no_car_share))) for x in p.get("zones",[]))
@@ -65,6 +65,15 @@ def load(provider,method,s,w,n,e,r):
     except (OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
 @app.get("/api/v1/data/overture/roads")
 def roads(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):return roads_to_geojson(load(OvertureTransportationProvider,"load_roads",south,west,north,east,release))
+@app.get("/api/v1/data/overture/graph")
+def graph(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):
+    b=bounds(south,west,north,east)
+    try:
+        n=OvertureNetworkProvider(source=src(release),bbox=b,snap_max_distance_m=150.0).load(include_connectors=True,include_stops=False,include_places=False)
+    except (OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
+    from .city_pack import streets_bin_for_graph
+    payload,stats=streets_bin_for_graph(n.graph,origin_lon=n.origin_lon,origin_lat=n.origin_lat)
+    return Response(content=payload,media_type="application/octet-stream",headers={"X-Streets-Version":"2","X-Nodes":str(stats["nodes"]),"X-Edges":str(stats["edges"]),"X-Components":str(stats["components"])})
 @app.get("/api/v1/data/overture/connectors")
 def connectors(south:float=Query(...),west:float=Query(...),north:float=Query(...),east:float=Query(...),release:str|None=Query(None)):return connectors_to_geojson(load(OvertureConnectorProvider,"load_connectors",south,west,north,east,release))
 @app.get("/api/v1/data/overture/stops")

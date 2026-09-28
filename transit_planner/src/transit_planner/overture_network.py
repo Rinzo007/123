@@ -76,17 +76,26 @@ class OvertureNetwork:
             max_distance=snap_max_distance_m,
         )
         edge_ids: list[str] = []
+        components = self.graph.weakly_connected_components()
         for index in range(len(route_stops) - 1):
             start_snap = snaps[index]
             end_snap = snaps[index + 1]
             if start_snap.road_node_id is None or end_snap.road_node_id is None:
                 raise ValueError("A route point is too far from the road graph")
+            if components[start_snap.road_node_id] != components[end_snap.road_node_id]:
+                raise ValueError(
+                    "Route points lie in disconnected road graph components; "
+                    "the street network is missing a connecting segment between them"
+                )
             _, path = self.graph.shortest_path(
                 start_snap.road_node_id,
                 end_snap.road_node_id,
             )
             if not path:
-                raise ValueError("No road path exists between consecutive route points")
+                raise ValueError(
+                    "No directed road path exists between consecutive route points "
+                    "within their connected component (check one-way restrictions)"
+                )
             edge_ids.extend(path)
 
         edge_path = tuple(edge_ids)

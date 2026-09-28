@@ -8,13 +8,12 @@ import {
   createTimetable,
   loadDemandStreets,
   loadOvertureNetwork,
-  loadOvertureRoute,
+  loadOvertureGraph,
   loadPopulationZones,
   loadReferenceDemand,
   validateNetwork,
   type EconomicsResult,
   type OvertureNetworkResponse,
-  type OvertureRouteResponse,
   type ScenarioPayload,
 } from "./api";
 import type { NetworkPayload, StopDraft, TransitMode, TrackType } from "./types";
@@ -36,6 +35,13 @@ import { estimateFleetRequirement } from "./planning/fleet";
 import { generateServiceTimetable } from "./planning/timetable";
 import { validateTopology } from "./core/topology";
 import { decodeLines, encodeLines } from "./line-cache";
+import {
+  assembleRouteCoordinates,
+  decodeStreets,
+  nearestGraphNode,
+  routeStreets,
+  type StreetGraph,
+} from "./street-graph";
 import {
   changedSegments,
   keepNetwork,
@@ -101,6 +107,7 @@ let mode: TransitMode = "bus";
 let headways: Record<string, number> = { early: 20, am: 10, mid: 12, pm: 10, eve: 20 };
 let stops: StopDraft[] = [];
 let roadRoute: FeatureCollection<LineString, object> | null = null;
+let streetGraph: StreetGraph | null = null;
 let cityRoads: FeatureCollection | null = null;
 let cityConnectors: FeatureCollection | null = null;
 let cityStops: FeatureCollection | null = null;
@@ -708,6 +715,20 @@ async function loadCityData(): Promise<void> {
     cityConnectors = data.connectors;
     cityStops = data.stops;
     cityPlaces = data.places;
+
+    const graphKey = key + ":graph-bin";
+    const cachedGraph = await loadBinaryDataset(graphKey);
+    try {
+      const graphBuffer = cachedGraph ?? (await loadOvertureGraph(b.south, b.west, b.north, b.east));
+      if (!cachedGraph) await saveBinaryDataset(graphKey, graphBuffer);
+      streetGraph = decodeStreets(graphBuffer);
+    } catch (error) {
+      streetGraph = null;
+      setStatus(
+        `${error instanceof Error ? error.message : "Street graph недоступен"}`,
+      );
+    }
+
       const populationKey = datasetCacheKey("population-zones", b);
     const cachedPopulation = await loadDataset<FeatureCollection>(populationKey);
     if (cachedPopulation) {
@@ -729,22 +750,58 @@ async function loadCityData(): Promise<void> {
 async function buildRoadRoute(): Promise<void> {
   if (!map || stops.length < 2) return;
   busy = true;
-  setStatus("Построение маршрута по Overture…");
+  setStatus("Построение маршрута по street graph...");
   try {
-    const b = bounds();
-    if (!b) throw new Error("Карта ещё не готова");
-    const points = stops.map((stop) => ({ lon: stop.lon, lat: stop.lat }));
-    const key = datasetCacheKey("overture-route", b) + ":" + points.map((p) => `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`).join(";");
-    const cached = await loadDataset<OvertureRouteResponse>(key);
-    const data = cached ?? await loadOvertureRoute(points, b.south, b.west, b.north, b.east);
-    if (!cached) await saveDataset(key, data);
+    if (!streetGraph) {
+      throw new Error("Street graph не загружен: обновите область карты (Данные Overture)");
+    }
+    const graph = streetGraph;
+    const snapped: number[] = [];
+    for (const stop of stops) {
+      const node = nearestGraphNode(graph, stop.lon, stop.lat);
+      if (node === null) {
+        throw new Error(
+          `Точка ${stop.lon.toFixed(5)},${stop.lat.toFixed(5)} дальше 150 м от уличного графа`,
+        );
+      }
+      snapped.push(node);
+    }
+
+    const requests: Array<{ start: number; end: number }> = [];
+    for (let index = 0; index + 1 < snapped.length; index += 1) {
+      requests.push({ start: snapped[index], end: snapped[index + 1] });
+    }
+    const legs = await routeStreets(graph, requests);
+
+    const coordinates: Array<[number, number]> = [];
+    let travelTimeMin = 0;
+    let lengthM = 0;
+    for (const leg of legs) {
+      for (const point of assembleRouteCoordinates(graph, leg.nodes, leg.edges)) {
+        const last = coordinates[coordinates.length - 1];
+        if (last && last[0] === point[0] && last[1] === point[1]) continue;
+        coordinates.push(point);
+      }
+      travelTimeMin += leg.costMin;
+      for (const edge of leg.edges) lengthM += graph.edgeLengthM[edge];
+    }
+    if (coordinates.length < 2) throw new Error("Маршрут по уличному графу пуст");
+
     roadRoute = {
       type: "FeatureCollection",
-      features: [{ type: "Feature", geometry: data.geometry, properties: data.properties }],
+      features: [{
+        type: "Feature",
+        geometry: { type: "LineString", coordinates },
+        properties: {
+          travel_time_min: travelTimeMin,
+          length_m: lengthM,
+          source: "street-graph-worker",
+        },
+      }],
     };
     previousNetwork = network;
-  network = buildNetworkPayload();
-    setStatus(`${cached ? "Кэш Overture" : "Overture"} маршрут: ${(data.properties.length_m / 1000).toFixed(2)} км, ${data.properties.travel_time_min.toFixed(1)} мин`);
+    network = buildNetworkPayload();
+    setStatus(`Street graph маршрут: ${(lengthM / 1000).toFixed(2)} км, ${travelTimeMin.toFixed(1)} мин`);
     syncMapGeoJson();
     markDirty();
   } catch (error) {

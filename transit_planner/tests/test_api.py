@@ -9,6 +9,7 @@ def test_api_has_core_routes():
     assert "/api/v1/data/overture/stops" in paths
     assert "/api/v1/data/overture/network" in paths
     assert "/api/v1/data/overture/route" in paths
+    assert "/api/v1/data/overture/graph" in paths
     assert "/api/v1/data/overture/roads" in paths
     assert "/api/v1/data/overture/connectors" in paths
     assert "/api/v1/scenario/compare" in paths
@@ -114,6 +115,80 @@ def test_economics_endpoint_calculates_report():
     assert result["economics"]["daily_vehicle_km"] == 12.0
     assert result["economics"]["daily_fare_revenue"] > 0
     assert result["economics"]["annual_operating_cost"] == result["economics"]["daily_operating_cost"] * 365
+
+
+def test_overture_graph_endpoint_streams_tkst(monkeypatch):
+    import transit_planner.api as api_module
+    from transit_planner.binary_pack import STREETS_MAGIC, STREETS_VERSION, decode_streets_bin
+    from transit_planner.data import ConnectorRef, RoadRecord
+    from transit_planner.geo import LineString, Point
+    from transit_planner.overture_network import build_overture_network
+
+    built = build_overture_network(
+        (
+            RoadRecord(
+                "r1",
+                LineString((Point(39.2000, 51.6700), Point(39.2010, 51.6700))),
+                40.0,
+                road_type="secondary",
+                oneway=True,
+                connectors=(ConnectorRef("c0", 0.0), ConnectorRef("c1", 0.5), ConnectorRef("c2", 1.0)),
+                length_m=140.0,
+            ),
+        ),
+        (),
+        (),
+        origin_lon=39.2010,
+        origin_lat=51.6700,
+        snap_max_distance_m=500.0,
+    )
+
+    class _Provider:
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, **_kwargs):
+            return built
+
+    monkeypatch.setattr(api_module, "OvertureNetworkProvider", _Provider)
+
+    response = api_module.graph(south=51.669, west=39.199, north=51.671, east=39.202)
+    assert response.media_type == "application/octet-stream"
+    assert response.headers["X-Streets-Version"] == str(STREETS_VERSION)
+    assert response.headers["X-Nodes"] == "3"
+    assert response.headers["X-Edges"] == "2"
+    assert response.headers["X-Components"] == "1"
+
+    payload = bytes(response.body)
+    assert int.from_bytes(payload[:4], "little") == STREETS_MAGIC
+    assert int.from_bytes(payload[4:8], "little") == STREETS_VERSION
+
+    decoded = decode_streets_bin(payload)
+    assert decoded["vertex_count"] == 3
+    assert decoded["edge_count"] == 2
+    assert len(set(decoded["component"])) == 1
+
+
+def test_overture_graph_endpoint_reports_source_failure(monkeypatch):
+    import transit_planner.api as api_module
+    from fastapi import HTTPException
+
+    class _Provider:
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, **_kwargs):
+            raise OSError("overture parquet is not available")
+
+    monkeypatch.setattr(api_module, "OvertureNetworkProvider", _Provider)
+
+    try:
+        api_module.graph(south=51.669, west=39.199, north=51.671, east=39.202)
+    except HTTPException as error:
+        assert error.status_code == 502
+        assert "overture parquet is not available" in str(error.detail)
+    else:
+        raise AssertionError("unavailable Overture data must raise 502, not return an empty graph")
 
 
 def test_city_assignment_exposes_temporal_economics(monkeypatch):

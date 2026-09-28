@@ -280,11 +280,34 @@ pack/
 
 ### Этап 3 — Уличный граф
 
-Статус: 🔜
+Статус: ✅ завершён
 
 Overture streets → street graph → compressed binary graph → routing worker.
 
-Сделать: узлы; рёбра; классы дорог; ограничения скорости; направления; длины; геометрию; snapping остановок; snapping маршрутов; disconnected-component detection.
+Сделано (Python):
+
+- `road.py`: `RoadGraph.weakly_connected_components()`, `component_sizes()`, `are_connected()` — компоненты weakly-connected графа, а не «всё связано по умолчанию»;
+- `route_points()` различает три исхода: точки в разных компонентах (явная ошибка со списком компонент), directed-пути нет, путь найден; прежний молчаливый отказ «маршрут не найден» на несвязанных сегментах устранён;
+- `binary_pack.py`: TKST v2 — узлы (WGS84 int32 микроградусы) + component id на узел, `edgeA/edgeB/edgeLen`, `geomOffset`, `edgeClass/edgeSpeedKph/edgeDirection` (u8), дельты геометрии (dx,dy int32), JSON-словарь имён; `decode_streets_bin()` для чтения и тестов roundtrip;
+- скорость вне `[0, 255]` кph — явная `ValueError` (было тихое усечение `min(255, …)`, то есть расхождение стоимости с Python);
+- `city_pack.py`: `streets_bin_for_graph()` — сборка TKST из готового `RoadGraph` + WGS84-обратная проекция узлов;
+- `api.py`: `GET /api/v1/data/overture/graph` отдаёт TKST v2 как `application/octet-stream` с `X-Streets-Version/Nodes/Edges/Components`; недоступный источник — 502, а не пустой граф.
+
+Сделано (frontend):
+
+- `street-graph.ts`: декодер TKST v2 (little-endian, полный mirror формата), CSR-строитель, `nearestGraphNode()` (линейный поиск с порогом 150 м, cos-коррекция), `assembleRouteCoordinates()`;
+- CSR-семантика: `RoadEdge` в Python — уже направленная дуга, поэтому каждое ребро даёт ровно одну дугу `edgeA → edgeB`; `edgeDirection` — информативный признак, а не правило обхода (иначе терялись односторонние рёбра и появлялись фантомные обратные дуги);
+- `speedKph === 0` — явная ошибка, а не подстановка 30 (Python `add_edge`/`travel_time_minutes` отбрасывают такие рёбра, паритет поведения);
+- `workers/street.worker.ts`: Dijkstra на CSR, отмена по job-номеру, бинарная куча, `postMessage` с transfer ArrayBuffer; воркер отдаёт цепочку узлов, поэтому геометрия собирается с учётом проезда против направления ребра;
+- `buildRoadRoute()` переведён на локальный граф: снаппинг остановок → пакет запросов в воркер → координаты; граф грузится один раз на bbox и кэшируется в IndexedDB как бинарник; серверный `/overture/route` фронтендом больше не используется и остаётся только как API;
+- без fallback: `streetGraph === null` или точка дальше 150 м от графа — явная ошибка в статусе, тихого возврата к серверному маршруту нет.
+
+Проверено: `python -m pytest tests -q` → 172 passed; `npx tsc --noEmit` → 0; `npx vite build` → собран `street.worker` (2.26 kB).
+
+Не сделано (сознательно, дальше по карте):
+
+- индекс пространственного поиска в TS: `nearestGraphNode` линейный (O(V) на точку) — на городских графах десятки тысяч узлов это приемлемо, но заменяется на grid/R-tree вместе с кэшем матриц (Этап 4);
+- отображение street graph отдельным слоем карты (сейчас слой дорог остаётся на GeoJSON из `/overture/network`, граф используется для маршрутизации).
 
 ### Этап 4 — Matrix Worker
 

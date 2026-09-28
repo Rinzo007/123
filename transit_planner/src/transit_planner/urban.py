@@ -51,13 +51,6 @@ def polygon_area_m2(polygon: tuple[Point, ...]) -> float:
     return abs(area) * 0.5 * scale_x * scale_y
 
 
-def line_length_m(points: tuple[Point, ...]) -> float:
-    return sum(
-        _haversine_m(left, right)
-        for left, right in zip(points, points[1:])
-    )
-
-
 class UrbanContext:
     """Coarse spatial context derived from Overture buildings and water."""
 

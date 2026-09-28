@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .binary_pack import (
+    STREETS_VERSION,
     encode_buildings_bin,
     encode_demand_bin,
     encode_stops_bin,
@@ -21,6 +22,7 @@ from .city_demand import CityDemandConfig
 from .geo import Point
 from .places import CityPlace, aggregate_place_attractions
 from .projection import project_local_point_wgs84, project_wgs84_point
+from .road import RoadGraph
 from .overture import OvertureSource, OvertureUrbanProvider
 from .overture_network import OvertureNetworkProvider
 from .reference_demand import build_daily_demand
@@ -363,6 +365,71 @@ def build_city_zones(
     return tuple(result)
 
 
+def streets_bin_for_graph(
+    graph: RoadGraph,
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> tuple[bytes, dict]:
+    """Compress a RoadGraph into TKST v2 with WGS84 coordinates.
+
+    Returns the payload and stats (nodes, edges, components). Node order
+    is the ascending node id; edge order is the ascending edge id.
+    """
+
+    class _WgsEdge:
+        __slots__ = ("id", "from_node", "to_node", "length_m", "speed_kph",
+                     "road_type", "direction", "geometry")
+
+        def __init__(self, edge):
+            self.id = edge.id
+            self.from_node = edge.from_node
+            self.to_node = edge.to_node
+            self.length_m = edge.length_m
+            self.speed_kph = edge.speed_kph
+            self.road_type = edge.road_type
+            self.direction = edge.direction
+            self.geometry = (
+                tuple(
+                    project_local_point_wgs84(
+                        Point(point.x, point.y),
+                        origin_lon=origin_lon,
+                        origin_lat=origin_lat,
+                    )
+                    for point in edge.geometry
+                )
+                if edge.geometry
+                else None
+            )
+
+    node_ids = sorted(graph.nodes)
+    nodes = tuple(
+        (
+            node_id,
+            project_local_point_wgs84(
+                Point(graph.nodes[node_id].x, graph.nodes[node_id].y),
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+            ),
+        )
+        for node_id in node_ids
+    )
+    components = graph.weakly_connected_components()
+    edges = tuple(_WgsEdge(graph.edges[edge_id]) for edge_id in sorted(graph.edges))
+    names = tuple(edge.id for edge in edges)
+    payload = encode_streets_bin(
+        nodes=nodes,
+        edges=edges,
+        names=names,
+        components=[components[node_id] for node_id in node_ids],
+    )
+    return payload, {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "components": len(set(components.values())),
+    }
+
+
 def build_overture_city_pack(
     *,
     city: str,
@@ -396,25 +463,18 @@ def build_overture_city_pack(
             ),
         )
 
-    nodes = tuple(
-        (
-            node_id,
-            project_local_point_wgs84(
-                Point(node.x, node.y),
-                origin_lon=network.origin_lon,
-                origin_lat=network.origin_lat,
-            ),
-        )
-        for node_id, node in sorted(network.graph.nodes.items())
+    streets_payload, streets_stats = streets_bin_for_graph(
+        network.graph,
+        origin_lon=network.origin_lon,
+        origin_lat=network.origin_lat,
     )
-    edges = tuple(network.graph.edges[edge_id] for edge_id in sorted(network.graph.edges))
-    names = tuple(edge.id for edge in edges)
     streets = {
-        "version": 1,
+        "version": STREETS_VERSION,
         "crs": "OGC:CRS84",
         "binary": "TKST",
-        "nodes": len(nodes),
-        "edges": len(edges),
+        "nodes": streets_stats["nodes"],
+        "edges": streets_stats["edges"],
+        "components": streets_stats["components"],
         "originLon": network.origin_lon,
         "originLat": network.origin_lat,
     }
@@ -470,7 +530,7 @@ def build_overture_city_pack(
         "streets.json": json.dumps(
             streets, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8"),
-        "streets.bin": encode_streets_bin(nodes=nodes, edges=edges, names=names),
+        "streets.bin": streets_payload,
         "stops.bin": encode_stops_bin(stops=stop_rows),
         "zones.bin": encode_zones_bin(zones=zone_rows, attractions=zone_attractions),
         "demand.bin": encode_demand_bin(

@@ -88,10 +88,20 @@ def encode_streets_bin(
     nodes: Sequence[tuple[int, Point]],
     edges: Sequence[object],
     names: Sequence[str],
+    components: Sequence[int] | None = None,
 ) -> bytes:
+    """Encode the self-routable street graph (TKST v2).
+
+    Carries, per node, the WGS84 position (int32 microdegrees) and its
+    weakly-connected component id; per edge, endpoints, length, class,
+    speed (kph, 0=unknown), travel direction and the shared-name index.
+    ``components`` aligns with ``nodes`` order when supplied.
+    """
     node_index = {node_id: index for index, (node_id, _point) in enumerate(nodes)}
     vertex_count = len(nodes)
     edge_count = len(edges)
+    if components is not None and len(components) != vertex_count:
+        raise ValueError("components must align with the node table")
 
     vertex_buffer = bytearray()
     for _node_id, point in nodes:
@@ -105,6 +115,8 @@ def encode_streets_bin(
     edge_name = bytearray()
     flat_off = bytearray()
     edge_cls = bytearray()
+    edge_speed = bytearray()
+    edge_dir = bytearray()
     flat_buffer = bytearray()
     flat_count = 0
 
@@ -135,10 +147,24 @@ def encode_streets_bin(
             flat_count += 1
 
     flat_off.extend(struct.pack("<I", flat_count))
-    edge_cls.extend(
-        _road_class_code(str(getattr(edge, "road_type", "unknown"))).to_bytes(1, "little")
-        for edge in edges
-    )
+    for edge in edges:
+        edge_cls.append(_road_class_code(str(getattr(edge, "road_type", "unknown"))))
+    for edge in edges:
+        speed = round(float(getattr(edge, "speed_kph", 0.0)))
+        if speed < 0 or speed > 255:
+            raise ValueError(
+                f"Edge {edge.id} speed_kph {speed} is outside the TKST range [0, 255]"
+            )
+        edge_speed.append(speed)
+    for edge in edges:
+        edge_dir.append(_direction_code(getattr(edge, "direction", None)))
+
+    component_buffer = bytearray()
+    if components is None:
+        component_buffer.extend(struct.pack("<i", -1) * vertex_count)
+    else:
+        for value in components:
+            component_buffer.extend(struct.pack("<i", int(value)))
 
     names_payload = json.dumps(
         {"names": list(names)},
@@ -149,7 +175,7 @@ def encode_streets_bin(
     header = struct.pack(
         "<6I",
         STREETS_MAGIC,
-        VERSION,
+        STREETS_VERSION,
         vertex_count,
         edge_count,
         flat_count,
@@ -157,17 +183,103 @@ def encode_streets_bin(
     )
     body = bytearray()
     body.extend(vertex_buffer)
+    body.extend(component_buffer)
     body.extend(edge_a)
     body.extend(edge_b)
     body.extend(edge_len)
     body.extend(edge_name)
     body.extend(flat_off)
     body.extend(edge_cls)
+    body.extend(edge_speed)
+    body.extend(edge_dir)
     while len(body) % 4:
         body.append(0)
     body.extend(flat_buffer)
     body.extend(names_payload)
     return bytes(header + body)
+
+
+STREETS_VERSION = 2
+STREETS_HEADER_BYTES = 24
+
+
+def _direction_code(direction: str | None) -> int:
+    if direction == "forward":
+        return 1
+    if direction == "backward":
+        return 2
+    return 0
+
+
+def decode_streets_bin(data: bytes) -> dict:
+    """Decode TKST into plain lists suitable for a routing worker."""
+    magic, version, vertex_count, edge_count, flat_count, names_len = struct.unpack_from(
+        "<6I", data, 0
+    )
+    if magic != STREETS_MAGIC:
+        raise ValueError("Неверный magic streets.bin")
+    if version != STREETS_VERSION:
+        raise ValueError(f"Неподдерживаемая версия streets.bin {version}")
+
+    cursor = STREETS_HEADER_BYTES
+    lat: list[int] = []
+    lon: list[int] = []
+    for x, y in struct.iter_unpack("<ii", data[cursor:cursor + vertex_count * 8]):
+        lon.append(x)
+        lat.append(y)
+    cursor += vertex_count * 8
+    component = [v for (v,) in struct.iter_unpack("<i", data[cursor:cursor + vertex_count * 4])]
+    cursor += vertex_count * 4
+
+    edge_a = [v for (v,) in struct.iter_unpack("<I", data[cursor:cursor + edge_count * 4])]
+    cursor += edge_count * 4
+    edge_b = [v for (v,) in struct.iter_unpack("<I", data[cursor:cursor + edge_count * 4])]
+    cursor += edge_count * 4
+    edge_len = [v for (v,) in struct.iter_unpack("<I", data[cursor:cursor + edge_count * 4])]
+    cursor += edge_count * 4
+    edge_name = [v for (v,) in struct.iter_unpack("<i", data[cursor:cursor + edge_count * 4])]
+    cursor += edge_count * 4
+    flat_off = [v for (v,) in struct.iter_unpack("<I", data[cursor:cursor + (edge_count + 1) * 4])]
+    cursor += (edge_count + 1) * 4
+    edge_cls = list(data[cursor:cursor + edge_count])
+    cursor += edge_count
+    edge_speed = list(data[cursor:cursor + edge_count])
+    cursor += edge_count
+    edge_dir = list(data[cursor:cursor + edge_count])
+    cursor += edge_count
+    while cursor % 4:
+        cursor += 1
+
+    deltas = list(struct.iter_unpack("<ii", data[cursor:cursor + flat_count * 8]))
+
+    geometry: list[list[tuple[int, int]]] = []
+    for edge_index in range(edge_count):
+        points: list[tuple[int, int]] = [
+            (lon[edge_a[edge_index]], lat[edge_a[edge_index]])
+        ]
+        for point_index in range(flat_off[edge_index], flat_off[edge_index + 1]):
+            dx, dy = deltas[point_index]
+            reference = points[-1]
+            points.append((reference[0] + dx, reference[1] + dy))
+        geometry.append(points)
+
+    names = json.loads(data[len(data) - names_len:])["names"] if names_len else []
+    return {
+        "vertex_count": vertex_count,
+        "edge_count": edge_count,
+        "lon": lon,
+        "lat": lat,
+        "component": component,
+        "edge_a": edge_a,
+        "edge_b": edge_b,
+        "edge_len_m": edge_len,
+        "edge_name": edge_name,
+        "edge_class": edge_cls,
+        "edge_speed_kph": edge_speed,
+        "edge_direction": edge_dir,
+        "geometry": geometry,
+        "names": names,
+    }
 
 
 def encode_stops_bin(

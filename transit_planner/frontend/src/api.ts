@@ -1,4 +1,4 @@
-import type { FeatureCollection, LineString, Position } from "./geojson";
+import type { FeatureCollection, LineString } from "./geojson";
 import type { NetworkPayload, ValidationResult } from "./types";
 
 export async function validateNetwork(
@@ -117,44 +117,25 @@ export function loadOvertureNetwork(
   );
 }
 
-export interface OvertureRouteResponse {
-  type: "Feature";
-  geometry: {
-    type: "LineString";
-    coordinates: Position[];
-  };
-  properties: {
-    edge_ids: string[];
-    length_m: number;
-    travel_time_min: number;
-    snap_distances_m: number[];
-  };
-}
-
-export function loadOvertureRoute(
-  points: Array<{ lon: number; lat: number }>,
+export async function loadOvertureGraph(
   south: number,
   west: number,
   north: number,
   east: number,
-): Promise<OvertureRouteResponse> {
-  return fetch("/api/v1/data/overture/route", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      points,
-      south,
-      west,
-      north,
-      east,
-    }),
-  }).then(async (response) => {
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(body || "Не удалось построить маршрут по Overture");
-    }
-    return response.json() as Promise<OvertureRouteResponse>;
-  });
+): Promise<ArrayBuffer> {
+  const response = await fetch(
+    "/api/v1/data/overture/graph?" +
+      new URLSearchParams({
+        south: String(south),
+        west: String(west),
+        north: String(north),
+        east: String(east),
+      }),
+  );
+  if (!response.ok) {
+    throw new Error((await response.text()) || "Не удалось получить street graph");
+  }
+  return response.arrayBuffer();
 }
 
 export interface TimetableResponse {

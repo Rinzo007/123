@@ -215,3 +215,35 @@ class RoadGraph:
                 ):
                     return True
         return False
+
+    def weakly_connected_components(self) -> dict[int, int]:
+        """Component id per node ignoring edge direction (union-find)."""
+        parent = {node_id: node_id for node_id in self.nodes}
+
+        def find(node_id: int) -> int:
+            root = node_id
+            while parent[root] != root:
+                root = parent[root]
+            while parent[node_id] != root:
+                parent[node_id], node_id = root, parent[node_id]
+            return root
+
+        for edge in self.edges.values():
+            left = find(edge.from_node)
+            right = find(edge.to_node)
+            if left != right:
+                parent[right] = left
+
+        return {node_id: find(node_id) for node_id in self.nodes}
+
+    def component_sizes(self) -> dict[int, int]:
+        sizes: dict[int, int] = {}
+        for component in self.weakly_connected_components().values():
+            sizes[component] = sizes.get(component, 0) + 1
+        return sizes
+
+    def are_connected(self, origin: int, destination: int) -> bool:
+        if origin not in self.nodes or destination not in self.nodes:
+            raise KeyError("Origin or destination node not found")
+        components = self.weakly_connected_components()
+        return components[origin] == components[destination]

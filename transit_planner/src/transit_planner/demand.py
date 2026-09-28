@@ -56,9 +56,6 @@ class TemporalDemandMatrix:
     def by_period(self, period_id: str) -> tuple[PeriodODPairDemand, ...]:
         return tuple(pair for pair in self.pairs if pair.period_id == period_id)
 
-    def by_purpose(self, purpose: str) -> tuple[PeriodODPairDemand, ...]:
-        return tuple(pair for pair in self.pairs if pair.purpose == purpose)
-
     def period_totals(self) -> dict[str, float]:
         totals: dict[str, float] = {}
         for pair in self.pairs:
