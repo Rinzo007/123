@@ -280,6 +280,7 @@ def _ts_answer(tmp_path: Path) -> dict | None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=FRONTEND,
     )
     if result.returncode != 0:
@@ -290,6 +291,7 @@ def _ts_answer(tmp_path: Path) -> dict | None:
         [node, str(tmp_path / "probe.mjs"), json.dumps(_ts_spec())],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=tmp_path,
     )
     if run.returncode != 0:

@@ -71,6 +71,7 @@ def _ts_departures(tmp_path: Path) -> list[list[float]] | None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=FRONTEND,
     )
     if result.returncode != 0:
@@ -84,6 +85,7 @@ def _ts_departures(tmp_path: Path) -> list[list[float]] | None:
         [node, str(tmp_path / "probe.mjs"), payload],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=tmp_path,
     )
     if run.returncode != 0:

@@ -117,6 +117,23 @@ export function loadOvertureNetwork(
   );
 }
 
+export function loadOverturePlaces(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<FeatureCollection> {
+  return loadGeoJson(
+    "/api/v1/data/overture/places",
+    new URLSearchParams({
+      south: String(south),
+      west: String(west),
+      north: String(north),
+      east: String(east),
+    }),
+  );
+}
+
 export interface OvertureGraphPayload {
   buffer: ArrayBuffer;
   release: string;

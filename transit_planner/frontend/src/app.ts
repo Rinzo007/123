@@ -10,7 +10,6 @@ import {
   loadOvertureNetwork,
   loadOvertureGraph,
   loadPopulationZones,
-  loadReferenceDemand,
   validateNetwork,
   type EconomicsResult,
   type OvertureNetworkResponse,
@@ -30,6 +29,7 @@ import {
 } from "./storage";
 import { createEvaluationClient, disposeComputationWorkers, networkCounts } from "./workers";
 import { runRuntimePreview } from "./workers/reference-runtime";
+import { buildReferenceDemand, referenceDemandWorkerRequest } from "./workers/demand";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
 import { RouteEditor } from "./planning/route-editor";
 import { estimateFleetRequirement } from "./planning/fleet";
@@ -949,10 +949,16 @@ async function runPreview(): Promise<void> {
     lastPlanningPreview = planningPreview(network);
     evaluationSummary = networkCounts(network);
     if (!evaluationClient) evaluationClient = createEvaluationClient();
-    const b = bounds();
-    if (!b) throw new Error("Карта ещё не готова");
-    const demandInput = await loadReferenceDemand(
-      b.south, b.west, b.north, b.east, network.origin_lon, network.origin_lat,
+    if (!populationZones) {
+      throw new Error("Зоны населения не загружены: обновите «Данные Overture» (WorldPop)");
+    }
+    const demandInput = await buildReferenceDemand(
+      referenceDemandWorkerRequest({
+        populationZones,
+        places: cityPlaces ?? { type: "FeatureCollection", features: [] },
+        originLon: network.origin_lon,
+        originLat: network.origin_lat,
+      }),
     );
     await runRuntimePreview(evaluationClient, network, demandInput);
     const demand = [{
