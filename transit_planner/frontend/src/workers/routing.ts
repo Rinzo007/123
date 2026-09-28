@@ -85,6 +85,13 @@ export function packRaptorInput(
   rangeWindowMin: number,
   maxTransfers: number,
   weights: RaptorChoiceWeights = JOURNEY_CHOICE_TABLE5,
+  /**
+   * Demand-feedback multipliers per service id. A service with a factor above
+   * 1 runs at a proportionally longer headway, so departures are recomputed —
+   * the same rule as `TransitRouter._patterns`. Factors below 1 are ignored:
+   * bunching is never rewarded here.
+   */
+  headwayFactors?: ReadonlyMap<string, number>,
 ) {
   const stopCount = network.stops.length;
   const routePatterns: Array<{
@@ -122,13 +129,14 @@ export function packRaptorInput(
     // Отсутствие маршрута или неизвестная остановка в маршруте — это порча
     // данных, молча пропускать их нельзя.
     if (!route) throw new Error(`Service ${service.id} references unknown route ${service.route_id}`);
-    const headway = service.headway_by_period[periodId];
+    const baseHeadway = service.headway_by_period[periodId];
     // Маршрут может не ходить в этом периоде — это законно, но если не ходит
     // никто, «нет соединения» не должно выглядеть как «нет расписания».
-    if (!headway) {
+    if (!baseHeadway) {
       patternsWithoutHeadway += 1;
       continue;
     }
+    const headway = baseHeadway * Math.max(1, headwayFactors?.get(service.id) ?? 1);
 
     const unknownStop = route.stop_ids.find((id) => !index.has(id));
     if (unknownStop !== undefined) {

@@ -445,6 +445,11 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
 
   if (input.maxAlternatives <= 1) {
     const single = routeOnce(input, input.routePenalties, input.bannedRoutes, input.segmentPenalties);
+    const patternDepartures = new Int32Array(input.routeCount);
+    for (let pattern = 0; pattern < input.routeCount; pattern += 1) {
+      patternDepartures[pattern] =
+        input.routeDepartureOffsets[pattern + 1] - input.routeDepartureOffsets[pattern];
+    }
     self.postMessage(
       {
         type: "result",
@@ -466,6 +471,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           waitMin: single.waitMin,
           departureShiftMin: single.departureShiftMin,
         },
+        info: { patternDepartures },
       },
       {
         transfer: [
@@ -474,6 +480,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           single.alights.buffer,
           single.departureMin.buffer,
           single.arrivalByLegMin.buffer,
+          patternDepartures.buffer,
         ],
       },
     );

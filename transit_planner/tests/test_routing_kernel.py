@@ -139,23 +139,34 @@ const egress = new Float64Array(stopCount).fill(Infinity);
 access[spec.origin] = 0;
 egress[spec.destination] = 0;
 
-const { input, patterns } = packRaptorInput(
-  network, "am", access, egress, spec.departureMin, 0, spec.maxTransfers,
-);
+let cached = null;
 
-// Раскладка паттернов и сегментов нужна, чтобы адресовать штрафы по ключу.
-const segmentIndex = new Map();
-for (let p = 0; p < patterns.length; p += 1) {
-  const start = input.routeSegmentOffsets[p];
-  for (let local = 0; local + 1 < patterns[p].stops.length; local += 1) {
-    const from = network.stops[patterns[p].stops[local]].id;
-    const to = network.stops[patterns[p].stops[local + 1]].id;
-    segmentIndex.set(`${p}|${from}|${to}`, start + local);
+// Упаковка внутри run: интервальные множители меняют сами отправления, поэтому
+// вход пересобирается на каждый прогон, а не один раз.
+const pack = (headwayFactors) => {
+  const factors = headwayFactors
+    ? new Map(Object.entries(headwayFactors).map(([k, v]) => [k, v]))
+    : undefined;
+  const { input, patterns } = packRaptorInput(
+    network, "am", access, egress, spec.departureMin, 0, spec.maxTransfers,
+    undefined, factors,
+  );
+  const segmentIndex = new Map();
+  for (let p = 0; p < patterns.length; p += 1) {
+    const start = input.routeSegmentOffsets[p];
+    for (let local = 0; local + 1 < patterns[p].stops.length; local += 1) {
+      const from = network.stops[patterns[p].stops[local]].id;
+      const to = network.stops[patterns[p].stops[local + 1]].id;
+      segmentIndex.set(`${p}|${from}|${to}`, start + local);
+    }
   }
-}
-const patternRoute = patterns.map((p) => p.routeId);
+  return { input, patterns, segmentIndex };
+};
 
 const run = (options) => {
+  const packed = pack(options.headwayFactors);
+  const { input, patterns, segmentIndex } = packed;
+  if (!cached) cached = patterns.map((p) => p.routeId);
   const routePenalties = new Float64Array(patterns.length);
   const bannedRoutes = new Uint8Array(patterns.length);
   const segmentPenalties = new Float64Array(input.segmentTimes.length);
@@ -180,8 +191,11 @@ const run = (options) => {
   return posted[0];
 };
 
+const patternRoute = (patterns) => patterns.map((p) => p.routeId);
+const idsOf = (stops) => Array.from(stops).map((s) => network.stops[s].id);
+
 const describeRide = (ride) => ({
-  routeId: patternRoute[ride.pattern],
+  routeId: network.stops[ride.boardStop] ? patternRoute(cached)[ride.pattern] : null,
   from: network.stops[ride.boardStop].id,
   to: network.stops[ride.alightStop].id,
   boardLocal: ride.boardLocal,
@@ -190,42 +204,48 @@ const describeRide = (ride) => ({
   waitMin: ride.waitMin,
 });
 
+const basePatterns = pack(undefined).patterns;
+const basePatternIds = patternRoute(basePatterns);
+const basePacked = pack(undefined);
+
 const single = run({});
 const alternatives = run({ maxAlternatives: 3, diversityPenaltyMin: 15 });
 
+const describe = (patterns) => patternRoute(patterns);
+
 process.stdout.write(JSON.stringify({
-  patterns: patternRoute,
+  patterns: describe(basePatterns),
   single: {
     found: single.result.found,
     transfers: single.result.transfers,
     generalizedMin: single.result.generalizedMin,
     routes: single.result.routeIds === undefined
       ? null
-      : Array.from(single.result.routeIds).map((p) => patternRoute[p]),
+      : Array.from(single.result.routeIds).map((p) => basePatternIds[p]),
     boardStops: single.result.boardStops === undefined
       ? null
-      : Array.from(single.result.boardStops).map((s) => network.stops[s].id),
+      : idsOf(single.result.boardStops),
     alightStops: single.result.alightStops === undefined
       ? null
-      : Array.from(single.result.alightStops).map((s) => network.stops[s].id),
+      : idsOf(single.result.alightStops),
   },
   crowdedRoute: (() => {
     const out = run({ segmentPenalties: { "0|s1|s2": 600 } });
-    return Array.from(out.result.routeIds).map((p) => patternRoute[p]);
+    return Array.from(out.result.routeIds).map((p) => basePatternIds[p]);
   })(),
   bannedRoute: (() => {
     const out = run({ bannedPatterns: [0] });
-    return Array.from(out.result.routeIds).map((p) => patternRoute[p]);
+    return Array.from(out.result.routeIds).map((p) => basePatternIds[p]);
   })(),
   penalizedSingle: (() => {
     const out = run({ routePenalties: { 1: 30 } });
     return {
-      routes: Array.from(out.result.routeIds).map((p) => patternRoute[p]),
+      routes: Array.from(out.result.routeIds).map((p) => basePatternIds[p]),
       generalizedMin: out.result.generalizedMin,
     };
   })(),
   alternatives: alternatives.alternatives.map((a) => ({
-    routes: a.rides.map((ride) => patternRoute[ride.pattern]),
+    routes: a.rides.map((ride) => basePatternIds[ride.pattern]),
     rides: a.rides.map(describeRide),
     transfers: a.transfers,
     durationMin: a.durationMin,
@@ -240,13 +260,27 @@ process.stdout.write(JSON.stringify({
       maxAlternatives: 2, diversityPenaltyMin: 15, segmentPenalties: { "0|s1|s2": 600 },
     });
     return out.alternatives.map((a) => ({
-      routes: a.rides.map((ride) => patternRoute[ride.pattern]),
+      routes: a.rides.map((ride) => basePatternIds[ride.pattern]),
       inVehicleMin: a.inVehicleMin,
       durationMin: a.durationMin,
       transfers: a.transfers,
       generalizedMin: a.generalizedMin,
     }));
   })(),
+  // Множитель интервала удлиняет headway втрое: отправлений втрое меньше.
+  withFactors: (() => {
+    const out = run({ headwayFactors: { vA: 3 }, maxAlternatives: 1 });
+    return {
+      departures: Array.from(out.info.patternDepartures),
+      waitMin: out.result.waitMin,
+      durationMin: out.result.arrivalMin - spec.departureMin,
+    };
+  })(),
+  baseDepartures: Array.from(run({ maxAlternatives: 1 }).info.patternDepartures),
+  // Множитель меньше единицы игнорируется: сгущение не поощряется.
+  factorBelowOne: Array.from(
+    run({ headwayFactors: { vA: 0.5 }, maxAlternatives: 1 }).info.patternDepartures,
+  ),
 }));
 """
 
@@ -394,6 +428,22 @@ def test_walk_and_wait_are_reported(kernel: dict) -> None:
             assert ride["inVehicleMin"] > 0
         assert rides[0]["from"] == "s1"
         assert rides[-1]["to"] == "s4"
+
+
+def test_headway_factor_lengthens_headway_and_recomputes_departures(kernel: dict) -> None:
+    """Множитель интервала удлиняет headway: отправлений становится втрое меньше.
+
+    Отправления пересчитываются, а не сдвигаются: иначе множитель обратной
+    связи не влиял бы на расписание, а был бы косметикой.
+    """
+    assert kernel["patterns"] == ["rA", "rB", "rT"]
+    assert kernel["baseDepartures"] == [18, 18, 180]
+    assert kernel["withFactors"]["departures"] == [6, 18, 180]
+
+
+def test_headway_factor_below_one_is_ignored(kernel: dict) -> None:
+    """Сгущение не поощряется: множитель < 1 не сокращает интервал."""
+    assert kernel["factorBelowOne"] == kernel["baseDepartures"]
 
 
 def test_section_capacity_helper_still_agrees_for_reference() -> None:
