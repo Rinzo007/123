@@ -211,9 +211,13 @@ Transit Planner не моделирует жизненный цикл строи
 
 ### Этап 1 — Полное удаление fallback
 
-Статус: ✅ завершён (`8ad8352`, `94782a0`)
+Статус: 🔄 финальная ревизия
 
-Правило после этапа: если обязательный источник/расчёт недоступен — выдаётся явная ошибка. Никакого молчаливого перехода на упрощённую модель.
+Правило этапа: если обязательный источник или расчёт недоступен — выдаётся явная ошибка. Никакого молчаливого перехода на другую модель, synthetic data, пустой результат или упрощённую геометрию.
+
+Уже устранены основные fallback-маршруты, synthetic demand, не-топологический road graph, скрытые дефолты скорости и стоимости, старые API-shim и дублирующие вычислительные реализации.
+
+Остались к удалению именно как runtime-ветки: `journey.ts` grid-nearest резервный поиск, `toReferenceDemand()` synthetic-предрасчёт, скрывающие ошибки `catch` в обязательных слоях Overture/urban context и все fallback-операторы, которые подменяют обязательные данные.
 
 Frontend:
 
@@ -388,19 +392,21 @@ Reference evaluation живёт в `evaluation-runtime.js` (init/run/cancel, epo
 
 ### Этап 9 — Urban Context
 
-Статус: 🔄 начат
+Статус: 🔄 в работе
 
-Уже сделано: Overture buildings; Overture water; UrbanContext; segment multipliers; подключение к CAPEX; city assignment metadata.
+Уже сделано: Overture buildings; Overture water; `UrbanContext`; segment multipliers; `built_up`; `water_share`; `roof_share`; `building_count`; `building_area_m2`; подключение к CAPEX; использование в city assignment; отдельный API urban context.
 
-Дальше: builtUp; waterShare; roofShare; buildingsHit; buildingRings; влияние на travel time; влияние на construction cost; сохранение в city pack; убрать runtime-загрузку urban data для уже собранного pack.
+Дальше: точный parity с `builtUp`, `waterShare`, `roofShare`, `buildingsHit`, `buildingRings`; влияние urban context на travel time; упаковка buildings/water в city pack; packed spatial index; исключение runtime-загрузки для уже собранного pack.
 
 ### Этап 10 — IndexedDB
 
 Статус: 🔄 частично готов
 
-Есть: база `takt/kv`, gzip через CompressionStream, writer-лок на localStorage, TTL-записи, atomic save/delete.
+Есть: IndexedDB для проектов и dataset cache, versioned stores, TTL для dataset records, gzip через CompressionStream, atomic save/delete.
 
-Сделать: writer queue; begin()/commit(); active promise pool; ABA-safe writes; reconciliation; version prefixes; size limit; atomic restore; cross-tab invalidation.
+Сделать: writer queue; `begin()/commit()`; active promise pool; ABA-safe writes; reconciliation по `savedAt`; version prefixes; size limit; atomic restore; cross-tab invalidation.
+
+Fallback localStorage для данных проекта после завершения этапа запрещён; localStorage остаётся только для небольших UI-настроек.
 
 ### Этап 11 — Editor
 
@@ -412,30 +418,37 @@ Reference evaluation живёт в `evaluation-runtime.js` (init/run/cancel, epo
 
 ### Этап 12 — Производительность
 
-Статус: 🔄 начат
+Статус: 🔄 в работе
 
-Принцип: NO JSON→Worker→JSON; YES ArrayBuffer→Worker→ArrayBuffer. already выполнено для matrix/routing/demand/evaluation.
+Принцип: `ArrayBuffer → Worker → ArrayBuffer`; JSON используется для метаданных, а не для горячих массивов.
 
-Добавить: worker pool для routing; memory accounting; GC profiling; route cache; matrix cache; demand cache; evaluation cache (есть одно-slot кэш run); сквозная incremental invalidation.
+Уже есть typed-array worker paths для routing/evaluation и packed street graph.
+
+Добавить: worker pool; 4-ary heap; memory accounting; GC profiling; route/matrix/demand/evaluation caches; batch ranges `[start,end)`; transferable buffers; reuseError; сквозная incremental invalidation.
+
+Запрещено: object-heavy hot loops для крупных OD/матриц, повторная сериализация больших массивов и полный пересчёт неизменённых сегментов.
 
 ### Этап 13 — UI
 
-Статус: 🔄 частично готов
+Статус: 🔄 миграция
 
-Есть: Vanilla TS, один entry, ручной DOM, MapLibre 5.24, inline SVG-иконки, responsive layout, быстрый preview.
+Целевая реализация: Vanilla TypeScript + Vite + ручной DOM + MapLibre GL JS.
 
-Сделать: keyboard navigation; ARIA; Escape cancellation; финальный отказ от Svelte как архитектурной зависимости.
+Сделать: завершить удаление Svelte runtime/component layer; keyboard navigation; ARIA; Escape cancellation; inline SVG; responsive layout; единый composition/bootstrap entry.
+
+Svelte не должен оставаться архитектурной зависимостью production runtime.
 
 ### Этап 14 — Сервер
 
 Статус: 🔜
 
-Backend перестаёт быть обязательным для интерактивной симуляции.
+Python не является обязательным runtime-компонентом интерактивной симуляции.
 
-Python: Overture → pack builder → city pack.
-Браузер: city pack → simulation → editor → evaluation.
+Python: `Overture → pack builder → validation → city pack`.
+Браузер: `city pack → IndexedDB → workers → simulation → editor → evaluation`.
 
-API остаётся для: подготовки данных; импорта; batch processing; диагностики; share API.
+API остаётся только для подготовки данных, импорта, batch processing, диагностики и share.
+Серверная city/assignment/economics реализация не должна быть вторым runtime-путём для тех же алгоритмов.
 
 ### Этап 15 — Share / Import / Export
 
@@ -457,7 +470,40 @@ API остаётся для: подготовки данных; импорта; 
 
 Статус: 🔜
 
-После миграции удалить: старые frontend profiles; старые modes; duplicate demand model; duplicate choice model; duplicate matrix; старые runtime adapters; fallback paths; synthetic fallback demand (frontend-часть удалена на Этапе 1); старые API-only расчёты; Svelte-компоненты; устаревшие storage adapters.
+После миграции удалить:
+
+- старые frontend profiles;
+- старые modes;
+- duplicate demand model;
+- duplicate choice model;
+- duplicate matrix;
+- старые runtime adapters;
+- все fallback/synthetic paths;
+- API-only runtime calculations;
+- Svelte-компоненты;
+- устаревшие storage adapters;
+- compatibility shims;
+- неиспользуемые assets.
+
+Критерий: каждый алгоритм имеет одну реализацию, один контракт и один источник данных.
+
+### Этап 18 — Strict Runtime Gate
+
+Статус: 🔜
+
+Добавить автоматический release-gate:
+
+- поиск `fallback`, `synthetic`, `default`, `??`, `||` и silent `continue` по runtime-коду с whitelist только для намеренно необязательных UI-настроек;
+- проверка, что обязательный worker не заменяется синхронным вычислением;
+- проверка, что обязательный city-pack слой не заменяется live API;
+- проверка, что повреждённый pack не принимается;
+- проверка, что release/version/hash mismatch является ошибкой;
+- проверка отсутствия duplicate algorithm entry points;
+- проверка отсутствия synthetic demand;
+- проверка отсутствия прямолинейного route fallback;
+- Vulture + Python tests + TypeScript build + production smoke test.
+
+`No fallback` становится машинно проверяемым свойством проекта, а не только архитектурным соглашением.
 
 ### Итоговая архитектура
 
