@@ -46,7 +46,9 @@ def test_overture_sql_uses_connectors():
     sql = provider._sql()
     assert "connectors" in sql
     assert "prohibited_transitions" in sql
-    assert "ST_AsGeoJSON(ST_GeomFromWKB(geometry))" in sql
+    # geometry приходит нативным GEOMETRY: ST_GeomFromWKB такой тип не принимает.
+    assert "ST_AsGeoJSON(geometry)" in sql
+    assert "ST_GeomFromWKB(geometry)" not in sql
     assert "bbox.xmin" in sql
 
 
@@ -56,7 +58,9 @@ def test_overture_connector_sql():
     )
     sql = provider._sql()
     assert "theme=transportation/type=connector" in sql
-    assert "ST_AsGeoJSON(ST_GeomFromWKB(geometry))" in sql
+    # geometry приходит нативным GEOMETRY: ST_GeomFromWKB такой тип не принимает.
+    assert "ST_AsGeoJSON(geometry)" in sql
+    assert "ST_GeomFromWKB(geometry)" not in sql
 
 
 def test_overture_transit_sql_filters_transit_classes():

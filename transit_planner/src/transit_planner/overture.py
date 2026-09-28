@@ -16,6 +16,12 @@ from .data import (
 from .geo import LineString, Point
 from .network import Stop
 
+# Релиз Overture, в котором parquet отдаёт geometry нативным типом GEOMETRY
+# ('OGC:CRS84'), а не WKB. Поэтому в SQL геометрия читается напрямую через
+# ST_AsGeoJSON(geometry): ST_GeomFromWKB(geometry) падает с BinderException
+# «No function matches … st_geomfromwkb(GEOMETRY)», а CAST(geometry AS BLOB)
+# не поддерживается. Проверено на всех доступных релизах (2026-08-19.0,
+# 2026-09-23.0, 2026-09-23.1) — во всех тип GEOMETRY.
 DEFAULT_RELEASE = "2026-09-23.1"
 DEFAULT_S3_ROOT = "s3://overturemaps-us-west-2/release"
 _DUCKDB_EXTENSION_LOCK = Lock()
@@ -138,7 +144,7 @@ class OverturePlacesProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                ST_AsGeoJSON(geometry) AS geojson,
                 names.primary AS name,
                 basic_category,
                 taxonomy.primary AS taxonomy_primary,
@@ -233,7 +239,7 @@ class OvertureUrbanProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                ST_AsGeoJSON(geometry) AS geojson,
                 class,
                 subtype
             FROM read_parquet('{_sql_quote(self.source.water())}')
@@ -354,7 +360,7 @@ class OvertureTransportationProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                ST_AsGeoJSON(geometry) AS geojson,
                 class,
                 subclass,
                 FALSE AS oneway,
@@ -412,7 +418,7 @@ class OvertureConnectorProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson
+                ST_AsGeoJSON(geometry) AS geojson
             FROM read_parquet('{_sql_quote(self.source.transportation_connectors())}')
             WHERE TRUE
               {bbox_filter}
@@ -450,15 +456,16 @@ class OvertureTransitProvider:
             if not geojson:
                 continue
             geometry = json.loads(geojson)
-            coordinates = geometry.get("coordinates") or []
-            if len(coordinates) < 2:
+            if not isinstance(geometry, dict):
                 continue
 
-            lon, lat = coordinates[:2]
+            lon, lat = _first_position(geometry)
+            if lon is None or lat is None:
+                continue
             stops[f"overture:{stop_id}"] = Stop(
                 id=f"overture:{stop_id}",
                 name=str(name or stop_class or stop_id),
-                location=Point(float(lon), float(lat)),
+                location=Point(lon, lat),
                 is_station=stop_class in {
                     "bus_station",
                     "railway_station",
@@ -480,7 +487,7 @@ class OvertureTransitProvider:
         return f"""
             SELECT
                 id,
-                ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS geojson,
+                ST_AsGeoJSON(geometry) AS geojson,
                 names.primary AS name,
                 class
             FROM read_parquet('{_sql_quote(self.source.infrastructure())}')
@@ -488,6 +495,29 @@ class OvertureTransitProvider:
               AND class IN ({classes})
               {bbox_filter}
         """
+
+
+def _first_position(geometry: dict) -> tuple[float | None, float | None]:
+    """Первая координата GeoJSON-геометрии как (lon, lat).
+
+    Остановки приходят как Point, но платформы и stop_position в теме
+    infrastructure бывают линиями: у LineString координаты — список точек, и
+    наивное `coordinates[:2]` даёт вложенный список вместо числа (TypeError на
+    float()). Берём первую вершину: позиция на платформе идентифицирует её не
+    хуже, чем точка, а отбрасывать такие строки молча нельзя — тогда город
+    теряет остановки целиком.
+    """
+    coordinates = geometry.get("coordinates")
+    position = coordinates
+    # Спускаемся по вложенным спискам до пары чисел.
+    while isinstance(position, list) and position and isinstance(position[0], list):
+        position = position[0]
+    if not isinstance(position, list) or len(position) < 2:
+        return None, None
+    try:
+        return float(position[0]), float(position[1])
+    except (TypeError, ValueError):
+        return None, None
 
 
 def _query_duckdb(sql: str):

@@ -16,6 +16,7 @@ from .binary_pack import (
     encode_stops_bin,
     encode_streets_bin,
     encode_water_bin,
+    encode_zones_bin,
 )
 from .city import DemandZone
 from .city_demand import CityDemandConfig
