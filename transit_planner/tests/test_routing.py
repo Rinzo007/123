@@ -1,5 +1,8 @@
+import pytest
+
 from transit_planner.geo import Point
 from transit_planner.network import Network, Route, Service, ServicePeriod, Stop, TransitMode, VehicleType
+from transit_planner.road import RoadEdge, RoadGraph, RoadNode
 from transit_planner.routing import RouterConfig, TransitRouter
 
 
@@ -337,3 +340,73 @@ def test_router_allows_through_running_stop_but_not_boarding_at_closed_stop():
 
     assert through is not None
     assert closed_origin is None
+
+
+def make_street_network() -> tuple[Network, RoadGraph]:
+    network = Network()
+    for stop_id, x in (("a", 0), ("b", 1000), ("c", 1600)):
+        network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
+    network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
+    network.add_period(ServicePeriod("am", 360, 540))
+    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b", "c")))
+    network.add_service(Service("svc", "r1", "bus", {"am": 10}))
+
+    graph = RoadGraph()
+    for node_id, x in ((1, 0), (2, 1000), (3, 1600), (10, 500)):
+        graph.add_node(RoadNode(node_id, float(x), 0.0))
+    graph.add_edge(RoadEdge("aq", 1, 10, 500.0, 30.0, "residential"))
+    graph.add_edge(RoadEdge("qb", 10, 2, 500.0, 30.0, "residential"))
+    graph.add_edge(RoadEdge("bc", 2, 3, 600.0, 30.0, "residential"))
+    return network, graph
+
+
+def test_door_to_door_searches_every_stop_within_walking_catchment():
+    network, graph = make_street_network()
+    router = TransitRouter(network, road_graph=graph)
+
+    journey = router.shortest_from_points(
+        Point(500.0, 0.0),
+        Point(1600.0, 0.0),
+        origin_id="door",
+        destination_id="hall",
+        period_id="am",
+    )
+
+    assert journey is not None
+    # A and B are equally far on foot, but boarding at B saves a transit
+    # segment. The search must consider B, not only the tied nearest stop.
+    assert journey.origin_stop_id == "b"
+    assert journey.destination_stop_id == "c"
+    assert journey.legs[0].kind == "access"
+    assert (journey.legs[0].from_id, journey.legs[0].to_id) == ("door", "b")
+    assert journey.legs[0].duration_min == pytest.approx(6.0)
+    assert journey.legs[-1].kind == "egress"
+    assert (journey.legs[-1].from_id, journey.legs[-1].to_id) == ("c", "hall")
+    assert journey.legs[-1].duration_min == 0.0
+    assert journey.duration_min == pytest.approx(
+        journey.legs[0].duration_min
+        + network.route_segment_run_time_min(network.routes["r1"], 1)
+    )
+
+
+def test_door_to_door_without_street_graph_is_an_error():
+    router = TransitRouter(make_network())
+
+    with pytest.raises(RuntimeError, match="road_graph"):
+        router.shortest_from_points(
+            Point(0.0, 0.0),
+            Point(1000.0, 0.0),
+            period_id="am",
+        )
+
+
+def test_door_to_door_rejects_a_point_outside_street_snap_range():
+    network, graph = make_street_network()
+    router = TransitRouter(network, road_graph=graph)
+
+    with pytest.raises(ValueError, match="farther than"):
+        router.shortest_from_points(
+            Point(5000.0, 0.0),
+            Point(1600.0, 0.0),
+            period_id="am",
+        )

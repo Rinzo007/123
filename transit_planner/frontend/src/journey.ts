@@ -1,13 +1,21 @@
 import { fromLocalMeters, toLocalMeters } from "./projection";
 import { buildGridIndex, gridNearest, type GridIndex } from "./spatial";
+import { assembleRouteCoordinates, type StreetGraph } from "./street-graph";
+import {
+  planStreetDoorAccess,
+  streetWalkRoute,
+  type StreetDoorAccess,
+} from "./street-walk";
 import type { NetworkPayload, TransitMode } from "./types";
 import { routeWithRaptor, type RaptorRoutePattern } from "./workers/routing";
 
 export const JOURNEY_SNAP_MAX_M = 500;
 export const JOURNEY_CACHE_LIMIT = 32;
 
+export type JourneyLegMode = TransitMode | "walk";
+
 export interface JourneyLeg {
-  mode: TransitMode;
+  mode: JourneyLegMode;
   routeId: string;
   routeName: string;
   fromStopId: string;
@@ -19,9 +27,13 @@ export interface JourneyLeg {
 
 export interface JourneyPlan {
   found: boolean;
+  /** Boarding stop for door-to-door results, not the query point. */
   originStopId: string;
+  /** Alighting stop for door-to-door results, not the query point. */
   destinationStopId: string;
+  /** Query point to street-graph connector, in metres. */
   originSnapM: number;
+  /** Query point to street-graph connector, in metres. */
   destinationSnapM: number;
   legs: JourneyLeg[];
   stopIds: string[];
@@ -36,6 +48,8 @@ export interface JourneyPlan {
 
 export interface JourneyRequest {
   network: NetworkPayload;
+  /** Street graph is mandatory: door-to-door planning has no stop fallback. */
+  streetGraph: StreetGraph;
   periodId: string;
   origin: { lon: number; lat: number };
   destination: { lon: number; lat: number };
@@ -44,6 +58,8 @@ export interface JourneyRequest {
   departureMin?: number;
   rangeWindowMin?: number;
   maxTransfers?: number;
+  walkingSpeedKph?: number;
+  accessRadiusM?: number;
 }
 
 /**
@@ -107,33 +123,54 @@ function legStopIndices(
 
 function buildPlan(
   network: NetworkPayload,
+  door: StreetDoorAccess,
   journey: Awaited<ReturnType<typeof routeWithRaptor>>["journey"],
   patterns: RaptorRoutePattern[],
-  originStopId: string,
-  destinationStopId: string,
-  originSnapM: number,
-  destinationSnapM: number,
+  origin: { lon: number; lat: number },
+  destination: { lon: number; lat: number },
 ): JourneyPlan {
-  const originStop = network.stops.find((stop) => stop.id === originStopId);
-  if (!originStop) throw new Error(`Остановка ${originStopId} исчезла из сети`);
-  const originLonLat = fromLocalMeters(
-    originStop.location.x,
-    originStop.location.y,
-    network.origin_lon,
-    network.origin_lat,
-  );
-  const destinationStop = network.stops.find((stop) => stop.id === destinationStopId);
-  if (!destinationStop) throw new Error(`Остановка ${destinationStopId} исчезла из сети`);
+  const accessStop = journey.accessStop;
+  const egressStop = journey.egressStop;
+  if (
+    accessStop < 0 ||
+    egressStop < 0 ||
+    accessStop >= network.stops.length ||
+    egressStop >= network.stops.length ||
+    !Number.isFinite(journey.walkToMin) ||
+    !Number.isFinite(journey.walkFromMin)
+  ) {
+    throw new Error("rRAPTOR вернул недопустимую точку доступа или выхода");
+  }
 
   const legs: JourneyLeg[] = [];
-  const stopIds: string[] = [originStopId];
-  const coordinates: Array<[number, number]> = [originLonLat];
-  const pushCoordinate = (x: number, y: number) => {
+  const stopIds: string[] = [];
+  const coordinates: Array<[number, number]> = [[origin.lon, origin.lat]];
+  const pushLonLat = (lon: number, lat: number) => {
     const last = coordinates[coordinates.length - 1];
-    const point = fromLocalMeters(x, y, network.origin_lon, network.origin_lat);
-    if (last && last[0] === point[0] && last[1] === point[1]) return;
-    coordinates.push(point);
+    if (last && last[0] === lon && last[1] === lat) return;
+    coordinates.push([lon, lat]);
   };
+  const pushStopCoordinate = (stopIndex: number) => {
+    const stop = network.stops[stopIndex];
+    const [lon, lat] = fromLocalMeters(
+      stop.location.x,
+      stop.location.y,
+      network.origin_lon,
+      network.origin_lat,
+    );
+    pushLonLat(lon, lat);
+  };
+
+  // Access: query point -> street path -> access-source stop.
+  const accessNode = door.stopNodes[accessStop];
+  if (accessNode < 0) throw new Error("Исходная остановка доступа не привязана к графу");
+  const accessRoute = streetWalkRoute(door.csr, door.originTree, accessNode, true);
+  for (const [lon, lat] of assembleRouteCoordinates(door.graph, accessRoute.nodes, accessRoute.edges)) {
+    pushLonLat(lon, lat);
+  }
+  pushStopCoordinate(accessStop);
+  const boardingStopId = network.stops[accessStop].id;
+  stopIds.push(boardingStopId);
 
   for (let leg = 0; leg < journey.routeIds.length; leg += 1) {
     const pattern = patterns[journey.routeIds[leg]];
@@ -152,8 +189,7 @@ function buildPlan(
     const legStopIds = legStops.map((index) => network.stops[index].id);
     for (const id of legStopIds) stopIds.push(id);
     for (const index of legStops) {
-      const stop = network.stops[index];
-      pushCoordinate(stop.location.x, stop.location.y);
+      pushStopCoordinate(index);
     }
     const route = network.routes.find((item) => item.id === pattern.routeId);
     if (!route) throw new Error(`Маршрут ${pattern.routeId} отсутствует в сети`);
@@ -169,15 +205,48 @@ function buildPlan(
     });
   }
 
-  pushCoordinate(destinationStop.location.x, destinationStop.location.y);
-  stopIds.push(destinationStopId);
+  // Egress: alighting stop -> street path -> query point.
+  const egressNode = door.stopNodes[egressStop];
+  if (egressNode < 0) throw new Error("Конечная остановка выхода не привязана к графу");
+  const egressRoute = streetWalkRoute(door.csr, door.destinationTree, egressNode, false);
+  for (const [lon, lat] of assembleRouteCoordinates(door.graph, egressRoute.nodes, egressRoute.edges)) {
+    pushLonLat(lon, lat);
+  }
+  pushLonLat(destination.lon, destination.lat);
+  const alightingStopId = network.stops[egressStop].id;
+  stopIds.push(alightingStopId);
+
+  if (legs.length > 0) {
+    legs.unshift({
+      mode: "walk",
+      routeId: "walk",
+      routeName: "Пешком",
+      fromStopId: "origin",
+      toStopId: boardingStopId,
+      departMin: journey.departureMin[0] - journey.walkToMin,
+      arriveMin: journey.departureMin[0],
+      stopIds: ["origin", boardingStopId],
+    });
+    legs.push({
+      mode: "walk",
+      routeId: "walk",
+      routeName: "Пешком",
+      fromStopId: alightingStopId,
+      toStopId: "destination",
+      departMin: journey.arrivalByLegMin[journey.arrivalByLegMin.length - 1],
+      arriveMin: journey.arrivalMin,
+      stopIds: [alightingStopId, "destination"],
+    });
+  }
 
   return {
-    found: journey.found && legs.length > 0,
-    originStopId,
-    destinationStopId,
-    originSnapM,
-    destinationSnapM,
+    // Без транзитных ног это чисто пешеходный результат: планировщику
+    // транзита он не подходит, поэтому found=false, как и раньше при пустых legs.
+    found: journey.found && legs.length > 2,
+    originStopId: boardingStopId,
+    destinationStopId: alightingStopId,
+    originSnapM: door.originOffsetM,
+    destinationSnapM: door.destinationOffsetM,
     legs,
     stopIds,
     coordinates,
@@ -190,15 +259,25 @@ function buildPlan(
   };
 }
 
-const cache = new Map<string, JourneyPlan>();
+/** Cache is scoped per street-graph object: a new graph must never reuse walks. */
+let journeyCaches = new WeakMap<object, Map<string, JourneyPlan>>();
+
+function cacheFor(graph: StreetGraph): Map<string, JourneyPlan> {
+  const cached = journeyCaches.get(graph);
+  if (cached) return cached;
+  const fresh = new Map<string, JourneyPlan>();
+  journeyCaches.set(graph, fresh);
+  return fresh;
+}
 
 export function clearJourneyCache(): void {
-  cache.clear();
+  journeyCaches = new WeakMap();
 }
 
 export async function planJourney(request: JourneyRequest): Promise<JourneyPlan> {
   const {
     network,
+    streetGraph,
     periodId,
     origin,
     destination,
@@ -206,22 +285,27 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     departureMin = 420,
     rangeWindowMin = 30,
     maxTransfers = 4,
+    walkingSpeedKph,
+    accessRadiusM,
   } = request;
-
-  const originSnap = nearestStopIndex(network, origin);
-  const destinationSnap = nearestStopIndex(network, destination);
-  const originStopId = network.stops[originSnap.index].id;
-  const destinationStopId = network.stops[destinationSnap.index].id;
+  if (!streetGraph) {
+    throw new Error("Для маршрута door-to-door нужен уличный граф: тихого отката к остановкам нет");
+  }
 
   const key = [
     revision,
     periodId,
-    originStopId,
-    destinationStopId,
+    origin.lon.toFixed(6),
+    origin.lat.toFixed(6),
+    destination.lon.toFixed(6),
+    destination.lat.toFixed(6),
     departureMin,
     rangeWindowMin,
     maxTransfers,
+    walkingSpeedKph ?? "",
+    accessRadiusM ?? "",
   ].join("|");
+  const cache = cacheFor(streetGraph);
   const cached = cache.get(key);
   if (cached) {
     // Свежие записи живут дольше: обновляем порядок вытеснения.
@@ -230,24 +314,25 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     return cached;
   }
 
+  // Уличные поиски — только при промахе кэша: это два Dijkstra на запрос.
+  const door = planStreetDoorAccess({
+    graph: streetGraph,
+    network,
+    origin,
+    destination,
+    walkingSpeedKph,
+    accessRadiusM,
+  });
   const { journey, patterns } = await routeWithRaptor(
     network,
     periodId,
-    originSnap.index,
-    destinationSnap.index,
+    door.accessTimeMin,
+    door.egressTimeMin,
     departureMin,
     rangeWindowMin,
     maxTransfers,
   );
-  const plan = buildPlan(
-    network,
-    journey,
-    patterns,
-    originStopId,
-    destinationStopId,
-    originSnap.distanceM,
-    destinationSnap.distanceM,
-  );
+  const plan = buildPlan(network, door, journey, patterns, origin, destination);
   cache.set(key, plan);
   if (cache.size > JOURNEY_CACHE_LIMIT) {
     const oldest = cache.keys().next();

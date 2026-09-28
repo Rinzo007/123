@@ -170,6 +170,7 @@ frontend/src/
 ├── journey.ts
 ├── projection.ts
 ├── spatial.ts
+├── street-walk.ts
 ├── map-network-editor.ts
 ├── network-editor.ts
 ├── line-cache.ts
@@ -341,7 +342,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Сделано на этом этапе:
 
-- `journey.ts` — единственная точка входа планировщика A→B: snap к ближайшей остановке (≤500 м), legs с board/alight, геометрия маршрута, LRU-кэш на 32 записи с ключом `projectRevision|period|from|to|параметры` и сброс при любой правке сети;
+- `journey.ts` — единственная точка входа планировщика A→B: door-to-door через `street-walk.ts` (граф обязателен, тихого отката к остановкам нет), legs с board/alight и walk-ногами, геометрия маршрута включая уличные сегменты, LRU-кэш на 32 записи на объект графа с ключом `projectRevision|period|from|to|параметры` и сброс при любой правке сети;
 - `routing.ts` — отдаёт из worker не только путь, но и копии route patterns для геометрии; добавлены явные ошибки вместо молчаливых `continue`: неизвестный период, выход индексов за границы, совпадающие endpoints, service без интервала в периоде, отсутствие отправлений в окне периода, route/stop ID, не встречающиеся в services, повреждённая геометрия маршрута;
 - UI — панель «Маршрут A→B» с выбором остановок, периода и времени отправления, слой геометрии на карте, текстовый itinerary;
 - инвалидация результата централизована в `markDirty()`/`invalidateJourneyPlan()`: ранее перетаскивание узлов карты и undo/redo меняли сеть без `markDirty()`, `projectRevision` не рос и из кэша возвращался устаревший маршрут;
@@ -349,10 +350,11 @@ Overture streets → street graph → compressed binary graph → routing worker
 - паритет расписания с Python: формула первого отправления в JS использовала отрицательный остаток и давала отправление **до** начала периода, а `planning/timetable.ts` считала `start + offset` и расходилась с `timetable.py` при `offset > headway`. Обе TS-реализации переведены на общий `firstDepartureMinute()`, тест `tests/test_frontend_timetable_parity.py` собирает настоящий `planning/timetable.ts` и сверяет его с `timetable.py` (пропускается без node/typescript);
 - `spatial.ts` — точный grid для `nearestGraphNode()` и `nearestStopIndex()`; вместо `Math.hypot` используется `sqrt(dx²+dy²)`, чтобы расстояния совпадали с `spatial.py` побитово. Индексы кэшируются через WeakMap. Тест `tests/test_spatial_parity.py` сверяет настоящий TS с Python и с полным перебором; радиус границ теперь включительный в обеих реализациях;
 - `formatMinuteOfDay(1440)` показывает `24:00`, а не `00:00` — иначе конец периода «вечер» подписан полночью следующего дня.
+- door-to-door по уличному графу: `TransitRouter.shortest_from_points()` принимает произвольные точки, считает пешеходный доступ/выход по графу (Dijkstra от снапнутых узлов, скорость 5 км/ч, кэтчмент 500 м — тот же `walk_transfer_radius_m`), ищет по всем остановкам кэтчмента и возвращает access/egress-ноги. Односторонние рёбра для пешеходов проходятся в обе стороны, motorway исключены. `street-walk.ts` — тот же алгоритм в TS (CSR, бинарная куча, порядок обхода outgoing-then-incoming как в `road.py`); `routing.worker.ts` стартует rAPTOR со всех доступных остановок и выбирает лучший выход среди всех целевых; `journey.ts` добавляет walk-ноги и уличную геометрию в itinerary. Тест `tests/test_door_to_door_parity.py` сверяет настоящий TS (journey + worker) с эталоном; допуск 5e-3 мин покрывает квантование микроградусов TKST.
 
 Не сделано (сознательно):
 
-- access/egress и walking legs: их нет и в Python-эталоне — маршрут начинается и заканчивается на остановках, пересадка считается прямой линией 500 м / 5 км/ч. Чтобы это заработало, нужен отдельный этап вместе с Этапом 4-подобным доступом к графу.
+- walk-only результаты: `shortest_from_points()` может вернуть чисто пешеходный маршрут без транзита; TS помечает такие `found=false`, потому что контракт worker не несёт provenance промежуточных transfer-ног и геометрию им построить не из чего. Узкое расхождение зафиксировано здесь, а не спрятано.
 
 ### Этап 6 — Demand Worker
 

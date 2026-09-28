@@ -331,13 +331,28 @@ function streetNodeIndex(graph: StreetGraph): StreetNodeIndex {
   return index;
 }
 
+export interface StreetSnap {
+  node: number;
+  distanceM: number;
+}
+
+export function snapStreetPoint(
+  graph: StreetGraph,
+  lon: number,
+  lat: number,
+  maxDistanceM = SNAP_METERS,
+): StreetSnap | null {
+  const { grid, refLat } = streetNodeIndex(graph);
+  const cosLat = Math.cos((refLat * Math.PI) / 180);
+  const found = gridNearest(grid, lon * 111320 * cosLat, lat * 110574, maxDistanceM);
+  return found === null ? null : { node: found.index, distanceM: found.distance };
+}
+
 export function nearestGraphNode(
   graph: StreetGraph,
   lon: number,
   lat: number,
 ): number | null {
-  const { grid, refLat } = streetNodeIndex(graph);
-  const cosLat = Math.cos((refLat * Math.PI) / 180);
-  const found = gridNearest(grid, lon * 111320 * cosLat, lat * 110574, SNAP_METERS);
-  return found === null ? null : found.index;
+  const snapped = snapStreetPoint(graph, lon, lat);
+  return snapped === null ? null : snapped.node;
 }

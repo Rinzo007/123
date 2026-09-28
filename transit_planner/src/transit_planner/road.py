@@ -9,6 +9,15 @@ from .geo import Point
 
 
 @dataclass(frozen=True, slots=True)
+class StreetWalkTree:
+    """One street-walking search rooted at a snapped query point."""
+
+    root: int
+    minutes: dict[int, float]
+    toward_root: dict[int, tuple[int, str]]
+
+
+@dataclass(frozen=True, slots=True)
 class RoadNode:
     id: int
     x: float
@@ -46,6 +55,7 @@ class RoadGraph:
     connector_nodes: dict[str, int] = field(default_factory=dict)
     prohibited_transitions: tuple[ProhibitedTransition, ...] = ()
     _restriction_index: dict[str, tuple[ProhibitedTransition, ...]] = field(default_factory=dict, init=False, repr=False)
+    _incoming: dict[int, list[str]] | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         for rule in self.prohibited_transitions:
@@ -109,6 +119,142 @@ class RoadGraph:
             raise ValueError("Edge speed must be positive")
         self.edges[edge.id] = edge
         self.outgoing.setdefault(edge.from_node, []).append(edge.id)
+        self._incoming = None
+
+    def incoming(self) -> dict[int, list[str]]:
+        if self._incoming is None:
+            adjacency = {node_id: [] for node_id in self.nodes}
+            for edge_id, edge in self.edges.items():
+                adjacency.setdefault(edge.to_node, []).append(edge_id)
+            self._incoming = adjacency
+        return self._incoming
+
+    @staticmethod
+    def walkable(edge: RoadEdge) -> bool:
+        """Pedestrians may use every mapped segment except motorways.
+
+        One-way designations constrain vehicles, so walkable segments are
+        traversed in both directions. Motorways keep their legal restriction.
+        """
+        road_type = str(edge.road_type).strip().lower().replace("-", "_")
+        return road_type != "motorway" and not road_type.startswith("motorway_")
+
+    def walking_search(self, root: int, *, walking_speed_kph: float) -> StreetWalkTree:
+        if root not in self.nodes:
+            raise KeyError("Street-walk root node not found")
+        if walking_speed_kph <= 0:
+            raise ValueError("Walking speed must be positive")
+
+        minutes = {root: 0.0}
+        toward_root: dict[int, tuple[int, str]] = {}
+        queue = [(0.0, 0, root)]
+        serial = 1
+        incoming = self.incoming()
+        while queue:
+            duration, _, node_id = heappop(queue)
+            if duration != minutes.get(node_id, inf):
+                continue
+            for edge_id in self.outgoing.get(node_id, ()):
+                edge = self.edges[edge_id]
+                neighbor = edge.to_node
+                serial = self._relax_walk_step(
+                    distances=minutes,
+                    toward_root=toward_root,
+                    queue=queue,
+                    serial=serial,
+                    origin=node_id,
+                    neighbor=neighbor,
+                    edge=edge,
+                    duration=duration,
+                    walking_speed_kph=walking_speed_kph,
+                )
+            for edge_id in incoming.get(node_id, ()):
+                edge = self.edges[edge_id]
+                neighbor = edge.from_node
+                serial = self._relax_walk_step(
+                    distances=minutes,
+                    toward_root=toward_root,
+                    queue=queue,
+                    serial=serial,
+                    origin=node_id,
+                    neighbor=neighbor,
+                    edge=edge,
+                    duration=duration,
+                    walking_speed_kph=walking_speed_kph,
+                )
+
+        return StreetWalkTree(root, minutes, toward_root)
+
+    @staticmethod
+    def _walk_edge_minutes(edge: RoadEdge, walking_speed_kph: float) -> float:
+        return max(0.0, edge.length_m) / 1000.0 / walking_speed_kph * 60.0
+
+    def _relax_walk_step(
+        self,
+        *,
+        distances: dict[int, float],
+        toward_root: dict[int, tuple[int, str]],
+        queue: list[tuple[float, int, int]],
+        serial: int,
+        origin: int,
+        neighbor: int,
+        edge: RoadEdge,
+        duration: float,
+        walking_speed_kph: float,
+    ) -> int:
+        if not self.walkable(edge):
+            return serial
+        candidate = duration + self._walk_edge_minutes(edge, walking_speed_kph)
+        if candidate < distances.get(neighbor, inf):
+            distances[neighbor] = candidate
+            toward_root[neighbor] = (origin, edge.id)
+            heappush(queue, (candidate, serial, neighbor))
+            return serial + 1
+        return serial
+
+    def walk_path_edges(
+        self,
+        search: StreetWalkTree,
+        target: int,
+        *,
+        root_first: bool,
+    ) -> tuple[tuple[str, bool], ...]:
+        if target not in search.minutes:
+            raise KeyError(f"Road node {target} is unreachable on foot")
+        oriented: list[tuple[str, bool]] = []
+        current = target
+        while current != search.root:
+            nearer, edge_id = search.toward_root[current]
+            edge = self.edges[edge_id]
+            forward = edge.from_node == current and edge.to_node == nearer
+            backward = edge.to_node == current and edge.from_node == nearer
+            if not (forward or backward):
+                raise KeyError("Street-walk ancestry does not follow a mapped edge")
+            oriented.append((edge_id, backward))
+            current = nearer
+        if root_first:
+            oriented.reverse()
+        return tuple(oriented)
+
+    def walk_path_geometry(
+        self,
+        oriented: tuple[tuple[str, bool], ...],
+    ) -> tuple[Point, ...]:
+        points: list[Point] = []
+        for edge_id, reverse_edge in oriented:
+            edge = self.edges[edge_id]
+            shape = tuple(edge.geometry) if edge.geometry is not None else (
+                self.nodes[edge.from_node],
+                self.nodes[edge.to_node],
+            )
+            if reverse_edge:
+                shape = tuple(reversed(shape))
+            for point in shape:
+                previous = points[-1] if points else None
+                if previous is not None and previous.x == point.x and previous.y == point.y:
+                    continue
+                points.append(point)
+        return tuple(points)
 
     def add_prohibited_transition(self, rule: ProhibitedTransition) -> None:
         self.prohibited_transitions = (*self.prohibited_transitions, rule)

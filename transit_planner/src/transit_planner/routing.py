@@ -3,9 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import hypot, inf, isfinite
 
+from .geo import Point
 from .network import Network, Stop
 from .reference_model import REFERENCE_MODE_PROFILES, REFERENCE_TRANSFER
+from .road import RoadGraph
+from .snap import StopSnap, snap_stops_to_road_graph
+from .spatial import GridPointIndex, IndexedPoint
 from .timetable import average_connection_wait_minutes
+
+
+#: Pedestrian search cells used for snapping points and stops to the street graph.
+ROAD_SNAP_GRID_CELL_M = 250.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,7 @@ class RouterConfig:
     walking_speed_kph: float = 5.0
     default_transit_speed_kph: float = 20.0
     walk_transfer_radius_m: float = 500.0
+    road_snap_max_m: float = 150.0
     wait_weight: float = 1.0
     transfer_penalty_min: float = REFERENCE_TRANSFER.base_s / 60.0
     transfer_penalty_per_m_s: float = REFERENCE_TRANSFER.per_m_s
@@ -45,6 +54,8 @@ class RouterConfig:
             raise ValueError("Speeds must be positive")
         if self.walk_transfer_radius_m < 0:
             raise ValueError("walk_transfer_radius_m cannot be negative")
+        if self.road_snap_max_m < 0:
+            raise ValueError("road_snap_max_m cannot be negative")
         if self.wait_weight < 0 or self.transfer_penalty_min < 0:
             raise ValueError("Wait and transfer penalties cannot be negative")
         if self.transfer_penalty_per_m_s < 0:
@@ -88,8 +99,9 @@ class TransitRouter:
     """Schedule-aware range-rRAPTOR router.
 
     The transit route-choice model is timetable-first. Street topology is
-    consumed upstream through Network.route_segment_run_time_min(), so this
-    router never falls back to a graph shortest-path search.
+    consumed upstream through Network.route_segment_run_time_min() for transit
+    run times. Door-to-door searches additionally use an explicitly supplied
+    road graph for pedestrian access and egress; that mode has no fallback.
     """
 
     def __init__(
@@ -97,11 +109,129 @@ class TransitRouter:
         network: Network,
         *,
         config: RouterConfig = RouterConfig(),
+        road_graph: RoadGraph | None = None,
     ) -> None:
         self.network = network
         self.config = config
+        self.road_graph = road_graph
         self._walking_neighbors_cache = self._build_walking_neighbors()
         self._pattern_cache: dict[str, tuple[_RaptorPattern, ...]] = {}
+        self._road_node_index: GridPointIndex | None = None
+        self._stop_road_snaps: dict[str, StopSnap] = {}
+        if road_graph is not None:
+            node_index = GridPointIndex(cell_size=ROAD_SNAP_GRID_CELL_M)
+            for node in road_graph.nodes.values():
+                node_index.insert(IndexedPoint(node.id, node.x, node.y))
+            self._road_node_index = node_index
+            snaps = snap_stops_to_road_graph(
+                tuple(network.stops.values()),
+                road_graph,
+                cell_size=ROAD_SNAP_GRID_CELL_M,
+                max_distance=config.road_snap_max_m,
+            )
+            self._stop_road_snaps = {snap.stop_id: snap for snap in snaps}
+
+    def _require_street_graph(self) -> tuple[RoadGraph, GridPointIndex]:
+        if self.road_graph is None or self._road_node_index is None:
+            raise RuntimeError(
+                "Door-to-door routing needs TransitRouter(..., road_graph=...); "
+                "fallback to stop-to-stop routing is not allowed here"
+            )
+        return self.road_graph, self._road_node_index
+
+    def _snap_street_point(self, point: Point, label: str) -> tuple[int, float]:
+        graph, node_index = self._require_street_graph()
+        nearest = node_index.nearest(
+            point.x,
+            point.y,
+            max_radius=self.config.road_snap_max_m,
+        )
+        if nearest is None:
+            raise ValueError(
+                f"{label} is farther than {self.config.road_snap_max_m:g} m "
+                "from the street graph"
+            )
+        return nearest.id, hypot(nearest.x - point.x, nearest.y - point.y)
+
+    def _walk_minutes(self, distance_m: float) -> float:
+        return max(0.0, distance_m) / 1000.0 / self.config.walking_speed_kph * 60.0
+
+    def _street_door_minutes(
+        self,
+        origin: Point,
+        destination: Point,
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        """Closed-door walk times from and to every reachable transit stop.
+
+        The shared pedestrian catchment is walk_transfer_radius_m. It is a
+        street-path budget, not a straight-line radius: point-to-node and
+        node-to-stop connector hops are part of the distance.
+        """
+        graph, _ = self._require_street_graph()
+        origin_node, origin_offset_m = self._snap_street_point(origin, "Origin")
+        destination_node, destination_offset_m = self._snap_street_point(
+            destination, "Destination"
+        )
+        origin_search = graph.walking_search(
+            origin_node, walking_speed_kph=self.config.walking_speed_kph
+        )
+        destination_search = graph.walking_search(
+            destination_node, walking_speed_kph=self.config.walking_speed_kph
+        )
+        limit_m = self.config.walk_transfer_radius_m
+        access: dict[str, float] = {}
+        egress: dict[str, float] = {}
+        for stop_id, snap in self._stop_road_snaps.items():
+            if snap.road_node_id is None:
+                continue
+            stop_offset_m = snap.distance
+            origin_graph_m = origin_search.minutes.get(snap.road_node_id)
+            if origin_graph_m is not None:
+                access_m = (
+                    origin_offset_m
+                    + origin_graph_m * self.config.walking_speed_kph / 60.0 * 1000.0
+                    + stop_offset_m
+                )
+                if access_m <= limit_m or abs(access_m - limit_m) <= 1e-9:
+                    access[stop_id] = self._walk_minutes(access_m)
+            destination_graph_m = destination_search.minutes.get(snap.road_node_id)
+            if destination_graph_m is not None:
+                egress_m = (
+                    stop_offset_m
+                    + destination_graph_m * self.config.walking_speed_kph / 60.0 * 1000.0
+                    + destination_offset_m
+                )
+                if egress_m <= limit_m or abs(egress_m - limit_m) <= 1e-9:
+                    egress[stop_id] = self._walk_minutes(egress_m)
+
+        if not access:
+            raise ValueError(
+                "No transit stop is reachable on foot from the origin within "
+                f"{limit_m:g} m"
+            )
+        if not egress:
+            raise ValueError(
+                "No transit stop can reach the destination on foot within "
+                f"{limit_m:g} m"
+            )
+        return access, egress
+
+    def _score_candidate(self, candidate: Journey, route_penalties: dict[str, float]) -> float:
+        used_routes = {
+            leg.route_id
+            for leg in candidate.legs
+            if leg.kind == "transit" and leg.route_id is not None
+        }
+        score = candidate.duration_min
+        score += self.config.transfer_penalty_min * candidate.transfers
+        score += self.config.wait_weight * sum(
+            leg.wait_min for leg in candidate.legs
+        )
+        score += sum(
+            max(0.0, route_penalties.get(route_id, 0.0))
+            for route_id in used_routes
+        )
+        return score
 
     def shortest(
         self,
@@ -147,20 +277,77 @@ class TransitRouter:
                 banned_route_ids=banned_route_ids,
             )
             if candidate is not None:
-                used_routes = {
-                    leg.route_id
-                    for leg in candidate.legs
-                    if leg.kind == "transit" and leg.route_id is not None
-                }
-                score = candidate.duration_min
-                score += self.config.transfer_penalty_min * candidate.transfers
-                score += self.config.wait_weight * sum(
-                    leg.wait_min for leg in candidate.legs
-                )
-                score += sum(
-                    max(0.0, route_penalties.get(route_id, 0.0))
-                    for route_id in used_routes
-                )
+                score = self._score_candidate(candidate, route_penalties)
+                if score < best_score:
+                    best_score = score
+                    best = candidate
+            departure += 1.0
+
+        return best
+
+    def shortest_from_points(
+        self,
+        origin: Point,
+        destination: Point,
+        *,
+        origin_id: str = "origin",
+        destination_id: str = "destination",
+        period_id: str,
+        route_penalties: dict[str, float] | None = None,
+        segment_crowding_penalties: dict[tuple[str, str, str], float] | None = None,
+        service_headway_factors: dict[str, float] | None = None,
+        banned_route_ids: frozenset[str] = frozenset(),
+    ) -> Journey | None:
+        """Door-to-door transit journey using street-graph pedestrian access.
+
+        origin_stop_id/destination_stop_id in the result are the boarding and
+        alighting stops. The query points are the endpoints of the leading
+        access leg and trailing egress leg; all candidate stops within the
+        shared pedestrian catchment are searched.
+        """
+        if not origin_id.strip() or not destination_id.strip():
+            raise ValueError("Door-to-door endpoint labels cannot be empty")
+        if origin_id in self.network.stops or destination_id in self.network.stops:
+            raise ValueError("Door-to-door endpoint labels must not be stop ids")
+        if origin_id == destination_id:
+            raise ValueError("Door-to-door endpoint labels must be distinct")
+        if period_id not in self.network.periods:
+            raise KeyError(period_id)
+
+        access_minutes, egress_minutes = self._street_door_minutes(
+            origin, destination
+        )
+        route_penalties = route_penalties or {}
+        segment_penalties = segment_crowding_penalties or {}
+        headway_factors = service_headway_factors or {}
+        period = self.network.periods[period_id]
+
+        best: Journey | None = None
+        best_score = inf
+        first = float(period.start_minute)
+        last = min(
+            float(period.end_minute),
+            first + self.config.raptor_range_window_min,
+        )
+
+        departure = first
+        while departure <= last + 1e-9:
+            candidate = self._raptor_once(
+                origin=None,
+                destination=None,
+                access_minutes=access_minutes,
+                access_origin_id=origin_id,
+                egress_minutes=egress_minutes,
+                egress_destination_id=destination_id,
+                period_id=period_id,
+                departure_minute=departure,
+                max_transfers=self.config.raptor_max_transfers,
+                segment_penalties=segment_penalties,
+                service_headway_factors=headway_factors,
+                banned_route_ids=banned_route_ids,
+            )
+            if candidate is not None:
+                score = self._score_candidate(candidate, route_penalties)
                 if score < best_score:
                     best_score = score
                     best = candidate
@@ -227,8 +414,12 @@ class TransitRouter:
     def _raptor_once(
         self,
         *,
-        origin: Stop,
-        destination: Stop,
+        origin: Stop | None = None,
+        destination: Stop | None = None,
+        access_minutes: dict[str, float] | None = None,
+        access_origin_id: str | None = None,
+        egress_minutes: dict[str, float] | None = None,
+        egress_destination_id: str | None = None,
         period_id: str,
         departure_minute: float,
         max_transfers: int,
@@ -236,6 +427,27 @@ class TransitRouter:
         service_headway_factors: dict[str, float],
         banned_route_ids: frozenset[str] = frozenset(),
     ) -> Journey | None:
+        door_to_door = (
+            access_minutes is not None
+            or egress_minutes is not None
+            or access_origin_id is not None
+            or egress_destination_id is not None
+        )
+        if door_to_door:
+            if origin is not None or destination is not None:
+                raise ValueError("Point searches use access/egress maps, not Stop objects")
+            if (
+                access_minutes is None
+                or egress_minutes is None
+                or access_origin_id is None
+                or egress_destination_id is None
+            ):
+                raise ValueError("Point searches need complete access/egress inputs")
+            source_id = access_origin_id
+        else:
+            if origin is None or destination is None:
+                raise ValueError("Stop searches need origin and destination stops")
+            source_id = origin.id
         patterns = self._patterns(
             period_id,
             service_headway_factors,
@@ -251,9 +463,30 @@ class TransitRouter:
             {stop_id: infinity for stop_id in self.network.stops}
             for _ in range(max_transfers + 1)
         ]
-        arrival_by_round[0][origin.id] = departure_minute
+        arrival_by_round[0][source_id] = departure_minute
         parents: list[dict[str, _RaptorParent]] = [{} for _ in range(max_transfers + 1)]
-        best_destination: tuple[float, int] | None = None
+        if door_to_door:
+            assert access_minutes is not None
+            for stop_id, walk_min in access_minutes.items():
+                if not isfinite(walk_min):
+                    continue
+                arrival = departure_minute + walk_min
+                if arrival < arrival_by_round[0].get(stop_id, infinity):
+                    arrival_by_round[0][stop_id] = arrival
+                    parents[0][stop_id] = _RaptorParent(
+                        kind="access",
+                        previous_stop=source_id,
+                        previous_round=0,
+                        route_id=None,
+                        service_id=None,
+                        board_time=departure_minute,
+                        ready_time=departure_minute,
+                        arrival_time=arrival,
+                    )
+            # Pre-boarding stop-to-stop walks are part of round zero and do not
+            # consume a transit round.
+            self._apply_footpaths(arrival_by_round[0], parents[0], 0)
+        best_destination: tuple[float, int, str] | None = None
         best_destination_arrival = infinity
 
         for round_index in range(1, max_transfers + 1):
@@ -329,13 +562,22 @@ class TransitRouter:
             arrival_by_round[round_index] = next_arrival
             parents[round_index] = next_parents
 
-            destination_arrival = next_arrival[destination.id]
-            if (
-                isfinite(destination_arrival)
-                and destination_arrival < best_destination_arrival
-            ):
-                best_destination_arrival = destination_arrival
-                best_destination = (destination_arrival, round_index)
+            if door_to_door:
+                assert egress_minutes is not None
+                egress_targets: dict[str, float] = egress_minutes
+            else:
+                assert destination is not None
+                egress_targets = {destination.id: 0.0}
+            for target_id, egress_walk in egress_targets.items():
+                if not isfinite(egress_walk):
+                    continue
+                candidate_arrival = next_arrival.get(target_id, infinity)
+                if not isfinite(candidate_arrival):
+                    continue
+                door_arrival = candidate_arrival + egress_walk
+                if door_arrival < best_destination_arrival:
+                    best_destination_arrival = door_arrival
+                    best_destination = (door_arrival, round_index, target_id)
 
             if not improved:
                 break
@@ -344,8 +586,8 @@ class TransitRouter:
             return None
 
         legs = self._reconstruct(
-            origin_id=origin.id,
-            destination_id=destination.id,
+            origin_id=source_id,
+            destination_id=best_destination[2],
             parents=parents,
             round_index=best_destination[1],
             segment_penalties=segment_penalties,
@@ -355,14 +597,48 @@ class TransitRouter:
 
         adjusted = _add_intermediate_dwell(self.network, legs)
         adjusted = _adjust_connection_waits(
-            self.network,
-            period_id,
-            adjusted,
+            network=self.network,
+            period_id=period_id,
+            legs=adjusted,
             service_headway_factors=service_headway_factors,
         )
+        if door_to_door:
+            assert egress_minutes is not None
+            assert egress_destination_id is not None
+            egress_walk = egress_minutes.get(legs[-1].to_id)
+            if egress_walk is None:
+                return None
+            completed = (
+                *adjusted,
+                JourneyLeg(
+                    "egress",
+                    legs[-1].to_id,
+                    egress_destination_id,
+                    egress_walk,
+                ),
+            )
+        else:
+            completed = adjusted
+        transit_legs = [
+            leg for leg in completed if leg.kind == "transit"
+        ]
+        if door_to_door:
+            assert access_origin_id is not None
+            assert egress_destination_id is not None
+            if transit_legs:
+                journey_origin_id = transit_legs[0].from_id
+                journey_destination_id = transit_legs[-1].to_id
+            else:
+                journey_origin_id = access_origin_id
+                journey_destination_id = egress_destination_id
+        else:
+            assert origin is not None
+            assert destination is not None
+            journey_origin_id = origin.id
+            journey_destination_id = destination.id
         route_ids = [
             leg.route_id
-            for leg in adjusted
+            for leg in completed
             if leg.kind == "transit" and leg.route_id is not None
         ]
         transfers = sum(
@@ -371,14 +647,14 @@ class TransitRouter:
         )
 
         return Journey(
-            origin_stop_id=origin.id,
-            destination_stop_id=destination.id,
+            origin_stop_id=journey_origin_id,
+            destination_stop_id=journey_destination_id,
             duration_min=sum(
                 leg.duration_min
-                for leg in adjusted
+                for leg in completed
             ),
             transfers=transfers,
-            legs=adjusted,
+            legs=completed,
         )
 
     def _patterns(
@@ -516,10 +792,10 @@ class TransitRouter:
             if record is None:
                 return None
 
-            if record.kind == "walk":
+            if record.kind == "walk" or record.kind == "access":
                 legs_reversed.append(
                     JourneyLeg(
-                        "walk",
+                        record.kind,
                         record.previous_stop,
                         current,
                         max(

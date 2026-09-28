@@ -17,8 +17,6 @@ type RaptorRequest = {
   departures: Float64Array;
   routeSegmentOffsets: Int32Array;
   segmentTimes: Float64Array;
-  origin: number;
-  destination: number;
   departureMin: number;
 };
 
@@ -62,6 +60,8 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
   let bestRouteIds = new Int32Array(0);
   let bestBoardStops = new Int32Array(0);
   let bestAlightStops = new Int32Array(0);
+  let bestAccessStop = -1;
+  let bestEgressStop = -1;
   let bestDepartures = new Float64Array(0);
   let bestArrivals = new Float64Array(0);
 
@@ -91,17 +91,21 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
     { length: rounds },
     () => new Int32Array(stops).fill(-1),
   );
+  const accessSourceByRound = Array.from(
+    { length: rounds },
+    () => new Int32Array(stops).fill(-1),
+  );
   const labelRound = new Int32Array(stops).fill(-1);
 
-  const reconstruct = (departureMin: number, access: number, walkFrom: number) => {
+  const reconstruct = (departureMin: number, target: number, targetRound: number) => {
     const routes: number[] = [];
     const boards: number[] = [];
     const alights: number[] = [];
     const departures: number[] = [];
     const arrivals: number[] = [];
-    let cursor = input.destination;
-    let r = labelRound[cursor];
-    if (r < 0 || !Number.isFinite(arrivalByRound[r][cursor])) return null;
+    let cursor = target;
+    let r = targetRound;
+    if (r < 0 || r >= rounds || !Number.isFinite(arrivalByRound[r][cursor])) return null;
     const finalArrival = arrivalByRound[r][cursor];
     let wait = 0;
     let guard = 0;
@@ -124,7 +128,17 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       cursor = fromStop;
       r = fromRound;
     }
-    if (cursor !== input.origin) return null;
+    if (r !== 0) return null;
+    // Цепочка без транзитных ног (чистая ходьба от доступа) здесь не
+    // считается найденным маршрутом: планировщик транзита такие результаты
+    // помечает not-found (см. journey.ts).
+    if (routes.length === 0) return null;
+    const accessStop = accessSourceByRound[0][cursor];
+    const access = accessStop >= 0 ? input.accessTimeMin[accessStop] : Number.POSITIVE_INFINITY;
+    const walkFrom = input.egressTimeMin[target];
+    if (cursor !== accessStop || !Number.isFinite(access) || !Number.isFinite(walkFrom)) {
+      return null;
+    }
 
     const transfers = Math.max(0, routes.length - 1);
     const shift = Math.max(0, departureMin - input.departureMin);
@@ -145,6 +159,8 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       generalized,
       arrivalWithEgress,
       transfers,
+      accessStop,
+      egressStop: target,
       walkTo: access,
       walkFrom,
       wait,
@@ -164,13 +180,20 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
     for (const values of departureByRound) values.fill(infinity);
     for (const values of prevStopByRound) values.fill(-1);
     for (const values of prevRoundByRound) values.fill(-1);
+    for (const values of accessSourceByRound) values.fill(-1);
     labelRound.fill(-1);
 
-    const access = input.accessTimeMin[input.origin];
-    if (!Number.isFinite(access)) return;
-    arrivalByRound[0][input.origin] = departureMin + access;
-    labelRound[input.origin] = 0;
-    let bestRoundArrival = arrivalByRound[0][input.destination];
+    let hasAccess = false;
+    for (let stop = 0; stop < stops; stop += 1) {
+      const access = input.accessTimeMin[stop];
+      if (!Number.isFinite(access)) continue;
+      arrivalByRound[0][stop] = departureMin + access;
+      accessSourceByRound[0][stop] = stop;
+      labelRound[stop] = 0;
+      hasAccess = true;
+    }
+    if (!hasAccess) return;
+    let bestArrivalTotal = infinity;
 
     for (let round = 0; round <= input.maxTransfers; round += 1) {
       const current = arrivalByRound[round];
@@ -183,6 +206,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
       departureByRound[round + 1].set(departureByRound[round]);
       prevStopByRound[round + 1].set(prevStopByRound[round]);
       prevRoundByRound[round + 1].set(prevRoundByRound[round]);
+      accessSourceByRound[round + 1].set(accessSourceByRound[round]);
 
       // Stage 2: scan each route, boarding the trip that minimizes
       // departureTime - cumulativeRunningTime (paper Section 3).
@@ -230,6 +254,7 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
               departureByRound[round + 1][stop] = boardDeparture;
               prevStopByRound[round + 1][stop] = boardStop;
               prevRoundByRound[round + 1][stop] = round;
+              accessSourceByRound[round + 1][stop] = accessSourceByRound[round][boardStop];
               labelRound[stop] = round + 1;
             }
           }
@@ -258,33 +283,37 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
           departureByRound[round + 1][to] = infinity;
           prevStopByRound[round + 1][to] = from;
           prevRoundByRound[round + 1][to] = labelRound[from];
+          accessSourceByRound[round + 1][to] = accessSourceByRound[round][from];
           labelRound[to] = round + 1;
         }
       }
 
-      if (!Number.isFinite(next[input.destination]) && bestRoundArrival === infinity) {
-        continue;
+      for (let target = 0; target < stops; target += 1) {
+        const egress = input.egressTimeMin[target];
+        if (!Number.isFinite(egress)) continue;
+        const arrival = next[target];
+        if (!Number.isFinite(arrival)) continue;
+        const total = arrival + egress;
+        if (total >= bestArrivalTotal) continue;
+        const journey = reconstruct(departureMin, target, round + 1);
+        if (journey === null || journey.generalized >= bestGeneralized) continue;
+
+        bestArrivalTotal = total;
+        bestGeneralized = journey.generalized;
+        bestArrival = journey.arrivalWithEgress;
+        bestTransfers = journey.transfers;
+        bestAccessStop = journey.accessStop;
+        bestEgressStop = journey.egressStop;
+        bestWalkTo = journey.walkTo;
+        bestWalkFrom = journey.walkFrom;
+        bestWait = journey.wait;
+        bestShift = journey.shift;
+        bestRouteIds = journey.routeIds;
+        bestBoardStops = journey.boardStops;
+        bestAlightStops = journey.alightStops;
+        bestDepartures = journey.departures;
+        bestArrivals = journey.arrivals;
       }
-      if (next[input.destination] >= bestRoundArrival) continue;
-      bestRoundArrival = next[input.destination];
-
-      const walkFrom = input.egressTimeMin[input.destination];
-      if (!Number.isFinite(walkFrom)) continue;
-      const journey = reconstruct(departureMin, access, walkFrom);
-      if (journey === null || journey.generalized >= bestGeneralized) continue;
-
-      bestGeneralized = journey.generalized;
-      bestArrival = journey.arrivalWithEgress;
-      bestTransfers = journey.transfers;
-      bestWalkTo = journey.walkTo;
-      bestWalkFrom = journey.walkFrom;
-      bestWait = journey.wait;
-      bestShift = journey.shift;
-      bestRouteIds = journey.routeIds;
-      bestBoardStops = journey.boardStops;
-      bestAlightStops = journey.alightStops;
-      bestDepartures = journey.departures;
-      bestArrivals = journey.arrivals;
     }
   };
 
@@ -305,6 +334,8 @@ self.onmessage = (event: MessageEvent<RaptorRequest>) => {
         routeIds: bestRouteIds,
         boardStops: bestBoardStops,
         alightStops: bestAlightStops,
+        accessStop: bestAccessStop,
+        egressStop: bestEgressStop,
         departureMin: bestDepartures,
         arrivalByLegMin: bestArrivals,
         walkToMin: bestWalkTo,

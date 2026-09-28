@@ -868,6 +868,9 @@ function parseClockToMinute(clock: string): number {
 
 async function buildJourney(): Promise<void> {
   if (stops.length < 2) return;
+  if (!streetGraph) {
+    throw new Error("Для маршрута door-to-door нужен уличный граф: загрузите его через «Данные Overture»");
+  }
   const originId = journeyOriginStopId ?? stops[0].id;
   const destinationId = journeyDestinationStopId ?? stops[stops.length - 1].id;
   const origin = stops.find((stop) => stop.id === originId);
@@ -889,6 +892,7 @@ async function buildJourney(): Promise<void> {
   try {
     const plan = await planJourney({
       network,
+      streetGraph,
       periodId: period.id,
       origin: { lon: origin.lon, lat: origin.lat },
       destination: { lon: destination.lon, lat: destination.lat },

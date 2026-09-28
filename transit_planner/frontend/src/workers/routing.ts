@@ -9,6 +9,8 @@ export interface RaptorJourney {
   routeIds: Int32Array;
   boardStops: Int32Array;
   alightStops: Int32Array;
+  accessStop: number;
+  egressStop: number;
   departureMin: Float64Array;
   arrivalByLegMin: Float64Array;
   walkToMin: number;
@@ -52,7 +54,15 @@ function departures(start: number, end: number, headway: number, offset: number)
   return result;
 }
 
-function pack(network: NetworkPayload, periodId: string, origin: number, destination: number, departureMin: number, rangeWindowMin: number, maxTransfers: number) {
+function pack(
+  network: NetworkPayload,
+  periodId: string,
+  accessTimeMin: Float64Array,
+  egressTimeMin: Float64Array,
+  departureMin: number,
+  rangeWindowMin: number,
+  maxTransfers: number,
+) {
   const stopCount = network.stops.length;
   const routePatterns: Array<{
     routeId: string;
@@ -63,10 +73,16 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
   const index = new Map(network.stops.map((stop, i) => [stop.id, i]));
   const period = network.periods.find((item) => item.id === periodId);
   if (!period) throw new Error(`Period not found in network: ${periodId}`);
-  if (origin < 0 || origin >= stopCount) throw new Error(`Origin stop index out of range: ${origin}`);
-  if (destination < 0 || destination >= stopCount) throw new Error(`Destination stop index out of range: ${destination}`);
-  if (origin === destination) throw new Error("Origin and destination are the same stop");
   if (network.services.length === 0) throw new Error("Network has no services: build a route before planning");
+  if (accessTimeMin.length !== stopCount || egressTimeMin.length !== stopCount) {
+    throw new Error("Access/egress maps must cover every network stop");
+  }
+  if (!accessTimeMin.some((value) => Number.isFinite(value))) {
+    throw new Error("No transit stop is reachable on foot from the origin");
+  }
+  if (!egressTimeMin.some((value) => Number.isFinite(value))) {
+    throw new Error("No transit stop can reach the destination on foot");
+  }
 
   let patternsWithoutHeadway = 0;
   for (const service of network.services) {
@@ -174,12 +190,8 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
     ti += pattern.segmentTimes.length;
   }
 
-  const accessTimeMin = new Float64Array(stopCount);
-  const egressTimeMin = new Float64Array(stopCount);
-  accessTimeMin.fill(Number.POSITIVE_INFINITY);
-  egressTimeMin.fill(Number.POSITIVE_INFINITY);
-  accessTimeMin[origin] = 0;
-  egressTimeMin[destination] = 0;
+  // Access/egress maps arrive from the street-walk layer already sized to
+  // stopCount; they are posted to the worker, whose transfer neuters them.
 
   const transferPairs: Array<[number, number, number]> = [];
   for (let a = 0; a < stopCount; a += 1) {
@@ -226,8 +238,6 @@ function pack(network: NetworkPayload, periodId: string, origin: number, destina
       departures: routeDepartures,
       routeSegmentOffsets,
       segmentTimes: routeSegmentTimes,
-      origin,
-      destination,
       departureMin,
     },
     // Копия нужна для геометрии маршрута: routeStops уходит в воркер по
@@ -252,8 +262,8 @@ export interface RaptorRouteResult {
 export function routeWithRaptor(
   network: NetworkPayload,
   periodId: string,
-  origin: number,
-  destination: number,
+  accessTimeMin: Float64Array,
+  egressTimeMin: Float64Array,
   departureMin = 420,
   rangeWindowMin = 30,
   maxTransfers = 4,
@@ -261,8 +271,8 @@ export function routeWithRaptor(
   const { input, patterns } = pack(
     network,
     periodId,
-    origin,
-    destination,
+    accessTimeMin,
+    egressTimeMin,
     departureMin,
     rangeWindowMin,
     maxTransfers,
