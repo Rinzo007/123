@@ -1,6 +1,6 @@
 import type { FeatureCollection } from "../geojson";
 import type { ReferenceDemandResponse } from "../api";
-import { toLocalMeters } from "../projection";
+import { fromLocalMeters, toLocalMeters } from "../projection";
 import {
   CITY_DEMAND_DECAY,
   CITY_DEMAND_REFERENCE_SPEED_KPH,
@@ -33,9 +33,40 @@ export interface DemandWorkerRequestInput {
 
 let requestId = 0;
 
+export interface ReferenceDemandDailyPair {
+  originZoneId: string;
+  destinationZoneId: string;
+  tripsPerDay: number;
+  purpose: string;
+  baseTimeMin: number;
+}
+
+export interface ReferenceDemandTemporalPair {
+  periodId: string;
+  originZoneId: string;
+  destinationZoneId: string;
+  trips: number;
+  purpose: string;
+}
+
+export interface ReferenceDemandZoneColumn {
+  id: string;
+  centroid_x: number;
+  centroid_y: number;
+  population: number;
+  jobs: number;
+}
+
+export interface ReferenceDemandBuilt {
+  response: ReferenceDemandResponse;
+  zones: ReferenceDemandZoneColumn[];
+  daily: ReferenceDemandDailyPair[];
+  temporal: ReferenceDemandTemporalPair[];
+}
+
 export function buildReferenceDemand(
   input: DemandWorkerRequestInput,
-): Promise<ReferenceDemandResponse> {
+): Promise<ReferenceDemandBuilt> {
   const worker = new Worker(new URL("./demand.worker.ts", import.meta.url), { type: "module" });
   const job = ++requestId;
   return new Promise((resolve, reject) => {
@@ -44,12 +75,29 @@ export function buildReferenceDemand(
       worker.terminate();
       const result = event.data;
       const zoneCount = input.zones.ids.length;
-      const pts: Array<[number, number, number, number]> = input.zones.ids.map((_, index) => [
-        input.places.lon[index] ?? 0,
-        input.places.lat[index] ?? 0,
-        input.zones.population[index],
-        Math.max(input.zones.jobs[index], input.zones.population[index]),
-      ]);
+      // Zone centroids, not places: the place columns are a different array and
+      // the response `pts` has always been per zone (as the Python endpoint does).
+      const pts: Array<[number, number, number, number]> = [];
+      const zones: ReferenceDemandZoneColumn[] = [];
+      input.zones.ids.forEach((id, index) => {
+        const [lon, lat] = fromLocalMeters(
+          input.zones.x[index],
+          input.zones.y[index],
+          input.originLon,
+          input.originLat,
+        );
+        const population = input.zones.population[index];
+        const jobs = input.zones.jobs[index];
+        pts.push([lon, lat, population, Math.max(jobs, population)]);
+        zones.push({
+          id,
+          centroid_x: input.zones.x[index],
+          centroid_y: input.zones.y[index],
+          population,
+          jobs,
+        });
+      });
+      const zoneId = (index: number) => input.zones.ids[index] ?? `zone-${index}`;
       const od: Array<[number, number, number, number]> = [];
       for (let index = 0; index < result.odOrigin.length; index += 1) {
         od.push([
@@ -72,20 +120,45 @@ export function buildReferenceDemand(
         if (existing) existing.od.push(row);
         else layers.push({ purpose, label: purpose, od: [row], out: [], ret: [] });
       }
+      const daily: ReferenceDemandDailyPair[] = [];
+      for (let index = 0; index < result.odOrigin.length; index += 1) {
+        daily.push({
+          originZoneId: zoneId(result.odOrigin[index]),
+          destinationZoneId: zoneId(result.odDestination[index]),
+          tripsPerDay: result.odTrips[index],
+          purpose: "work",
+          baseTimeMin: Math.max(120, result.odBaseTime[index]),
+        });
+      }
+      const temporal: ReferenceDemandTemporalPair[] = [];
+      for (let index = 0; index < result.temporalTrips.length; index += 1) {
+        temporal.push({
+          periodId: result.temporalPeriod[index],
+          originZoneId: zoneId(result.temporalOrigin[index]),
+          destinationZoneId: zoneId(result.temporalDestination[index]),
+          trips: result.temporalTrips[index],
+          purpose: result.temporalPurpose[index],
+        });
+      }
       resolve({
-        city: "dynamic",
-        source: "TS demand worker",
-        pts,
-        od,
-        baselineT: null,
-        layers,
-        meta: {
-          zones: zoneCount,
-          commuter_od_pairs: od.length,
-          purpose_layers: layers.length,
-          purpose_od_pairs: od.length,
-          baselineT_included: false,
+        response: {
+          city: "dynamic",
+          source: "TS demand worker",
+          pts,
+          od,
+          baselineT: null,
+          layers,
+          meta: {
+            zones: zoneCount,
+            commuter_od_pairs: od.length,
+            purpose_layers: layers.length,
+            purpose_od_pairs: od.length,
+            baselineT_included: false,
+          },
         },
+        zones,
+        daily,
+        temporal,
       });
     };
     worker.onerror = (event) => {

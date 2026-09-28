@@ -952,7 +952,7 @@ async function runPreview(): Promise<void> {
     if (!populationZones) {
       throw new Error("Зоны населения не загружены: обновите «Данные Overture» (WorldPop)");
     }
-    const demandInput = await buildReferenceDemand(
+    const built = await buildReferenceDemand(
       referenceDemandWorkerRequest({
         populationZones,
         places: cityPlaces ?? { type: "FeatureCollection", features: [] },
@@ -960,16 +960,28 @@ async function runPreview(): Promise<void> {
         originLat: network.origin_lat,
       }),
     );
-    await runRuntimePreview(evaluationClient, network, demandInput);
-    const demand = [{
-      origin_zone_id: stops[0].id,
-      destination_zone_id: stops[stops.length - 1].id,
-      trips_per_day: previewTrips,
-      purpose: "all",
-    }];
-    assignmentResult = await calculateAssignment(network, demand, previewZones(), "am");
-    demandStreets = await loadDemandStreets(demand, previewZones(), stops[0].lon, stops[0].lat);
-    setStatus(`Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}% · изменено сегментов ${changed.length}`);
+    await runRuntimePreview(evaluationClient, network, built.response);
+    // Реальная матрица gravity по зонам населения и слои purpose из воркера
+    // вместо синтетической пары «первая остановка → последняя».
+    const demand = built.daily.map((pair) => ({
+      origin_zone_id: pair.originZoneId,
+      destination_zone_id: pair.destinationZoneId,
+      trips_per_day: pair.tripsPerDay,
+      purpose: pair.purpose,
+    }));
+    if (demand.length === 0) throw new Error("Модель спроса не вернула ни одной пары зон");
+    assignmentResult = await calculateAssignment(network, demand, built.zones, "am");
+    demandStreets = await loadDemandStreets(
+      demand,
+      built.zones,
+      stops[0].lon,
+      stops[0].lat,
+    );
+    setStatus(
+      `Пассажиропоток рассчитан: transit ${(assignmentResult.metrics.transit_share * 100).toFixed(1)}%` +
+      ` · пар зон ${demand.length} · периодов ${new Set(built.temporal.map((row) => row.periodId)).size}` +
+      ` · изменено сегментов ${changed.length}`,
+    );
     renderResults();
     syncMapGeoJson();
   } catch (error) {

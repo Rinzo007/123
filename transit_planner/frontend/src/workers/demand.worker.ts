@@ -70,6 +70,12 @@ export interface DemandWorkerResult {
   layerDestination: Int32Array;
   layerTrips: Float64Array;
   layerBaseTime: Float64Array;
+  /** Period-keyed demand: same gravity commuter rows plus purpose layers. */
+  temporalPeriod: string[];
+  temporalOrigin: Int32Array;
+  temporalDestination: Int32Array;
+  temporalTrips: Float64Array;
+  temporalPurpose: string[];
 }
 
 export type DemandWorkerMessage = DemandWorkerRequest | { type: "cancel"; before: number };
@@ -191,6 +197,22 @@ self.onmessage = (event: MessageEvent<DemandWorkerMessage>) => {
     }
   }
 
+  const temporalPeriod: string[] = [];
+  const temporalOrigin: number[] = [];
+  const temporalDestination: number[] = [];
+  const temporalTrips: number[] = [];
+  const temporalPurpose: string[] = [];
+  for (const pair of temporal.pairs) {
+    const origin = zoneIndex.get(pair.originZoneId);
+    const destination = zoneIndex.get(pair.destinationZoneId);
+    if (origin === undefined || destination === undefined) continue;
+    temporalPeriod.push(pair.periodId);
+    temporalOrigin.push(origin);
+    temporalDestination.push(destination);
+    temporalTrips.push(pair.trips);
+    temporalPurpose.push(pair.purpose);
+  }
+
   const result: DemandWorkerResult = {
     type: "built",
     job: input.job,
@@ -203,6 +225,11 @@ self.onmessage = (event: MessageEvent<DemandWorkerMessage>) => {
     layerDestination: Int32Array.from(layerDestination),
     layerTrips: Float64Array.from(layerTrips),
     layerBaseTime: Float64Array.from(layerBaseTime),
+    temporalPeriod,
+    temporalOrigin: Int32Array.from(temporalOrigin),
+    temporalDestination: Int32Array.from(temporalDestination),
+    temporalTrips: Float64Array.from(temporalTrips),
+    temporalPurpose,
   };
 
   self.postMessage(result, {
@@ -215,6 +242,9 @@ self.onmessage = (event: MessageEvent<DemandWorkerMessage>) => {
       result.layerDestination.buffer,
       result.layerTrips.buffer,
       result.layerBaseTime.buffer,
+      result.temporalOrigin.buffer,
+      result.temporalDestination.buffer,
+      result.temporalTrips.buffer,
     ],
   });
 };
