@@ -48,6 +48,7 @@ class RouterConfig:
     transfer_walk_multiplier: float = REFERENCE_TRANSFER.walk_multiplier
     raptor_range_window_min: float = 30.0
     raptor_max_transfers: int = 4
+    raptor_max_range_departures: int = 24
 
     def __post_init__(self) -> None:
         if self.walking_speed_kph <= 0 or self.default_transit_speed_kph <= 0:
@@ -66,6 +67,8 @@ class RouterConfig:
             raise ValueError("raptor_range_window_min cannot be negative")
         if self.raptor_max_transfers < 0:
             raise ValueError("raptor_max_transfers cannot be negative")
+        if self.raptor_max_range_departures < 1:
+            raise ValueError("raptor_max_range_departures must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,9 +332,18 @@ class TransitRouter:
             float(period.end_minute),
             first + self.config.raptor_range_window_min,
         )
+        # Range-query budget: at most raptor_max_range_departures departures are
+        # evaluated, evenly spaced across the window. The game engine caps the
+        # same way (MAX_RANGE_DEPARTURES=24); without it a 30-minute window at
+        # 1-minute steps is 31 rRAPTOR runs per query.
+        max_departures = self.config.raptor_max_range_departures
+        if max_departures <= 1:
+            departures = (first,)
+        else:
+            step = (last - first) / (max_departures - 1)
+            departures = tuple(first + index * step for index in range(max_departures))
 
-        departure = first
-        while departure <= last + 1e-9:
+        for departure in departures:
             candidate = self._raptor_once(
                 origin=None,
                 destination=None,
@@ -351,7 +363,6 @@ class TransitRouter:
                 if score < best_score:
                     best_score = score
                     best = candidate
-            departure += 1.0
 
         return best
 

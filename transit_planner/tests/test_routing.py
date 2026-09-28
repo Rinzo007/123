@@ -342,6 +342,20 @@ def test_router_allows_through_running_stop_but_not_boarding_at_closed_stop():
     assert closed_origin is None
 
 
+def test_range_query_departure_cap_is_configurable() -> None:
+    network = make_network()
+    router = TransitRouter(network, config=RouterConfig(raptor_max_range_departures=1))
+
+    journey = router.shortest(
+        network.stops["a"],
+        network.stops["c"],
+        period_id="am",
+    )
+
+    assert journey is not None
+    assert journey.legs
+
+
 def make_street_network() -> tuple[Network, RoadGraph]:
     network = Network()
     for stop_id, x in (("a", 0), ("b", 1000), ("c", 1600)):
