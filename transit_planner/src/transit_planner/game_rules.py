@@ -334,11 +334,8 @@ def perceived_minutes(
         + max(0.0, departure_shift_s) * DEPARTURE_SHIFT_MIN
     )
     car = (
-        max(0.0, car_drive_s) * CONGESTED_DRIVING_MIN
+        max(0.0, car_drive_s) * CONGESTED_DRIVING_MIN * short_drive_penalty(car_distance_m)
         + max(0.0, car_parking_s) / 60.0 * PARKING_SEARCH_MIN
-        + MIN_SENSIBLE_DRIVING_DISTANCE_M / AVG_DRIVING_SPEED_MPS
-        * (short_drive_penalty(car_distance_m) - 1.0)
-        * CONGESTED_DRIVING_MIN
     )
     walk = max(0.0, walk_s) * (AIRPORT_WALK_MIN if to_airport else WALK_MIN)
     return PerceivedMinutes(

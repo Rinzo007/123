@@ -84,6 +84,33 @@ SCENARIOS = [
         "transit_access_walk_min": 4.0, "transit_egress_walk_min": 4.0,
         "transit_transfer_walk_min": 2.0, "transit_transfers": 0,
     },
+    {
+        # Короткая поездка попадает под штраф за неудобство (< 1 км).
+        "name": "short_car_trip",
+        "walk_time_min": 14.0, "car_time_min": 7.0, "transit_time_min": 16.0,
+        "bike_time_min": 18.0, "transit_wait_min": 3.0, "transit_fare": 0.0,
+        "car_distance_km": 0.35, "bike_distance_km": 0.35, "base_time_min": 12.0,
+        "transit_access_walk_min": 3.0, "transit_egress_walk_min": 3.0,
+        "transit_transfer_walk_min": 2.0, "transit_transfers": 0,
+    },
+    {
+        # Четыре пересадки - верхняя граница игры; запас 50 с на каждую.
+        "name": "max_transfers",
+        "walk_time_min": 35.0, "car_time_min": 26.0, "transit_time_min": 48.0,
+        "bike_time_min": 30.0, "transit_wait_min": 11.0, "transit_fare": 1.9,
+        "car_distance_km": 21.0, "bike_distance_km": 21.0, "base_time_min": 33.0,
+        "transit_access_walk_min": 7.0, "transit_egress_walk_min": 7.0,
+        "transit_transfer_walk_min": 5.0, "transit_transfers": 4,
+    },
+    {
+        # Нулевое расстояние авто: данных о поездке нет, штраф не применяется.
+        "name": "car_distance_unknown",
+        "walk_time_min": 40.0, "car_time_min": 9.0, "transit_time_min": 33.0,
+        "bike_time_min": 44.0, "transit_wait_min": 6.0, "transit_fare": 0.0,
+        "car_distance_km": 0.0, "bike_distance_km": 12.0, "base_time_min": 28.0,
+        "transit_access_walk_min": 4.0, "transit_egress_walk_min": 4.0,
+        "transit_transfer_walk_min": 2.0, "transit_transfers": 2,
+    },
 ]
 
 # Доступность режимов и доля households без автомобиля.
@@ -163,7 +190,7 @@ def _ts_out(tmp_path: Path) -> dict | None:
         return None
     build = subprocess.run(
         [
-            node, str(TSC_JS), str(SRC / "choice.ts"),
+            node, str(TSC_JS), str(SRC / "choice.ts"), str(SRC / "game-rules.ts"),
             "--outDir", str(tmp_path),
             "--rootDir", str(SRC),
             "--module", "esnext",

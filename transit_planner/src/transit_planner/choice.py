@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import exp
 
+from . import game_rules
 from .reference_model import (
     REFERENCE_CAR,
     REFERENCE_JOURNEY_CHOICE,
@@ -54,6 +55,8 @@ class ChoiceConfig:
     bike_speed_kph: float = REFERENCE_MOBILITY.two_wheel_speed_kph
     no_car_share: float = REFERENCE_MOBILITY.no_car_share
     no_car_effectiveness: float = REFERENCE_NO_CAR_EFFECTIVENESS
+    min_sensible_driving_m: float = game_rules.MIN_SENSIBLE_DRIVING_DISTANCE_M
+    arrival_gap_minutes: float = game_rules.ARRIVAL_GAP_S / 60.0
 
     def __post_init__(self) -> None:
         if self.value_of_time_s_per_eur <= 0:
@@ -89,10 +92,28 @@ class ChoiceConfig:
             raise ValueError("no_car_effectiveness must be in [0, 1]")
         if not 0.0 <= self.two_wheel_share <= 1.0:
             raise ValueError("two_wheel_share must be in [0, 1]")
+        if self.min_sensible_driving_m < 0:
+            raise ValueError("min_sensible_driving_m cannot be negative")
+        if self.arrival_gap_minutes < 0:
+            raise ValueError("arrival_gap_minutes cannot be negative")
 
     @property
     def time_coefficient(self) -> float:
         return 60.0 / self.value_of_time_s_per_eur
+
+    def for_income(self, income_per_year: float) -> ChoiceConfig:
+        """Копия конфига с VOT по доходу конкретного человека.
+
+        В игре ценность времени разная у каждого жителя: VOT = доход / 1860
+        часов. Здесь доход передаётся явно, потому что в планировщике сеть
+        общая, а не персональная.
+        """
+        return replace(
+            self,
+            value_of_time_s_per_eur=max(
+                1e-6, game_rules.value_of_time_s_per_eur(income_per_year)
+            ),
+        )
 
     def transfer_burden_minutes(self, transfers: int) -> float:
         if transfers <= 0:
@@ -123,6 +144,7 @@ class ChoiceConfig:
             + self.transit_stage_egress_weight * max(0.0, egress_walk_min)
             + self.transit_stage_transfer_walk_weight * max(0.0, transfer_walk_min)
             + self.transfer_burden_minutes(transfers)
+            + self.arrival_gap_minutes * transfers
             + self.transit_bias_minutes
         )
 
@@ -192,8 +214,17 @@ def utilities(
     bike = config.bike_constant - coefficient * bike_generalized_minutes
 
     walk_generalized_minutes = config.walk_circuity * walk_time_min
+    car_distance_m = max(0.0, car_distance_km) * 1000.0
+    # Короткая поездка неудобна: заводить, разгоняться, искать парковку, -
+    # поэтому время вождения умножается на коэффициент из игры. При
+    # неизвестном расстоянии коэффициент не применяется: ноль километров
+    # означает «нет данных», а не «поездка нулевой длины».
+    if config.min_sensible_driving_m > 0.0 and car_distance_m > 0.0:
+        short_drive_multiplier = game_rules.short_drive_penalty(car_distance_m)
+    else:
+        short_drive_multiplier = 1.0
     car_generalized_minutes = (
-        config.car_circuity * car_time_min
+        config.car_circuity * car_time_min * short_drive_multiplier
         + config.car_parking_minutes
         + (
             car_distance_km * config.car_cost_per_km_eur

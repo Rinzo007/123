@@ -6,7 +6,17 @@
  * follow Ha, Lee & Ko (2020); walk/wait multipliers follow Wardman et al.
  * (2026). Literals mirror `model.json` and are asserted against it by
  * `tests/test_choice_parity.py`, so a model change cannot silently diverge.
+ *
+ * Short-drive penalty and the per-transfer arrival gap come from the
+ * Subway Builder parse in `game-rules.ts`, which is the port of
+ * `game_rules.py`.
  */
+
+import {
+  GAME_ARRIVAL_GAP_S,
+  GAME_MIN_SENSIBLE_DRIVING_DISTANCE_M,
+  shortDrivePenalty,
+} from "./game-rules.js";
 
 /** Value of time: `model.json` → `vot_s_per_eur`. */
 export const REFERENCE_VOT_S_PER_EUR = 360;
@@ -65,6 +75,8 @@ export interface ChoiceConfig {
   bikeSpeedKph: number;
   noCarShare: number;
   noCarEffectiveness: number;
+  minSensibleDrivingM: number;
+  arrivalGapMinutes: number;
 }
 
 export const DEFAULT_CHOICE_CONFIG: ChoiceConfig = {
@@ -96,6 +108,8 @@ export const DEFAULT_CHOICE_CONFIG: ChoiceConfig = {
   bikeSpeedKph: REFERENCE_TWO_WHEEL_SPEED_KPH,
   noCarShare: REFERENCE_NO_CAR_SHARE,
   noCarEffectiveness: REFERENCE_NO_CAR_EFFECTIVENESS,
+  minSensibleDrivingM: GAME_MIN_SENSIBLE_DRIVING_DISTANCE_M,
+  arrivalGapMinutes: GAME_ARRIVAL_GAP_S / 60,
 };
 
 /** Mirrors `ChoiceConfig.__post_init__`: throws instead of clamping silently. */
@@ -137,6 +151,8 @@ export function validateChoiceConfig(config: ChoiceConfig): void {
   unit("no_car_share", config.noCarShare);
   unit("no_car_effectiveness", config.noCarEffectiveness);
   unit("two_wheel_share", config.twoWheelShare);
+  nonNegative("min_sensible_driving_m", config.minSensibleDrivingM);
+  nonNegative("arrival_gap_minutes", config.arrivalGapMinutes);
 }
 
 function timeCoefficient(config: ChoiceConfig): number {
@@ -175,6 +191,7 @@ export function transitGeneralizedMinutes(
     + config.transitStageEgressWeight * Math.max(0, input.egressWalkMin ?? 0)
     + config.transitStageTransferWalkWeight * Math.max(0, input.transferWalkMin ?? 0)
     + transferBurdenMinutes(config, input.transfers ?? 0)
+    + config.arrivalGapMinutes * (input.transfers ?? 0)
     + config.transitBiasMinutes
   );
 }
@@ -237,8 +254,16 @@ export function utilities(input: UtilitiesInput, config: ChoiceConfig = DEFAULT_
 
   const walkGeneralizedMinutes = config.walkCircuity * input.walkTimeMin;
   const carDistanceKm = input.carDistanceKm ?? 0;
+  // Короткая поездка неудобна: заводить, разгоняться, искать парковку, -
+  // поэтому время вождения умножается на коэффициент из игры. При
+  // неизвестном расстоянии коэффициент не применяется: ноль километров
+  // означает «нет данных», а не «поездка нулевой длины».
+  const carDistanceM = carDistanceKm * 1000;
+  const shortDriveMultiplier = config.minSensibleDrivingM > 0 && carDistanceM > 0
+    ? shortDrivePenalty(carDistanceM)
+    : 1;
   const carGeneralizedMinutes =
-    config.carCircuity * input.carTimeMin
+    config.carCircuity * input.carTimeMin * shortDriveMultiplier
     + config.carParkingMinutes
     + (carDistanceKm * config.carCostPerKmEur + config.carParkingEur)
     * config.valueOfTimeSPerEur
