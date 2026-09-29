@@ -103,6 +103,79 @@ def anchor_to_control(
     )
 
 
+def jobs_from_workplace_floor_area(
+    workplace_area_by_zone: dict[str, float],
+    population_total: float,
+    *,
+    fallback_shape: dict[str, float] | None = None,
+) -> tuple[dict[str, float], AnchoringReport]:
+    """Рабочие места по рабочим зданиям, с итогом равным населению.
+
+    Так делает автор киевского бандла: сумма residents равна сумме jobs, и
+    обеспечивает это конструкция, а не совпадение. Разный профиль у 59 точек
+    из 29 373 означает, что стороны распределены независимо, но сведён общий
+    итог. Рынок труда получается закрытым, и гравитация сохраняет баланс
+    productions и attractions.
+
+    Если рабочих зданий нет, форма берётся из `fallback_shape` (прокси мест),
+    а при пустом и его - население просто делится поровну. Какой путь
+    сработал, видно в отчёте: молчаливый ноль хуже любой заглушки.
+    """
+    if population_total < 0:
+        raise ValueError("population_total must be non-negative")
+    shape = {zone: value for zone, value in workplace_area_by_zone.items() if value > 0}
+    method = "closed_labour_market_by_workplace_floor_area"
+    if not shape and fallback_shape:
+        shape = {zone: value for zone, value in fallback_shape.items() if value > 0}
+        method = "closed_labour_market_by_place_proxy"
+
+    if population_total <= 0:
+        # Уравнивать нечего: населения нет ни от зданий, ни от растра. Тогда
+        # работа берётся из прокси мест как есть, и метод это фиксирует -
+        # закрытый рынок труда здесь просто не применим.
+        jobs = dict(shape)
+        return jobs, AnchoringReport(
+            method="place_proxy_magnitude_no_population",
+            total_estimated=sum(jobs.values()),
+            total_control=0.0,
+            factor=0.0,
+            zones_scaled=sum(1 for value in jobs.values() if value > 0),
+            zones_zero_estimate_but_control=(),
+            zones_zero_control_but_estimate=(),
+        )
+
+    total_area = sum(shape.values())
+    if total_area <= 0:
+        fallback = {
+            zone: population_total / len(workplace_area_by_zone)
+            for zone in workplace_area_by_zone
+        } if workplace_area_by_zone else {}
+        return fallback, AnchoringReport(
+            method="no_workplace_buildings_fallback",
+            total_estimated=0.0,
+            total_control=population_total,
+            factor=0.0,
+            zones_scaled=len(fallback),
+            zones_zero_estimate_but_control=(),
+            zones_zero_control_but_estimate=(),
+        )
+
+    jobs = {
+        zone: population_total * area / total_area for zone, area in shape.items()
+    }
+    return jobs, AnchoringReport(
+        method=method,
+        total_estimated=total_area,
+        total_control=population_total,
+        factor=population_total / total_area,
+        zones_scaled=len(jobs),
+        zones_zero_estimate_but_control=(),
+        zones_zero_control_but_estimate=tuple(
+            zone for zone in workplace_area_by_zone if zone not in jobs
+        ),
+    )
+
+
 def anchor_jobs_to_control(
     estimates: dict[str, float],
     controls: tuple[ZoneControl, ...],

@@ -117,7 +117,9 @@ def test_zones_take_population_from_buildings():
     total = sum(zone.population for zone in zones)
     expected = 3 * 1000.0 * 4.0 / FLOOR_AREA_PER_PERSON_M2
     assert total == pytest.approx(expected, rel=1e-6)
-    assert total > sum(zone.jobs for zone in zones)
+    # Занятость уравнивается с населением (закрытый рынок труда, как в
+    # киевском эталоне), а не берётся из прокси мест.
+    assert sum(zone.jobs for zone in zones) == pytest.approx(total, rel=1e-6)
 
 
 def test_zones_fall_back_to_places_without_buildings():
