@@ -11,7 +11,7 @@ from .overture import (
     OvertureTransportationProvider,
     OverturePlacesProvider,
 )
-from .projection import project_roads_wgs84, project_stops_wgs84
+from .projection import project_roads_wgs84, project_stops_wgs84, project_wgs84_point
 from .road import RoadGraph
 from .road_builder import RoadGraphBuildResult, build_topological_road_graph
 from .snap import StopSnap, snap_stops_to_road_graph
@@ -129,7 +129,20 @@ def build_overture_network(
         origin_lon=origin_lon,
         origin_lat=origin_lat,
     )
-    graph_build = build_topological_road_graph(roads_metric)
+    graph_build = build_topological_road_graph(
+        roads_metric,
+        # Дороги проецированы в локальные метры, поэтому позиции коннекторов
+        # обязаны быть в тех же единицах, иначе узел встал бы на другой конец
+        # города. Система координат дорог и коннекторов обязана совпадать.
+        connector_locations={
+            record.id: project_wgs84_point(
+                record.location,
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+            )
+            for record in connectors
+        },
+    )
     stop_snaps = snap_stops_to_road_graph(
         stops_metric,
         graph_build.graph,

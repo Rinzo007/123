@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import time
+
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Lock
 from math import asin, cos, radians, sin, sqrt
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from .data import (
     ConnectorRecord,
@@ -150,7 +156,7 @@ class OverturePlacesProvider:
                 taxonomy.primary AS taxonomy_primary,
                 taxonomy.hierarchy AS taxonomy_hierarchy,
                 confidence
-            FROM read_parquet('{_sql_quote(self.source.places())}')
+            FROM read_parquet({_parquet_source(self.source.places(), release=self.source.release, overture_type='place', bbox=self.bbox)})
             WHERE TRUE
               {category_filter}
               {bbox_filter}
@@ -230,7 +236,7 @@ class OvertureUrbanProvider:
                 subtype,
                 class,
                 is_underground
-            FROM read_parquet('{_sql_quote(self.source.buildings())}')
+            FROM read_parquet({_parquet_source(self.source.buildings(), release=self.source.release, overture_type='building', bbox=self.bbox)})
             WHERE TRUE
               {_bbox_sql(self.bbox)}
         """
@@ -242,7 +248,7 @@ class OvertureUrbanProvider:
                 ST_AsGeoJSON(geometry) AS geojson,
                 class,
                 subtype
-            FROM read_parquet('{_sql_quote(self.source.water())}')
+            FROM read_parquet({_parquet_source(self.source.water(), release=self.source.release, overture_type='water', bbox=self.bbox)})
             WHERE TRUE
               {_bbox_sql(self.bbox)}
         """
@@ -348,7 +354,16 @@ class OvertureTransportationProvider:
     def load_graph(self):
         from .road_builder import build_topological_road_graph
 
-        return build_topological_road_graph(self.load_roads())
+        roads = self.load_roads()
+        # Позиции коннекторов авторитетны; без них граф не собирается, потому
+        # что интерполяция по двум сегментам одного коннектора расходится.
+        connectors = {
+            record.id: record.location
+            for record in OvertureConnectorProvider(
+                source=self.source, bbox=self.bbox
+            ).load_connectors()
+        }
+        return build_topological_road_graph(roads, connector_locations=connectors)
 
     def _sql(self) -> str:
         classes = ", ".join(
@@ -368,7 +383,7 @@ class OvertureTransportationProvider:
                 access_restrictions,
                 speed_limits,
                 prohibited_transitions
-            FROM read_parquet('{_sql_quote(self.source.transportation_segments())}')
+            FROM read_parquet({_parquet_source(self.source.transportation_segments(), release=self.source.release, overture_type='segment', bbox=self.bbox)})
             WHERE subtype = 'road'
               AND (
                 class IN ({classes})
@@ -398,30 +413,23 @@ class OvertureConnectorProvider:
             if not geojson:
                 continue
             geometry = json.loads(geojson)
-            coordinates = geometry.get("coordinates") or []
-            if len(coordinates) < 2:
+            if not isinstance(geometry, dict):
                 continue
-            connectors.append(
-                ConnectorRecord(
-                    id=str(connector_id),
-                    location=Point(
-                        float(coordinates[0]),
-                        float(coordinates[1]),
-                    ),
-                )
-            )
+            lon, lat = _first_position(geometry)
+            if lon is None or lat is None:
+                continue
+            connectors.append(ConnectorRecord(id=str(connector_id), location=Point(lon, lat)))
 
         return tuple(connectors)
 
     def _sql(self) -> str:
-        bbox_filter = _bbox_sql(self.bbox)
         return f"""
             SELECT
                 id,
                 ST_AsGeoJSON(geometry) AS geojson
-            FROM read_parquet('{_sql_quote(self.source.transportation_connectors())}')
+            FROM read_parquet({_parquet_source(self.source.transportation_connectors(), release=self.source.release, overture_type='connector', bbox=self.bbox)})
             WHERE TRUE
-              {bbox_filter}
+              {_bbox_sql(_dilated(self.bbox))}
         """
 
 
@@ -490,7 +498,7 @@ class OvertureTransitProvider:
                 ST_AsGeoJSON(geometry) AS geojson,
                 names.primary AS name,
                 class
-            FROM read_parquet('{_sql_quote(self.source.infrastructure())}')
+            FROM read_parquet({_parquet_source(self.source.infrastructure(), release=self.source.release, overture_type='infrastructure', bbox=self.bbox)})
             WHERE subtype = 'transit'
               AND class IN ({classes})
               {bbox_filter}
@@ -536,9 +544,36 @@ def _query_duckdb(sql: str):
             connection.execute("INSTALL spatial")
             connection.execute("LOAD spatial")
         connection.execute("SET s3_region='us-west-2'")
+        # Явный S3-секрет обязателен: без него httpfs ходит в бакет анонимно и
+        # S3 периодически обрывает соединение с "SSL connect error" на середине
+        # чтения parquet. С секретом идёт штатный S3-протокол без редиректов.
+        connection.execute(
+            "CREATE SECRET IF NOT EXISTS overture_s3 (TYPE s3, REGION 'us-west-2')"
+        )
         return connection.execute(sql).fetchall()
     finally:
         connection.close()
+
+
+# Коннекторы читаются по расширенной области. Коннектор, на который ссылается
+# сегмент внутри bbox, регулярно лежит за его границей: на участке
+# 4x2 км в Берлине так теряется около тысячи из десяти тысяч нужных записей, а
+# без их позиции граф не собирается (узел не на чем поставить). Расширение на
+# ~1.1 км даёт полное покрытие на проверенном участке и не требует ни
+# гигантского IN по тысячам id, ни повторных сканов parquet.
+_CONNECTOR_BBOX_MARGIN_DEG = 0.01
+
+
+def _dilated(bbox: tuple[float, float, float, float] | None) -> tuple[float, float, float, float] | None:
+    if bbox is None:
+        return None
+    south, west, north, east = bbox
+    margin = _CONNECTOR_BBOX_MARGIN_DEG
+    # Округление убирает двоичный шум вида 39.309999999999995 из SQL.
+    return (
+        round(south - margin, 6), round(west - margin, 6),
+        round(north + margin, 6), round(east + margin, 6),
+    )
 
 
 def _bbox_sql(
@@ -557,6 +592,125 @@ def _bbox_sql(
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+# --- Выбор part-файлов через STAC ---------------------------------------
+#
+# Overture разложен по part-файлам без географического partitioning, поэтому
+# чтение по glob `*` заставляет DuckDB открыть и опросить все ~128 частей
+# темы. На замере в Тамбове это 175 с и сетевые сбои на середине чтения, тогда
+# как STAC-индекс прямо говорит, что bbox пересекает ровно один файл: 7.5 с при
+# том же результате. Индекс кэшируется на диске, а любая неудача молча
+# возвращает None — тогда остаётся прежнее поведение через glob.
+_STAC_HOSTS = (
+    "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/stac",
+    "https://overturemaps-extras-us-west-2.s3.amazonaws.com/stac",
+    "https://s3.us-west-2.amazonaws.com/overturemaps-extras-us-west-2/stac",
+    "https://stac.overturemaps.org",
+)
+_STAC_LOCK = Lock()
+
+
+def _stac_index_path(release: str) -> Path | None:
+    """Локальная копия STAC-индекса релиза; None, если он недоступен."""
+    cache_dir = Path(tempfile.gettempdir()) / "transit_planner_overture"
+    target = cache_dir / f"collections-{release}.parquet"
+    if target.exists() and target.stat().st_size > 0:
+        return target
+
+    with _STAC_LOCK:
+        if target.exists() and target.stat().st_size > 0:
+            return target
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+
+        for host in _STAC_HOSTS:
+            url = f"{host}/{release}/collections.parquet"
+            for attempt in range(3):
+                try:
+                    request = Request(url, headers={"User-Agent": "transit-planner"})
+                    with urlopen(request, timeout=120) as response:
+                        payload = response.read()
+                    break
+                except (OSError, HTTPError, URLError):
+                    if attempt == 2:
+                        payload = None
+                    else:
+                        time.sleep(2.0 * (attempt + 1))
+            if payload:
+                # Пишем через временный файл: прерванная закачка не должна
+                # оставить индекс, который выглядит рабочим.
+                staging = target.with_suffix(".part")
+                try:
+                    staging.write_bytes(payload)
+                    staging.replace(target)
+                except OSError:
+                    return None
+                return target
+    return None
+
+
+def _stac_part_files(
+    release: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float] | None,
+) -> list[str] | None:
+    """part-файлы, пересекающие bbox, либо None, если индекс недоступен."""
+    if bbox is None:
+        return None
+    index_path = _stac_index_path(release)
+    if index_path is None:
+        return None
+
+    south, west, north, east = bbox
+    sql = f"""
+        SELECT assets
+        FROM read_parquet('{_sql_quote(str(index_path))}')
+        WHERE collection = '{_sql_quote(overture_type)}'
+          AND type = 'Feature'
+          AND bbox.xmin < {east}
+          AND bbox.xmax > {west}
+          AND bbox.ymin < {north}
+          AND bbox.ymax > {south}
+    """
+    try:
+        rows = _query_duckdb(sql)
+    except Exception:
+        return None
+
+    hrefs: list[str] = []
+    for (assets,) in rows:
+        if not assets:
+            continue
+        entry = None
+        if isinstance(assets, dict):
+            entry = assets.get("aws") or assets.get("s3") or next(
+                iter(assets.values()), None
+            )
+        if not isinstance(entry, dict):
+            continue
+        href = entry.get("href")
+        if isinstance(href, str) and href:
+            hrefs.append(href)
+    return hrefs or None
+
+
+def _parquet_source(
+    default_glob: str,
+    *,
+    release: str,
+    overture_type: str,
+    bbox: tuple[float, float, float, float] | None,
+) -> str:
+    """Аргумент read_parquet: конкретные файлы из STAC либо прежний glob."""
+    parts = _stac_part_files(release, overture_type, bbox)
+    if not parts:
+        return _sql_quote(default_glob)
+    # В списочной форме каждый элемент должен быть строковым литералом.
+    quoted = ", ".join("'" + _sql_quote(part) + "'" for part in parts)
+    return "[" + quoted + "]"
 
 
 def _parse_prohibited_transitions(

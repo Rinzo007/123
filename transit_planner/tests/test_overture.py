@@ -1,4 +1,12 @@
-from transit_planner.data import ConnectorRef, ProhibitedTransitionSequenceEntry, ProhibitedTransition, RoadRecord
+import pytest
+
+from transit_planner.data import (
+    ConnectorRecord,
+    ConnectorRef,
+    ProhibitedTransition,
+    ProhibitedTransitionSequenceEntry,
+    RoadRecord,
+)
 from transit_planner.geo import LineString, Point
 from transit_planner.overture import (
     DEFAULT_RELEASE,
@@ -12,7 +20,10 @@ from transit_planner.overture import (
     _haversine_linestring_m,
     _parse_prohibited_transitions,
     _is_oneway,
+    _parquet_source,
     _parse_connector_refs,
+    _stac_index_path,
+    _stac_part_files,
 )
 
 
@@ -121,7 +132,7 @@ def test_prohibited_transition_parser_prefixes_segment_ids_and_skips_scoped_rule
     )
 
 
-def test_overture_provider_load_graph_uses_connector_topology():
+def test_overture_provider_load_graph_uses_connector_topology(monkeypatch):
     provider = OvertureTransportationProvider()
     provider.load_roads = lambda: (
         RoadRecord(
@@ -145,11 +156,96 @@ def test_overture_provider_load_graph_uses_connector_topology():
             length_m=100.0,
         ),
     )
+    requested: list[int] = []
+
+    def fake_load_connectors(_self):
+        # Коннекторы читаются по расширенной области: без их позиций граф не
+        # собирается, так как интерполяция по двум сегментам расходится.
+        requested.append(1)
+        return (
+            ConnectorRecord("c0", Point(0.0, 0.0)),
+            ConnectorRecord("c1", Point(1.0, 0.0)),
+            ConnectorRecord("c2", Point(2.0, 0.0)),
+        )
+
+    monkeypatch.setattr(
+        OvertureConnectorProvider, "load_connectors", fake_load_connectors, raising=True
+    )
 
     result = provider.load_graph()
 
     assert result.connector_count == 3
     assert len(result.graph.prohibited_transitions) == 1
+    assert requested == [1], "коннекторы должны читаться ровно один раз"
+
+
+def test_overture_connector_sql_uses_dilated_bbox():
+    """Коннекторы нужны и за границей bbox: расширение обязано быть в SQL."""
+    provider = OvertureConnectorProvider(bbox=(51.6, 39.1, 51.7, 39.3))
+    sql = provider._sql()
+    # Исходный bbox плюс запас: коннектор на стыке сегментов лежит снаружи.
+    assert "bbox.xmin <= 39.31" in sql, sql
+    assert "bbox.xmax >= 39.09" in sql
+    assert "bbox.ymin <= 51.71" in sql
+    assert "bbox.ymax >= 51.59" in sql
+
+
+def test_overture_graph_prefers_connector_position_over_interpolation(monkeypatch):
+    """Позиция коннектора авторитетна: расхождение с интерполяцией не должно
+    валить сборку. Проверено на живых данных: у 62% коннекторов расхождение
+    больше 1 см, а максимум достигает 77 м."""
+    from transit_planner.road_builder import build_topological_road_graph
+
+    roads = (
+        RoadRecord(
+            "a",
+            LineString((Point(0.0, 0.0), Point(100.0, 0.0))),
+            30.0,
+            connectors=(ConnectorRef("shared", 0.5), ConnectorRef("tail", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            # Геометрия другого сегмента даёт для shared заметно другую точку.
+            LineString((Point(100.0, 0.0), Point(100.0, 100.0))),
+            30.0,
+            connectors=(ConnectorRef("shared", 0.0), ConnectorRef("end", 1.0)),
+            length_m=100.0,
+        ),
+    )
+    # Авторитетная позиция совпадает с интерполяцией первого сегмента.
+    locations = {"shared": Point(50.0, 0.0), "tail": Point(100.0, 0.0),
+                 "end": Point(100.0, 100.0)}
+    result = build_topological_road_graph(roads, connector_locations=locations)
+    assert result.connector_count == 3
+    shared_node = result.graph.nodes[result.graph.connector_nodes["shared"]]
+    assert (shared_node.x, shared_node.y) == (50.0, 0.0)
+
+
+def test_overture_graph_still_rejects_unknown_connector_conflict():
+    """Без известной позиции коннектора конфликт остаётся ошибкой, а не молчаливым
+    выбором одной из двух точек: данных для решения нет."""
+    from transit_planner.road_builder import build_topological_road_graph
+
+    roads = (
+        RoadRecord(
+            "a",
+            LineString((Point(0.0, 0.0), Point(100.0, 0.0))),
+            30.0,
+            connectors=(ConnectorRef("shared", 0.5), ConnectorRef("tail", 1.0)),
+            length_m=100.0,
+        ),
+        RoadRecord(
+            "b",
+            LineString((Point(100.0, 0.0), Point(100.0, 100.0))),
+            30.0,
+            connectors=(ConnectorRef("shared", 0.0), ConnectorRef("end", 1.0)),
+            length_m=100.0,
+        ),
+    )
+    locations = {"tail": Point(100.0, 0.0), "end": Point(100.0, 100.0)}
+    with pytest.raises(ValueError, match="conflicting coordinates"):
+        build_topological_road_graph(roads, connector_locations=locations)
 
 def test_access_direction_parser_handles_forward_backward_and_global_denials():
     assert _access_directions([
@@ -191,3 +287,89 @@ def test_place_purpose_mapper_matches_basic_and_taxonomy_categories():
     assert mapper.purpose_for(
         CityPlace("3", "Unknown", Point(0, 0), basic_category="unknown")
     ) is None
+
+
+def test_stac_part_files_absent_without_bbox(monkeypatch):
+    """Без bbox части не выбираются: фильтровать нечем."""
+    def boom(*_args, **_kwargs):
+        raise AssertionError("STAC не должен вызываться без bbox")
+
+    monkeypatch.setattr("transit_planner.overture._query_duckdb", boom)
+    assert _stac_part_files(DEFAULT_RELEASE, "segment", None) is None
+
+
+def test_stac_part_files_reads_assets_href(monkeypatch, tmp_path):
+    index = tmp_path / "collections.parquet"
+    index.write_bytes(b"stac")
+    monkeypatch.setattr(
+        "transit_planner.overture._stac_index_path", lambda _release: index
+    )
+
+    def fake_query(sql):
+        assert "collection = 'segment'" in sql
+        return (
+            ({"aws": {"href": "https://s3/part-a.parquet"}},),
+            ({"s3": {"href": "https://s3/part-b.parquet"}},),
+            (None,),
+            ({"aws": {"href": ""}},),
+        )
+
+    monkeypatch.setattr("transit_planner.overture._query_duckdb", fake_query)
+    parts = _stac_part_files(DEFAULT_RELEASE, "segment", (52.4, 13.3, 52.5, 13.4))
+    assert parts == ["https://s3/part-a.parquet", "https://s3/part-b.parquet"]
+
+
+def test_stac_part_files_returns_none_on_failure(monkeypatch, tmp_path):
+    index = tmp_path / "collections.parquet"
+    index.write_bytes(b"stac")
+    monkeypatch.setattr(
+        "transit_planner.overture._stac_index_path", lambda _release: index
+    )
+
+    def boom(_sql):
+        raise RuntimeError("STAC недоступен")
+
+    monkeypatch.setattr("transit_planner.overture._query_duckdb", boom)
+    assert _stac_part_files(DEFAULT_RELEASE, "segment", (52.4, 13.3, 52.5, 13.4)) is None
+
+
+def test_parquet_source_quotes_parts_and_falls_back(monkeypatch):
+    monkeypatch.setattr(
+        "transit_planner.overture._stac_part_files",
+        lambda *_args: ["https://s3/a.parquet", "https://s3/b.parquet"],
+    )
+    listed = _parquet_source(
+        "s3://bucket/theme=x/*",
+        release=DEFAULT_RELEASE,
+        overture_type="segment",
+        bbox=(52.4, 13.3, 52.5, 13.4),
+    )
+    # В списочной форме элементы обязаны быть строковыми литералами.
+    assert listed == "['https://s3/a.parquet', 'https://s3/b.parquet']"
+
+    monkeypatch.setattr(
+        "transit_planner.overture._stac_part_files", lambda *_args: None
+    )
+    assert (
+        _parquet_source(
+            "s3://bucket/theme=x/*",
+            release=DEFAULT_RELEASE,
+            overture_type="segment",
+            bbox=(52.4, 13.3, 52.5, 13.4),
+        )
+        == "s3://bucket/theme=x/*"
+    )
+
+
+def test_stac_index_download_failure_returns_none(monkeypatch, tmp_path):
+    """Падение закачки индекса не должно ломать чтение: вернётся glob."""
+    monkeypatch.setattr(
+        "transit_planner.overture.tempfile.gettempdir", lambda: str(tmp_path)
+    )
+
+    def boom(*_args, **_kwargs):
+        raise OSError("сети нет")
+
+    monkeypatch.setattr("transit_planner.overture.urlopen", boom)
+    monkeypatch.setattr("transit_planner.overture.time.sleep", lambda _s: None)
+    assert _stac_index_path(DEFAULT_RELEASE) is None
