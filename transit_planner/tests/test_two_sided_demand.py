@@ -1,5 +1,8 @@
 from transit_planner.city import DemandZone
-from transit_planner.city_demand import build_city_temporal_demand, build_city_temporal_demand_two_sided
+from transit_planner.reference_demand import (
+    build_temporal_demand,
+    build_temporal_demand_two_sided,
+)
 
 
 def make_zones() -> tuple[DemandZone, ...]:
@@ -11,16 +14,16 @@ def make_zones() -> tuple[DemandZone, ...]:
 
 def test_two_sided_demand_preserves_total_trips() -> None:
     zones = make_zones()
-    base = build_city_temporal_demand(zones)
-    two_sided = build_city_temporal_demand_two_sided(zones)
+    base = build_temporal_demand(zones)
+    two_sided = build_temporal_demand_two_sided(zones)
 
     assert two_sided.total_trips == base.total_trips
 
 
 def test_two_sided_demand_shifts_volume_to_dominant_direction() -> None:
     zones = make_zones()
-    base = build_city_temporal_demand(zones)
-    two_sided = build_city_temporal_demand_two_sided(zones)
+    base = build_temporal_demand(zones)
+    two_sided = build_temporal_demand_two_sided(zones)
 
     base_am = sum(pair.trips for pair in base.by_period("am"))
     two_sided_am = sum(pair.trips for pair in two_sided.by_period("am"))

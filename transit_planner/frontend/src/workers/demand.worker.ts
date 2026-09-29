@@ -55,9 +55,6 @@ export interface DemandWorkerRequest {
   periods: DemandPeriodInput;
   originLon: number;
   originLat: number;
-  tripRate: number;
-  decay: number;
-  speedKph: number;
 }
 
 export interface DemandWorkerResult {
@@ -162,9 +159,9 @@ self.onmessage = (event: MessageEvent<DemandWorkerMessage>) => {
   const purposes = toPurposeLayers(input.purposes);
   const periods = toPeriods(input.periods);
 
-  const daily = buildDailyDemand(zones, purposes, input.tripRate, input.decay, input.speedKph);
+  const daily = buildDailyDemand(zones, purposes);
   const referenceLayers = buildReferenceDemandLayers(zones, places, purposes, input.originLon, input.originLat);
-  const temporal = buildTemporalDemand(zones, periods, purposes, input.tripRate, input.decay, input.speedKph);
+  const temporal = buildTemporalDemand(zones, periods, purposes);
 
   const zoneIndex = new Map(zones.map((zone, index) => [zone.id, index]));
   const odOrigin: number[] = [];

@@ -82,7 +82,3 @@ export const REFERENCE_PURPOSES: readonly ReferencePurposeRow[] = [
 
 /** `model.json` → `mobility`.no_car_share: WorldPop zones carry no such attribute. */
 export const REFERENCE_MOBILITY_NO_CAR_SHARE = 0.35;
-/** Gravity parameters of CityDemandConfig, mirrored for the worker call. */
-export const CITY_DEMAND_TRIP_RATE = 0.12;
-export const CITY_DEMAND_DECAY = 0.08;
-export const CITY_DEMAND_REFERENCE_SPEED_KPH = 30.0;

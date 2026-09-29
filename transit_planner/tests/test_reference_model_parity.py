@@ -21,12 +21,11 @@ TSC_JS = SRC.parent / "node_modules" / "typescript" / "lib" / "tsc.js"
 MODEL = ROOT / "src" / "transit_planner" / "model.json"
 
 PROBE = """
-import { REFERENCE_PERIODS, REFERENCE_PURPOSES, CITY_DEMAND_TRIP_RATE, CITY_DEMAND_DECAY, CITY_DEMAND_REFERENCE_SPEED_KPH } from "./reference-model.js";
+import { REFERENCE_PERIODS, REFERENCE_PURPOSES } from "./reference-model.js";
 
 process.stdout.write(JSON.stringify({
   periods: REFERENCE_PERIODS,
   purposes: REFERENCE_PURPOSES,
-  gravity: [CITY_DEMAND_TRIP_RATE, CITY_DEMAND_DECAY, CITY_DEMAND_REFERENCE_SPEED_KPH],
 }));
 """
 
@@ -107,16 +106,30 @@ def test_purposes_match_model_json(tmp_path: Path) -> None:
     assert actual == expected, "цели в reference-model.ts разошлись с model.json"
 
 
-def test_gravity_parameters_match_city_demand_config(tmp_path: Path) -> None:
-    ts = _ts_model(tmp_path)
-    if ts is None:
-        pytest.skip("tsc недоступен")
-    sys.path.insert(0, str(ROOT / "src"))
-    from transit_planner.city_demand import CityDemandConfig
+def test_gravity_parameters_match_python_defaults() -> None:
+    """Числа гравитации не должны разъезжаться между TS и Python.
 
-    config = CityDemandConfig()
-    assert ts["gravity"] == [
-        config.trip_rate,
-        config.decay,
-        config.reference_speed_kph,
-    ], "gravity-параметры в reference-model.ts разошлись с CityDemandConfig"
+    Раньше значения дублировались: экспортированные `CITY_DEMAND_*` в
+    reference-model.ts плюс дефолты функций в demand-model.ts, и паритет
+    держался на сверке константы с конфигом Python. Теперь определение одно
+    на язык - дефолты аргументов функции, - поэтому сверяются сами литералы
+    в исходнике TS с дефолтами сигнатуры Python.
+    """
+    import re
+
+    sys.path.insert(0, str(ROOT / "src"))
+    from inspect import signature
+
+    from transit_planner.reference_demand import build_temporal_demand
+
+    source = (ROOT / "frontend" / "src" / "demand-model.ts").read_text(encoding="utf-8")
+    params = signature(build_temporal_demand).parameters
+
+    def ts_default(name: str, fallback: str) -> str:
+        match = re.search(rf"{name} = ([0-9.]+)", source)
+        assert match is not None, f"{name} не найден в demand-model.ts"
+        return match.group(1)
+
+    assert float(ts_default("tripRate", "0.12")) == params["trip_rate"].default
+    assert float(ts_default("decay", "0.08")) == params["decay"].default
+    assert float(ts_default("speedKph", "30")) == params["speed_kph"].default

@@ -2,10 +2,7 @@ import type { FeatureCollection } from "../geojson";
 import type { ReferenceDemandResponse } from "../api";
 import { fromLocalMeters, toLocalMeters } from "../projection";
 import {
-  CITY_DEMAND_DECAY,
-  CITY_DEMAND_REFERENCE_SPEED_KPH,
   REFERENCE_MOBILITY_NO_CAR_SHARE,
-  CITY_DEMAND_TRIP_RATE,
   REFERENCE_PERIODS,
   REFERENCE_PURPOSES,
 } from "../reference-model";
@@ -27,9 +24,6 @@ export interface DemandWorkerRequestInput {
   periods: DemandPeriodInput;
   originLon: number;
   originLat: number;
-  tripRate: number;
-  decay: number;
-  speedKph: number;
 }
 
 let requestId = 0;
@@ -196,9 +190,6 @@ export function buildReferenceDemand(
       periods: input.periods,
       originLon: input.originLon,
       originLat: input.originLat,
-      tripRate: input.tripRate,
-      decay: input.decay,
-      speedKph: input.speedKph,
     };
     worker.postMessage(message, {
       transfer: [
@@ -346,9 +337,6 @@ export interface ReferenceDemandWorkerRequest {
   places: FeatureCollection;
   originLon: number;
   originLat: number;
-  tripRate?: number;
-  decay?: number;
-  speedKph?: number;
 }
 
 /** Assemble the worker request from already loaded city datasets. */
@@ -370,8 +358,5 @@ export function referenceDemandWorkerRequest(
     periods: periodsToWorkerInput(),
     originLon: request.originLon,
     originLat: request.originLat,
-    tripRate: request.tripRate ?? CITY_DEMAND_TRIP_RATE,
-    decay: request.decay ?? CITY_DEMAND_DECAY,
-    speedKph: request.speedKph ?? CITY_DEMAND_REFERENCE_SPEED_KPH,
   };
 }

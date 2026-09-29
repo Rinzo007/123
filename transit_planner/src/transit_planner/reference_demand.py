@@ -21,6 +21,48 @@ _REFERENCE_ATTRACTION_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def enrich_zones_with_places(
+    zones: tuple[DemandZone, ...],
+    places: tuple[CityPlace, ...],
+    *,
+    origin_lon: float | None = None,
+    origin_lat: float | None = None,
+) -> tuple[DemandZone, ...]:
+    """Раскладывает аттракции мест по зонам в локальных метрах.
+
+    Места лежат в WGS84, а зоны - в локальных координатах, поэтому перед
+    сопоставлением точки переводятся в ту же проекцию, что и зоны.
+    """
+    from .places import aggregate_place_attractions
+    from .projection import project_wgs84_point
+
+    if not places:
+        return zones
+    projected = tuple(
+        replace(
+            place,
+            location=project_wgs84_point(
+                place.location,
+                origin_lon=origin_lon if origin_lon is not None else place.location.x,
+                origin_lat=origin_lat if origin_lat is not None else place.location.y,
+            ),
+        )
+        for place in places
+    )
+    return aggregate_place_attractions(zones, projected)
+
+
+def trips_per_resident(trips_per_day: float, population: float) -> float | None:
+    """Поездок на жителя в сутки - величина, которую можно сверить с данными.
+
+    При пустом населении возвращается None, а не ноль: ноль означал бы
+    "поездок нет", тогда как здесь просто нет знаменателя.
+    """
+    if population <= 0:
+        return None
+    return trips_per_day / population
+
+
 def _purpose_attraction(zone: DemandZone, purpose: ReferencePurposeLayer) -> float:
     keys = _REFERENCE_ATTRACTION_ALIASES.get(purpose.key, (purpose.key,))
     return sum(zone.attractions.get(key, 0.0) for key in keys)

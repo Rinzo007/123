@@ -32,7 +32,6 @@ from .building_class import (
     classification_summary,
 )
 from .city import DemandZone
-from .city_demand import CityDemandConfig
 from .geo import Point
 from .population_raster import (
     PopulationRaster,
@@ -719,7 +718,6 @@ def _pack_provenance(
     *,
     source: OvertureSource,
     bbox: tuple[float, float, float, float] | None,
-    demand_config: CityDemandConfig,
     snap_max_distance_m: float,
     zones: tuple[DemandZone, ...],
     demand_rows: list[tuple],
@@ -759,9 +757,6 @@ def _pack_provenance(
         "snapMaxDistanceM": snap_max_distance_m,
         "populationMethod": population_method,
         "floorAreaPerPersonM2": FLOOR_AREA_PER_PERSON_M2,
-        "tripRate": demand_config.trip_rate,
-        "decay": demand_config.decay,
-        "referenceSpeedKph": demand_config.reference_speed_kph,
     }
 
     return {
@@ -840,7 +835,6 @@ def build_overture_city_pack(
     source: OvertureSource = OvertureSource(),
     bbox: tuple[float, float, float, float] | None = None,
     zones: tuple[DemandZone, ...] = (),
-    demand_config: CityDemandConfig = CityDemandConfig(),
     study_area: StudyArea | None = None,
 ) -> tuple[CityPackManifest, dict[str, bytes]]:
     """Собирает пак города.
@@ -937,9 +931,6 @@ def build_overture_city_pack(
     zone_index = {zone.id: index for index, zone in enumerate(zones)}
     demand = build_daily_demand(
         zones,
-        trip_rate=demand_config.trip_rate,
-        decay=demand_config.decay,
-        reference_speed_kph=demand_config.reference_speed_kph,
     )
     purposes = sorted({pair.purpose for pair in demand.pairs})
     purpose_index = {purpose: index for index, purpose in enumerate(purposes)}
@@ -995,7 +986,6 @@ def build_overture_city_pack(
         provenance=_pack_provenance(
             source=source,
             bbox=bbox,
-            demand_config=demand_config,
             snap_max_distance_m=SNAP_MAX_DISTANCE_M,
             zones=zones,
             demand_rows=demand_rows,
@@ -1022,7 +1012,6 @@ def build_and_write_overture_city_pack(
     source: OvertureSource = OvertureSource(),
     bbox: tuple[float, float, float, float] | None = None,
     zones: tuple[DemandZone, ...] = (),
-    demand_config: CityDemandConfig = CityDemandConfig(),
 ) -> CityPackManifest:
     manifest, files = build_overture_city_pack(
         city=city,
@@ -1030,7 +1019,6 @@ def build_and_write_overture_city_pack(
         source=source,
         bbox=bbox,
         zones=zones,
-        demand_config=demand_config,
     )
     return write_city_pack(
         output_dir,

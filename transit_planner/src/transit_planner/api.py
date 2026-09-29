@@ -10,7 +10,6 @@ from .assignment import AssignmentConfig, assign_demand
 from .binary_pack import STREETS_VERSION
 from .calibration import ObservedRouteRidership, calibrate_route_ridership
 from .city import DemandZone
-from .city_demand import CityDemandConfig, build_city_temporal_demand
 from .demand import DemandMatrix, ODPairDemand
 from .demand_streets import build_demand_streets, demand_streets_to_geojson
 from .economics import EconomicsConfig, aggregate_temporal_economics, calculate_temporal_economics
@@ -22,7 +21,8 @@ from .od import GravityParameters, gravity_od
 from .overture import OvertureConnectorProvider, OverturePlacesProvider, OvertureSource, OvertureTransitProvider, OvertureTransportationProvider
 from .overture_network import OvertureNetworkProvider
 from .projection import project_local_point_wgs84
-from .reference_demand import build_reference_demand_layers
+from .reference_demand import (build_reference_demand_layers, build_temporal_demand,
+                                enrich_zones_with_places)
 from .reference_model import REFERENCE_MOBILITY, REFERENCE_PURPOSE_LAYERS, TrackRow
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
@@ -112,7 +112,7 @@ def reference_demand(south:float=Query(...),west:float=Query(...),north:float=Qu
     if not raster:raise HTTPException(503,"TRANSIT_PLANNER_POPULATION_RASTER не настроен")
     b=bounds(south,west,north,east); lon=(west+east)/2 if origin_lon is None else origin_lon; lat=(south+north)/2 if origin_lat is None else origin_lat
     try:
-        z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(release),bbox=b).load_places(); cfg=CityDemandConfig(); od=gravity_od(z,parameters=GravityParameters(speed_kph=cfg.reference_speed_kph,decay=cfg.decay),trip_rate=cfg.trip_rate); layers=build_reference_demand_layers(z,pl,origin_lon=lon,origin_lat=lat); idx={x.id:i for i,x in enumerate(z)}; profiles={x.key:x for x in REFERENCE_PURPOSE_LAYERS}
+        z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(release),bbox=b).load_places(); od=gravity_od(z); layers=build_reference_demand_layers(z,pl,origin_lon=lon,origin_lat=lat); idx={x.id:i for i,x in enumerate(z)}; profiles={x.key:x for x in REFERENCE_PURPOSE_LAYERS}
         pts=[]
         for x in z:q=project_local_point_wgs84(Point(x.centroid_x,x.centroid_y),origin_lon=lon,origin_lat=lat);pts.append([q.x,q.y,max(0,x.population),max(x.jobs,x.population,sum(x.attractions.values()))])
         rows=[[idx[x.origin_zone_id],idx[x.destination_zone_id],x.trips_per_day,max(120,(x.base_time_min or 0)*60)] for x in od.pairs if x.origin_zone_id in idx and x.destination_zone_id in idx]
@@ -124,7 +124,7 @@ def reference_demand(south:float=Query(...),west:float=Query(...),north:float=Qu
                 for j,bz in enumerate(ordered):
                     if i==j:continue
                     dx=a.centroid_x-bz.centroid_x; dy=a.centroid_y-bz.centroid_y
-                    baseline_t[i][j]=max(120.0,(dx*dx+dy*dy)**0.5/(cfg.reference_speed_kph/3.6))
+                    baseline_t[i][j]=max(120.0,(dx*dx+dy*dy)**0.5/(30.0/3.6))
         return {"city":"dynamic","source":"WorldPop + Overture + city demand model","pts":pts,"od":rows,"baselineT":baseline_t,"layers":[{"purpose":x.purpose,"label":x.label,"od":[[idx[o],idx[d],t,max(120,base)] for o,d,t,base in x.od_pairs if o in idx and d in idx],"out":list(profiles[x.purpose].outbound_shares),"ret":list(profiles[x.purpose].return_shares)} for x in layers.layers],"meta":{"zones":len(z),"commuter_od_pairs":len(rows),"purpose_layers":len(layers.layers),"purpose_od_pairs":sum(len(x.od_pairs) for x in layers.layers),"baselineT_included":baseline_t is not None}}
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
 @app.post("/api/v1/demand/streets")
@@ -158,7 +158,7 @@ def city_assignment(p:dict):
     raster=os.getenv("TRANSIT_PLANNER_POPULATION_RASTER")
     if not raster:raise HTTPException(503,"TRANSIT_PLANNER_POPULATION_RASTER не настроен")
     try:
-        n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); raw=p.get("demand_config",{}); dc=CityDemandConfig(trip_rate=float(raw.get("trip_rate",.12)),decay=float(raw.get("decay",.08)),reference_speed_kph=float(raw.get("reference_speed_kph",30))); td=build_city_temporal_demand(z,pl,origin_lon=lon,origin_lat=lat,config=dc); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); ec=econ(p,ac.period_id); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
+        n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); td=build_temporal_demand(enrich_zones_with_places(z,pl,origin_lon=lon,origin_lat=lat)); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); ec=econ(p,ac.period_id); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
     r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"assignment":{"metrics":asdict(r.metrics),"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
 

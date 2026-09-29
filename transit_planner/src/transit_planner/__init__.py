@@ -24,14 +24,6 @@ from .calibration import (
     route_boardings_from_assignment,
 )
 from .city import City, DemandZone
-from .city_demand import (
-    CityDemandConfig,
-    build_city_daily_demand,
-    build_city_demand,
-    build_city_demand_layers,
-    build_city_temporal_demand,
-    build_city_temporal_demand_two_sided,
-)
 from .data import (
     ConnectorRecord,
     ConnectorRef,
@@ -152,12 +144,6 @@ __all__ = [
     "calibrate_route_ridership",
     "route_boardings_from_assignment",
     "City",
-    "CityDemandConfig",
-    "build_city_demand",
-    "build_city_daily_demand",
-    "build_city_demand_layers",
-    "build_city_temporal_demand",
-    "build_city_temporal_demand_two_sided",
     "DemandZone",
     "CityPlace",
     "PlacePurpose",

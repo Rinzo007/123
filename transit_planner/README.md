@@ -83,7 +83,6 @@ Service хранит headway по каждому периоду и может д
 
 ### Настройки городской модели
 
-Функции build_city_demand и build_city_temporal_demand принимают CityDemandConfig с параметрами trip_rate, decay и reference_speed_kph. В API те же параметры доступны через trip_rate, decay, reference_speed_kph, а для городского назначения — внутри demand_config.
 
 При выборе остановки глобальный предел доступа дополнительно ограничивается нормативом access_m соответствующего обслуживающего режима. Для экономики учитывается требуемое число транспортных средств по времени кругового оборота, интервалу и режимным значениям времени стоянки и оборота.
 
@@ -358,7 +357,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 - пресеты обобщённой стоимости: `model.json` хранит Table 5 (walk 1.65 / wait 1.72) как стандарт; бандл Borough Studio цитирует Table 8 того же мета-анализа (walk 1.39 / wait 1.37) — разные таблицы, поэтому оба набора стали именованными пресетами (`journey_choice_table8`, `JOURNEY_CHOICE_TABLE5/TABLE8`), а не заменой. Веса инжектируются в worker, захардкоженных литералов там нет; `tests/test_choice_weights_parity.py` сверяет их с `model.json`.
 - бюджет range-запроса: `RouterConfig.raptor_max_range_departures` (24) — отправления в окне берутся равномерно, а не каждую минуту; без лимита 30-минутное окно давало 31 прогон rRAPTOR на запрос.
 - shared trunk'и: `trunks.detect_shared_trunks()` — пары маршрутов по длинному общему коридору (нормализованное перекрытие по длине, bearing-гейт 20°, минимум общих пар сегментов); только пары, без мега-мерджей. Упрощение относительно игры: вместо turf-буферов и RBush — точное сравнение пар остановок и длин сегментов.
-- двусторонние TOD-множители: `build_temporal_demand_two_sided()` берёт `max(outbound, return)` по периоду вместо усреднения, сумма дневных поездок сохраняется; `build_city_temporal_demand_two_sided()` — обёртка для города.
+- двусторонние TOD-множители: `build_temporal_demand_two_sided()` берёт `max(outbound, return)` по периоду вместо усреднения, сумма дневных поездок сохраняется.
 - сглаживание парка: `fleet_required_at_minute()` (Python) и `fleetRequiredAt()` (TS) — в пределах ±cycle от границы периода линейная интерполяция между соседними периодами вместо ступеньки; паритет в `tests/test_fleet_blending.py`.
 - strict-fit boarding: `SectionLoad.denied_boardings` и `AssignmentMetrics.denied_boardings` — избыток спроса над свободной вместимостью секции считается отдельно, а не теряется молча;
 - Pareto-фильтр альтернатив: `pareto_filter_journeys()` оставляет только недоминируемые на (perceived time, transfers, duration); `shortest_alternatives` применяет его к выходу diversity-цикла. Идентичные метрические кортежи не доминируют друг друга.
