@@ -297,6 +297,7 @@ def _ts_out(tmp_path: Path) -> dict | None:
             str(SRC / "workers" / "routing-kernel.ts"),
             str(SRC / "journey-alternatives.ts"),
             str(SRC / "planning" / "timetable.ts"),
+            str(SRC / "game-rules.ts"),
             str(SRC / "types.ts"),
             "--outDir", str(tmp_path),
             "--rootDir", str(SRC),
@@ -312,6 +313,7 @@ def _ts_out(tmp_path: Path) -> dict | None:
         text = compiled.read_text(encoding="utf-8")
         for target in (
             "./journey-alternatives", "./routing", "./routing-kernel",
+            "./game-rules", "../game-rules",
             "../journey-alternatives", "../types", "../planning/timetable",
         ):
             text = text.replace(f'from "{target}"', f'from "{target}.js"')

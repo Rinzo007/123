@@ -295,6 +295,10 @@ def income_for_person(
     квантиль перерисовывается равномерно на 0.1..0.95 - иначе треть бедных
     слипалась бы в MINIMUM_INCOME из-за расходимости Ф^-1 при q -> 0.
     Отдельно 10% людей получают бонус псевдослучайно, но детерминированно.
+
+    Порядок как в игре: сначала отсечение, потом перерисовка, а бонус идёт
+    в другой ветке и достаётся не тем u. Финальной отсечки после
+    перерисовки в игре нет - она и так лежит внутри допустимого коридора.
     """
     multiplier = 1.0
     if job_id.startswith("AIR_"):
@@ -305,14 +309,125 @@ def income_for_person(
     denominator = max(total - 1, 1)
     probability = index / denominator
     income = INCOME_MEAN * multiplier + inverse_normal_cdf(probability) * INCOME_STD_DEV
+    income = min(max(income, MINIMUM_INCOME), MAXIMUM_INCOME)
+    # Псевдослучайное u из индекса: в игре (index * 362436069) % 1e6 / 1e6.
+    noise = (index * 362436069) % 1_000_000 / 1_000_000.0
     if income <= MINIMUM_INCOME + 5000.0:
-        # Равномерная перерисовка квантиля, а не сдвиг готового дохода.
-        spread = 0.85 / max(1, total)
-        probability = 0.1 + ((index * 7919) % 1000) / 1000.0 * spread
-        income = INCOME_MEAN * multiplier + inverse_normal_cdf(probability) * INCOME_STD_DEV
-    if (index * 123456789) % 1_000_000 < 100_000:
+        # Перерисовка квантиля на 0.1..0.95, а не сдвиг готового дохода. Без
+        # неё Ф^-1(q) при q -> 0 уводит нижнюю треть в отсечку, и бедные
+        # слипаются в одно значение. Верхняя граница 0.95 задаёт разброс:
+        # доход бедных покрывает примерно 28..101 тыс. вместо узкой полосы.
+        income = (
+            INCOME_MEAN * multiplier
+            + inverse_normal_cdf(0.1 + noise * 0.85) * INCOME_STD_DEV
+        )
+    elif noise < 0.1:
+        # Бонус получают только те, кто не попал в нижнюю отсечку, и лишь
+        # десятая их часть: условие и величина бонуса берут разные u.
         income += ((index * 123456789) % 1_000_000) / 1_000_000.0 * 1e5
-    return min(MAXIMUM_INCOME, max(MINIMUM_INCOME, income))
+    return income
+
+
+def time_slots(
+    *,
+    dampened: float = 0.0,
+    mirrored: bool = False,
+) -> dict[str, tuple[tuple[int, int, float], ...]]:
+    """Часовые слоты отправления с вероятностями, assignCommuteTimes.
+
+    Разбор (index-C2DH4lPc.js:132975 generateTimeSlots). По каждому часу
+    берётся максимум уровня спроса среди периодов суток, покрывающих час,
+    поэтому пик 7-10 даёт `home[7..9] = HIGH`. Затем ряд суток может быть
+    сглажен к равномерному (`dampened` - доля, подмешиваемая к среднему) и
+    отзеркален (`mirrored` - home и work становятся одним и тем же, что нужно
+    для зеркальных аэропортовых рейсов).
+
+    Одинаковые соседние часы склеиваются в интервалы, и вес интервала равен
+    произведению вероятностей его часов, поэтому сумма весов равна единице и
+    отправление выбирается взвешенно, а не равномерно.
+    """
+    hours = {
+        "home": [0.0] * 24,
+        "work": [0.0] * 24,
+    }
+    for _key, start, end, home_level, work_level in TIME_OF_DAY_RANGES:
+        home_demand = driving_time_multiplier(home_level)
+        work_demand = driving_time_multiplier(work_level)
+        for hour in range(int(start), int(end)):
+            hours["home"][hour] = max(hours["home"][hour], home_demand)
+            hours["work"][hour] = max(hours["work"][hour], work_demand)
+
+    if dampened > 0.0:
+        for key in ("home", "work"):
+            mean = sum(hours[key]) / 24.0
+            for hour in range(24):
+                hours[key][hour] = hours[key][hour] * (1.0 - dampened) + mean * dampened
+
+    if mirrored:
+        for hour in range(24):
+            middle = (hours["home"][hour] + hours["work"][hour]) / 2.0
+            hours["home"][hour] = middle
+            hours["work"][hour] = middle
+
+    result: dict[str, tuple[tuple[int, int, float], ...]] = {}
+    for key in ("home", "work"):
+        slots: list[tuple[int, int, float]] = []
+        start_hour = 0
+        demand = hours[key][0]
+        for position in range(1, 25):
+            if position == 24 or hours[key][position] != demand:
+                weight = 1.0
+                for hour in range(start_hour, position):
+                    weight *= hours[key][hour]
+                slots.append((start_hour, position, weight))
+                if position < 24:
+                    start_hour = position
+                    demand = hours[key][position]
+        total = sum(weight for _start, _end, weight in slots)
+        result[key] = tuple(
+            (start, end, weight / total) for start, end, weight in slots
+        )
+    return result
+
+
+def departure_time_from_demand(
+    key: str,
+    slots: tuple[tuple[int, int, float], ...],
+    draw: float,
+    *,
+    within: float,
+    minute_draw: float,
+    jitter: float,
+) -> float:
+    """Время отправления внутри слота по трём независимым розыгрышам.
+
+    Разбор (index-C2DH4lPc.js generateDepartureTimeBasedOnDemand): слот
+    выбирается накопленной вероятностью, затем час внутри слота берётся
+    равномерно, к нему добавляется остаток часа и равномерный сдвиг до
+    ±15 минут, после чего результат зажимается в границы слота.
+
+    В игре это три независимых `Math.random()`, поэтому все три числа
+    обязаны приходить снаружи: производная от `draw` связывает их между собой
+    и схлопывает всё время в границы слотов.
+    """
+    del key
+    accumulated = 0.0
+    chosen = slots[0]
+    for slot in slots:
+        accumulated += slot[2]
+        if draw <= accumulated:
+            chosen = slot
+            break
+    start_hour, end_hour, _weight = chosen
+    # Время внутри слота: час равномерно по слоту, остаток часа отдельным
+    # розыгрышем, плюс сдвиг до ±15 минут.
+    hour = start_hour + within * (end_hour - start_hour)
+    departure = hour * 3600.0 + minute_draw * 3600.0
+    departure += (jitter - 0.5) * 900.0
+    # Зажим в границы слота по игровой формуле: `min(endHour*3600 - 1, t)`
+    # выполняется первым, `max(startHour*3600, ...)` — вторым. Порядок важен:
+    # при обратном порядке время прижималось к началу часа вместо конца.
+    return max(start_hour * 3600.0, min(end_hour * 3600.0 - 1.0, departure))
 
 
 def home_work_departure_pair(
@@ -323,21 +438,45 @@ def home_work_departure_pair(
 ) -> tuple[float, float]:
     """Пара (уход из дома, уход с работы) в секундах от начала суток.
 
-    Время выбирается по профилю суток и уровню спроса в часе. Разрыв между
-    выездом из дома и выездом с работы не меньше MIN_GAP_MINUTES - в игре
-    `work` подбирается циклом до 100 попыток с условием
-    |work - home| >= MIN_GAP_MINUTES*60 (assignCommuteTimes:132975), здесь
-    разрыв берётся сразу, что даёт тот же результат без цикла.
+    Разбор (index-C2DH4lPc.js:132975 assignCommuteTimes). Отправление
+    выбирается из часовых слотов суток взвешенно, а не «окно по уровню
+    спроса»: расписание задаёт вес часа, а не длину интервала.
+
+    Разрыв между выездом из дома и выездом с работы не меньше
+    `MIN_GAP_MINUTES`, как в игре; здесь он берётся сразу, что даёт то же
+    допустимое множество без цикла из 100 попыток.
+
+    `seed` смещает розыгрыш, чтобы разные ячейки не получали одно время.
     """
-    level_value = {"veryLow": 0.1, "low": 0.35, "lowMedium": 0.6, "medium": 0.8, "high": 1.0}
-    span = level_value.get(demand_level, 0.6)
-    window = max(0.0, (span - 0.3) * 24 * 3600.0)
-    base = ((index * 1103515245 + seed * 12345) % 1000) / 1000.0
-    home = (base * window) % 86400.0
+    del demand_level  # Слоты строятся из профиля суток, а не из уровня часа.
+    slots = time_slots()
+    # Три независимых розыгрыша, как три вызова Math.random() в игре. Сдвиг
+    # от 1 нужен, иначе index = 0 дал бы все нули и полночь для всех слотов.
+    def _draw(salt: int) -> float:
+        raw = (index + 1) * (2_654_435_761 + salt * 4_076_931) + seed * 31
+        return ((raw % 1_000_000) + 1) / 1_000_001.0
+
+    home = departure_time_from_demand(
+        "home", slots["home"], _draw(1), within=_draw(2), minute_draw=_draw(3), jitter=_draw(4),
+    )
+    work = departure_time_from_demand(
+        "work", slots["work"], _draw(5), within=_draw(6), minute_draw=_draw(7), jitter=_draw(8),
+    )
     gap = MIN_GAP_MINUTES * 60.0
-    work = home + gap
-    if work >= 86400.0:
-        work -= 86400.0
+    # В игре work подбирается циклом до 100 попыток с новым Math.random() на
+    # каждой. Здесь сдвиг детерминирован, но итерация нужна: один сдвиг на
+    # величину разрыва может привести к паре с разрывом чуть меньше
+    # минимального, если исходное время стояло на границе часа.
+    for _attempt in range(100):
+        if circular_gap_s(home, work) >= gap:
+            break
+        work = departure_time_from_demand(
+            "work", slots["work"],
+            _draw(9 + _attempt), within=_draw(20 + _attempt),
+            minute_draw=_draw(31 + _attempt), jitter=_draw(42 + _attempt),
+        )
+    if circular_gap_s(home, work) < gap:
+        work = (work + gap) % 86400.0
     return home, work
 
 

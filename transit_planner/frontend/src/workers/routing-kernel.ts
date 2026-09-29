@@ -15,6 +15,7 @@
  * ones: crowding must steer the choice without corrupting the utility.
  */
 import { paretoFilterJourneys, type AlternativeJourney } from "../journey-alternatives";
+import { GAME_MAX_RANGE_DEPARTURES } from "../game-rules";
 
 export type RaptorRequest = {
   type: "route";
@@ -416,8 +417,17 @@ export function routeOnce(
   };
 
   const end = input.departureMin + Math.max(0, input.rangeWindowMin);
-  for (let departure = input.departureMin; departure <= end; departure += 1) {
-    evaluateDeparture(departure);
+  // Бюджет range-запроса: не больше GAME_MAX_RANGE_DEPARTURES отправлений,
+  // взятых равномерно по окну. Игра ограничивает так же, и без этого
+  // 30-минутное окно с шагом в минуту даёт 31 прогон rRAPTOR на запрос.
+  const maxDepartures = GAME_MAX_RANGE_DEPARTURES;
+  if (maxDepartures <= 1) {
+    evaluateDeparture(input.departureMin);
+  } else {
+    const step = Math.max(0, end - input.departureMin) / (maxDepartures - 1);
+    for (let index = 0; index < maxDepartures; index += 1) {
+      evaluateDeparture(input.departureMin + index * step);
+    }
   }
 
   return {

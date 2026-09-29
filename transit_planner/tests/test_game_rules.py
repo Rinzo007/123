@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import math
+import re
+from pathlib import Path
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from transit_planner.game_rules import (
     ARRIVAL_GAP_S,
     CONGESTION_FULL_AT_MIN,
     DRIVING_TIME_MULTIPLIERS,
+    INCOME_MEAN,
+    INCOME_STD_DEV,
     MAX_TRANSFERS,
     MAX_WALK_TO_FROM_STATION_S,
     MIN_GAP_MINUTES,
@@ -16,10 +22,13 @@ from transit_planner.game_rules import (
     PerceivedMinutes,
     airport_parking_cost,
     circular_gap_s,
+    circular_gap_s,
     congested_share,
+    departure_time_from_demand,
     driving_seconds,
     driving_time_multiplier,
     home_work_departure_pair,
+    time_slots,
     income_for_person,
     inverse_normal_cdf,
     journey_origin,
@@ -156,12 +165,63 @@ def test_walk_weighted_to_airport_is_harder() -> None:
 
 
 def test_departure_pair_keeps_minimum_gap() -> None:
+    """Разрыв между выездами не меньше MIN_GAP_MINUTES по кругу суток.
+
+    Метрика круговая, как `determineJourneyOrigin` в игре: расстояние между
+    двумя моментами суток это `min(|X-Y|, 86400 - |X-Y|)`, а не простая
+    разность. Разрыв подбирается сразу, а не циклом из 100 попыток, но
+    множество допустимых пар у обоих способов одно.
+    """
     for index in range(50):
         home, work = home_work_departure_pair(index, seed=3)
-        gap = (work - home) % 86_400.0
-        assert gap == pytest.approx(MIN_GAP_MINUTES * 60.0)
+        gap = circular_gap_s(home, work)
+        assert gap >= MIN_GAP_MINUTES * 60.0 - 1e-6
         assert 0.0 <= home < 86_400.0
         assert 0.0 <= work < 86_400.0
+
+
+def test_departure_times_are_spread_within_demand_slots() -> None:
+    """Отправления разбросаны внутри слотов, а не стоят на границах часов.
+
+    Регресс: производная от одного и того же розыгрыша связывала выбор слота и
+    позицию внутри него, из-за чего время квантовалось по границам часов -
+    на 200 ячеек выходило всего 8 уникальных моментов. Теперь уникальных
+    моментов почти 200; оставшиеся совпадения приходятся на границы часов,
+    куда время прижимается зажимом по игровой формуле.
+    """
+    pairs = [home_work_departure_pair(index) for index in range(200)]
+    assert len(set(pairs)) >= 190, "время отправления слиплось у границ часов"
+
+    slots = time_slots()
+    for index, (home, _work) in enumerate(pairs[:50]):
+        probability = ((index + 1) * (2_654_435_761 + 4_076_931)) % 1_000_000
+        draw = (probability + 1) / 1_000_001.0
+        accumulated = 0.0
+        for start, end, weight in slots["home"]:
+            accumulated += weight
+            if draw <= accumulated:
+                assert start * 3600.0 <= home <= end * 3600.0, (
+                    f"время {home} вне слота ({start}, {end})"
+                )
+                break
+
+
+def test_time_slots_follow_the_daily_demand_profile() -> None:
+    """Слоты повторяют игровой профиль: пик home утром, пик work вечером."""
+    slots = time_slots()
+    for key in ("home", "work"):
+        weights = [weight for _start, _end, weight in slots[key]]
+        assert sum(weights) == pytest.approx(1.0, abs=1e-9)
+
+    def peak(key: str) -> tuple[int, int]:
+        return max(slots[key], key=lambda slot: slot[2])[:2]
+
+    assert peak("home") == (7, 10), "утренний пик home должен совпасть с игрой"
+    assert peak("work") == (15, 19), "вечерний пик work должен совпасть с игрой"
+
+    # Аэропортовые слоты зеркальны: home и work совпадают час в час.
+    mirrored = time_slots(mirrored=True, dampened=0.5)
+    assert mirrored["home"] == mirrored["work"]
 
 
 def test_airport_parking_cost_is_multiplied() -> None:
@@ -287,3 +347,81 @@ def test_journey_origin_uses_nearest_departure_time() -> None:
     assert journey_origin(home, work, 8 * 3600.0) == "home"
     assert journey_origin(home, work, 18.5 * 3600.0) == "work"
     assert journey_origin(home, work, 12 * 3600.0) == "home"
+
+
+def test_income_bonus_only_for_non_poor_and_spreads_the_tail() -> None:
+    """Анти-кластеризация дохода обязана разбрасывать бедных, а не слипать их.
+
+    Регресс: перерисовка квантиля считала разброс как 0.85 / total, из-за чего
+    квантиль покрывал 0.1..0.104 вместо игровых 0.1..0.95. Треть бедных
+    получала почти один доход вместо разброса 28..101 тыс., и разные VOT
+    схлопывались в одно значение.
+    """
+    total = 200
+    incomes = [income_for_person(index, total=total) for index in range(total)]
+    assert len(set(incomes)) == total, "доходы слиплись — перерисовка не работает"
+
+    # Перерисовка достаётся бедным: их доход не зависит от квантиля индекса,
+    # а определяется псевдослучайным u из того же индекса.
+    poor = [v for v in incomes if v <= 15_000.0 + 5_000.0 + 60_000.0]
+    assert poor, "в ячейке должны быть бедные"
+    assert min(poor) < 35_000.0, f"нижняя граница бедных слишком высока: {min(poor)}"
+    assert max(poor) > 60_000.0, f"бедные не разбросаны до среднего: {max(poor)}"
+
+    # Бонус достаётся не тем u, что перерисовка, и только не бедным: у бедного
+    # в игре бонус не полагается вовсе, поэтому доход равен ровно
+    # перерисованному значению.
+    for index in range(total):
+        income = income_for_person(index, total=total)
+        noise = (index * 362436069) % 1_000_000 / 1_000_000.0
+        base = INCOME_MEAN + inverse_normal_cdf(index / (total - 1)) * INCOME_STD_DEV
+        base = min(max(base, 15_000.0), 200_000.0)
+        if base <= 20_000.0:
+            # Перерисованный доход не получает бонус.
+            expected = 60_000.0 + inverse_normal_cdf(0.1 + noise * 0.85) * 25_000.0
+            assert income == pytest.approx(expected), (
+                f"бедный {index} получил бонус: {income} != {expected}"
+            )
+
+
+def test_ts_mirror_declares_every_game_constant() -> None:
+    """TS-зеркало game_rules обязано объявлять те же константы, что и Python.
+
+    Константы из разбора (`Текстовый документ.txt`, раздел 4). Раньше в TS
+    отсутствовали окно range-запроса, потолок отправлений и предрасчёт
+    рейсов, из-за чего rRAPTOR перебирал каждую минуту окна вместо 24
+    равномерных отправлений.
+    """
+    ts = (ROOT / "frontend" / "src" / "game-rules.ts").read_text(encoding="utf-8")
+    expected = {
+        "GAME_MAX_TRANSFERS": MAX_TRANSFERS,
+        "GAME_MAX_WALK_TO_FROM_STATION_S": MAX_WALK_TO_FROM_STATION_S,
+        "GAME_ARRIVAL_GAP_S": ARRIVAL_GAP_S,
+        "GAME_MIN_TRANSIT_CHOICE": MIN_TRANSIT_CHOICE,
+        "GAME_CONGESTION_FULL_AT": CONGESTION_FULL_AT_MIN,
+        "GAME_MAX_RANGE_DEPARTURES": 24,
+        "GAME_RANGE_QUERY_WINDOW_MIN": 30,
+        "GAME_FUTURE_CYCLE_TIME_OFFSET_MIN": 120,
+        "GAME_MIN_FUTURE_CYCLES": 2,
+        "GAME_RIDE_MIN": 1.0,
+        "GAME_CAR_CIRCUITY": 1.3,
+    }
+    declared = {}
+    number = r"[0-9][0-9_.]*(?:\s*\*\s*[0-9][0-9_.]*)?"
+    for name, value in expected.items():
+        match = re.search(
+            rf"export const {re.escape(name)}\s*(?::\s*number\s*)?=\s*({number})",
+            ts,
+        )
+        assert match is not None, f"{name} не объявлена в game-rules.ts"
+        expression = match.group(1).replace("_", "")
+        if "*" in expression:
+            left, right = (part.strip() for part in expression.split("*"))
+            actual = float(left) * float(right)
+        else:
+            actual = float(expression)
+        declared[name] = actual
+    for name, value in expected.items():
+        assert declared[name] == pytest.approx(float(value)), (
+            f"{name}: TS {declared[name]} != игра {value}"
+        )

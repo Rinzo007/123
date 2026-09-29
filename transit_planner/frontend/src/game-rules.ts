@@ -32,6 +32,19 @@ export const GAME_PARKING_TIME_S = 180;
 export const GAME_PARKING_COST = 5.0;
 export const GAME_MIN_TRANSIT_CHOICE = 10;
 
+/** Окно отправлений rRAPTOR: 30 минут (PATHFINDING_RULES.RANGE_QUERY_WINDOW). */
+export const GAME_RANGE_QUERY_WINDOW_MIN = 30;
+/** Потолок отправлений на запрос: без него 30-минутное окно даёт 31 прогон. */
+export const GAME_MAX_RANGE_DEPARTURES = 24;
+/** Предрасчёт рейсов вперёд: 2 часа (FUTURE_CYCLE_TIME_OFFSET). */
+export const GAME_FUTURE_CYCLE_TIME_OFFSET_MIN = 120;
+/** Минимум предрассчитанных циклов расписания (MIN_FUTURE_CYCLES). */
+export const GAME_MIN_FUTURE_CYCLES = 2;
+/** Множитель времени в пути на единицу (RIDE_MIN): езда не утяжеляется. */
+export const GAME_RIDE_MIN = 1.0;
+/** Извилистость дорожного расстояния относительно прямого (DRIVING). */
+export const GAME_CAR_CIRCUITY = 1.3;
+
 export const GAME_HOURS_WORKED_PER_YEAR = 1860;
 export const GAME_MINIMUM_INCOME = 15000;
 export const GAME_MAXIMUM_INCOME = 200000;
@@ -210,18 +223,23 @@ export function incomeForPerson(index: number, total: number, jobId = ""): numbe
   if (jobId.startsWith("AIR_")) multiplier = GAME_AIRPORT_INCOME_MULTIPLIER;
   else if (jobId.startsWith("UNI_")) multiplier = GAME_COLLEGE_INCOME_MULTIPLIER;
   const denominator = Math.max(total - 1, 1);
-  let probability = index / denominator;
+  const probability = index / denominator;
   let income = GAME_INCOME_MEAN * multiplier
     + inverseNormalCdf(probability) * GAME_INCOME_STD_DEV;
+  income = Math.min(Math.max(income, GAME_MINIMUM_INCOME), GAME_MAXIMUM_INCOME);
+  // Псевдослучайное u из индекса: в игре (index * 362436069) % 1e6 / 1e6.
+  const noise = (index * 362436069) % 1000000 / 1000000;
   if (income <= GAME_MINIMUM_INCOME + 5000) {
-    const spread = 0.85 / Math.max(1, total);
-    probability = 0.1 + ((index * 7919) % 1000) / 1000 * spread;
+    // Перерисовка квантиля на 0.1..0.95: без неё Ф^-1(q) при q -> 0 уводит
+    // нижнюю треть в отсечку и бедные слипаются в одно значение.
     income = GAME_INCOME_MEAN * multiplier
-      + inverseNormalCdf(probability) * GAME_INCOME_STD_DEV;
+      + inverseNormalCdf(0.1 + noise * 0.85) * GAME_INCOME_STD_DEV;
+  } else if (noise < 0.1) {
+    // Бонус достаётся не тем u, что перерисовка, и только не бедным.
+    const mod = (index * 123456789) % 1000000;
+    income += (mod / 1000000) * 1e5;
   }
-  const mod = (index * 123456789) % 1000000;
-  if (mod < 100000) income += (mod / 1000000) * 1e5;
-  return Math.min(GAME_MAXIMUM_INCOME, Math.max(GAME_MINIMUM_INCOME, income));
+  return income;
 }
 
 /** Воспринимаемое время авто: +180*2*1.6 = 576 с к каждой поездке. */
