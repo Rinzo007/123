@@ -37,9 +37,6 @@ _FALLBACK_FLOORS_MAX = 8.0
 # Номинальная высота жилого этажа. В Overture height включает конструктив и
 # кровлю, поэтому из неё берётся грубая оценка с потолком, а не точное число.
 _METERS_PER_FLOOR = 3.0
-# Жилая площадь на одного человека. 30-40 м² — обычная величина для
-# городской квартиры вместе с долей общих площадей.
-FLOOR_AREA_PER_PERSON_M2 = 32.0
 
 
 def is_residential_building(building: BuildingFootprint) -> bool:
@@ -71,25 +68,6 @@ def residential_floor_area_m2(building: BuildingFootprint) -> float:
     if not is_residential_building(building):
         return 0.0
     return building.area_m2 * effective_floors(building)
-
-
-def population_from_buildings(
-    buildings: Iterable[BuildingFootprint],
-    *,
-    floor_area_per_person_m2: float = FLOOR_AREA_PER_PERSON_M2,
-) -> float:
-    """Оценка населения по жилой площади этажей.
-
-    Опора self-contained: перепись не нужна, всё считается из площади и
-    этажности, которые Overture отдаёт по зданиям. Метод тот же, что у GHSL:
-    объём жилого фонда делится на площадь на человека.
-    """
-    if floor_area_per_person_m2 <= 0:
-        raise ValueError("floor_area_per_person_m2 must be positive")
-    total = 0.0
-    for building in buildings:
-        total += residential_floor_area_m2(building)
-    return total / floor_area_per_person_m2
 
 
 @dataclass(frozen=True, slots=True)

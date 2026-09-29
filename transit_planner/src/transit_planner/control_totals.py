@@ -118,8 +118,10 @@ def jobs_from_workplace_floor_area(
     productions и attractions.
 
     Если рабочих зданий нет, форма берётся из `fallback_shape` (прокси мест),
-    а при пустом и его - население просто делится поровну. Какой путь
-    сработал, видно в отчёте: молчаливый ноль хуже любой заглушки.
+    а при пустом и его - население просто делится поровну. При нулевом
+    населении возвращается нулевая занятость: прокси важности POI не является ни
+    населением, ни рабочими местами, и подставлять его вместо отсутствующих
+    данных значило бы выдавать заглушку за измерение.
     """
     if population_total < 0:
         raise ValueError("population_total must be non-negative")
@@ -130,17 +132,13 @@ def jobs_from_workplace_floor_area(
         method = "closed_labour_market_by_place_proxy"
 
     if population_total <= 0:
-        # Уравнивать нечего: населения нет ни от зданий, ни от растра. Тогда
-        # работа берётся из прокси мест как есть, и метод это фиксирует -
-        # закрытый рынок труда здесь просто не применим.
-        jobs = dict(shape)
-        return jobs, AnchoringReport(
-            method="place_proxy_magnitude_no_population",
-            total_estimated=sum(jobs.values()),
-            total_control=0.0,
-            factor=0.0,
-            zones_scaled=sum(1 for value in jobs.values() if value > 0),
-            zones_zero_estimate_but_control=(),
+        # Населения нет: закрытый рынок труда не на что уравнивать, и прокси
+        # мест (важность POI) населением и занятостью не является. Ноль здесь -
+        # честный результат, а не молчаливая заглушка: пакет помечается в
+        # provenance как raster_control_missing.
+        return {zone: 0.0 for zone in workplace_area_by_zone}, AnchoringReport(
+            method="no_population_no_jobs", total_estimated=0.0, total_control=0.0,
+            factor=0.0, zones_scaled=0, zones_zero_estimate_but_control=(),
             zones_zero_control_but_estimate=(),
         )
 

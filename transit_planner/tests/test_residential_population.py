@@ -1,14 +1,19 @@
+"""Жилая площадь зданий и распределение населения по зонам.
+
+Население берётся только из растра контрольных итогов. Оценка «жилая площадь
+делить на площадь на человека» удалена вместе с `FLOOR_AREA_PER_PERSON_M2`:
+она опиралась на константу без источника. Эти тесты проверяют то, что осталось
+живым, — классификацию зданий и этажность, из которых считается занятость.
+"""
 import pytest
 
 from transit_planner.city_pack import build_city_zones
 from transit_planner.geo import Point
 from transit_planner.places import CityPlace
 from transit_planner.urban import (
-    FLOOR_AREA_PER_PERSON_M2,
     BuildingFootprint,
     effective_floors,
     is_residential_building,
-    population_from_buildings,
     residential_floor_area_m2,
 )
 
@@ -41,21 +46,17 @@ def _building(
     )
 
 
-def test_population_counts_floor_area_not_footprint():
+def test_floor_area_counts_floors_not_footprint():
     """Люди живут на этажах, поэтому этажность входит в площадь."""
     building = _building(area_m2=100.0, num_floors=4.0)
     assert residential_floor_area_m2(building) == pytest.approx(400.0)
-    assert population_from_buildings([building]) == pytest.approx(
-        400.0 / FLOOR_AREA_PER_PERSON_M2
-    )
 
 
-def test_non_residential_buildings_carry_no_population():
+def test_non_residential_buildings_carry_no_floor_area():
     """Склад или офис нельзя считать жильём: класс важнее подтипа."""
     warehouse = _building(area_m2=1000.0, num_floors=6.0, building_class="warehouse")
     assert not is_residential_building(warehouse)
     assert residential_floor_area_m2(warehouse) == 0.0
-    assert population_from_buildings([warehouse]) == 0.0
 
 
 def test_underground_buildings_are_skipped():
@@ -67,7 +68,7 @@ def test_underground_buildings_are_skipped():
         is_underground=True,
         num_floors=3.0,
     )
-    assert population_from_buildings([buried]) == 0.0
+    assert residential_floor_area_m2(buried) == 0.0
 
 
 def test_floors_fall_back_to_height_then_to_minimum():
@@ -90,7 +91,13 @@ def test_subtype_used_when_class_missing():
     assert is_residential_building(building)
 
 
-def test_zones_take_population_from_buildings():
+def test_zones_take_population_only_from_raster_controls():
+    """Без растра зоны пусты: подменять население нечем.
+
+    Раньше здесь была оценка по площади, и здания без растра давали ненулевое
+    население. Теперь единственный источник - контрольные итоги, поэтому
+    здание само по себе населения не создаёт.
+    """
     places = tuple(
         CityPlace(
             id=f"p{index}",
@@ -114,16 +121,34 @@ def test_zones_take_population_from_buildings():
     zones = build_city_zones(
         places, origin_lon=13.4, origin_lat=52.5, buildings=buildings
     )
-    total = sum(zone.population for zone in zones)
-    expected = 3 * 1000.0 * 4.0 / FLOOR_AREA_PER_PERSON_M2
-    assert total == pytest.approx(expected, rel=1e-6)
-    # Занятость уравнивается с населением (закрытый рынок труда, как в
-    # киевском эталоне), а не берётся из прокси мест.
-    assert sum(zone.jobs for zone in zones) == pytest.approx(total, rel=1e-6)
+    assert sum(zone.population for zone in zones) == pytest.approx(0.0)
 
 
-def test_zones_fall_back_to_places_without_buildings():
-    """Без зданий поведение прежнее: население из прокси мест."""
+def test_zones_read_population_from_raster_controls():
+    """С растром население приходит из контрольных итогов, а не из площади."""
+    places = tuple(
+        CityPlace(
+            id=f"p{index}",
+            name=f"Place {index}",
+            location=Point(13.4 + index * 0.002, 52.5),
+            basic_category="cafe",
+            importance=1.0,
+        )
+        for index in range(3)
+    )
+    controls = {f"z{index:04d}_0000": 100.0 * (index + 1) for index in range(3)}
+    zones = build_city_zones(
+        places,
+        origin_lon=13.4,
+        origin_lat=52.5,
+        population_controls_factory=lambda _zones: controls,
+    )
+    assert sum(zone.population for zone in zones) == pytest.approx(600.0)
+    # Занятость уравнивается с населением: закрытый рынок труда.
+    assert sum(zone.jobs for zone in zones) == pytest.approx(600.0, rel=1e-6)
+
+
+def test_zones_carry_no_population_without_raster_or_demand_points():
     places = (
         CityPlace(
             id="p0",
@@ -134,9 +159,4 @@ def test_zones_fall_back_to_places_without_buildings():
         ),
     )
     zones = build_city_zones(places, origin_lon=13.4, origin_lat=52.5)
-    assert sum(zone.population for zone in zones) == pytest.approx(5.0)
-
-
-def test_population_rejects_non_positive_area_per_person():
-    with pytest.raises(ValueError):
-        population_from_buildings([_building()], floor_area_per_person_m2=0.0)
+    assert sum(zone.population for zone in zones) == pytest.approx(0.0)

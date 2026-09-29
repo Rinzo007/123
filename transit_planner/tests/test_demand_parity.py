@@ -45,8 +45,7 @@ import { gravityOd } from "./demand-model.js";
 const spec = JSON.parse(process.argv[2]);
 const zones = spec.zones.map(([id, x, y, population, jobs]) => ({
   id, centroidX: x, centroidY: y, population, jobs,
-  attractions: {}, noCarShare: 0.35,
-}));
+  attractions: {}, }));
 const matrix = gravityOd(zones, {
   speedKph: spec.speedKph, decay: spec.decay, intrazonalFactor: spec.intrazonal,
 });

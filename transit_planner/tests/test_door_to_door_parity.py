@@ -241,6 +241,43 @@ def _ts_spec() -> dict:
 # tsc сохраняет бессуффиксные импорты (`from "./projection"`), которые node ESM
 # не разрешает. Дописываем `.js` к относительным спецификаторам без расширения
 # во всех emitted-файлах — детерминированно и только средствами typescript.
+# Проба границы пешеходного кэтчмента: 45 минут при игровых 1.5 м/с = 4050 м.
+# Остановка на 4000 м в лимите, на 4400 м уже нет, хотя по графу она достижима.
+CATCHMENT_PROBE = """
+import { planStreetDoorAccess } from "./street-walk.js";
+
+const spec = JSON.parse(process.argv[2]);
+const asInt = (values) => Int32Array.from(values);
+const asByte = (values) => Uint8Array.from(values);
+const graph = {
+  vertexCount: spec.graph.nodes.length,
+  edgeCount: spec.graph.edges.length,
+  lon: asInt(spec.graph.nodes.map(([lon]) => lon)),
+  lat: asInt(spec.graph.nodes.map(([, lat]) => lat)),
+  component: asInt(spec.graph.nodes.map(() => 0)),
+  edgeA: asInt(spec.graph.edges.map(([a]) => a)),
+  edgeB: asInt(spec.graph.edges.map(([, b]) => b)),
+  edgeLengthM: asInt(spec.graph.edges.map(([, , length]) => length)),
+  edgeClass: asByte(spec.graph.edges.map(() => 0)),
+  edgeSpeedKph: asByte(spec.graph.edges.map(() => 30)),
+  edgeDirection: asByte(spec.graph.edges.map(() => 0)),
+  geomOffset: asInt(spec.graph.geomOffset),
+  geomDeltaX: asInt(spec.graph.geomDelta[0]),
+  geomDeltaY: asInt(spec.graph.geomDelta[1]),
+  names: [],
+};
+const door = planStreetDoorAccess({
+  graph,
+  network: spec.network,
+  origin: spec.origin,
+  destination: spec.destination,
+});
+process.stdout.write(JSON.stringify({
+  access: Array.from(door.accessTimeMin),
+  egress: Array.from(door.egressTimeMin),
+}));
+"""
+
 _IMPORT_RE = re.compile(
     r"(?P<prefix>(?:from\s+|import\s*\())(?P<quote>[\"'])(?P<spec>\.{1,2}/[^\"']+)(?P=quote)"
 )
@@ -299,6 +336,139 @@ def _ts_answer(tmp_path: Path) -> dict | None:
     return json.loads(run.stdout)
 
 
+CATCHMENT_STOPS = (("near", 4000.0), ("far", 4400.0))
+
+
+def _catchment_fixture() -> tuple[Network, RoadGraph, Point, Point]:
+    """Остановка на 4000 м (в лимите) и на 4400 м (за лимитом) по одной улице."""
+    network = Network()
+    for stop_id, x in CATCHMENT_STOPS:
+        network.add_stop(Stop(stop_id, stop_id, Point(x, 0.0)))
+    network.add_period(ServicePeriod("am", 360, 540))
+
+    graph = RoadGraph()
+    graph.add_node(RoadNode(0, 0.0, 0.0))
+    graph.add_node(RoadNode(1, 4000.0, 0.0))
+    graph.add_node(RoadNode(2, 4400.0, 0.0))
+    graph.add_edge(RoadEdge("link", 0, 1, 4000.0, 30.0, "residential"))
+    graph.add_edge(RoadEdge("link2", 1, 2, 400.0, 30.0, "residential"))
+    return network, graph, Point(0.0, 0.0), Point(4000.0, 0.0)
+
+
+def _catchment_spec() -> dict:
+    network, _, origin, destination = _catchment_fixture()
+    nodes = [[_micro(_wgs84(x, 0.0)[0]), _micro(_wgs84(x, 0.0)[1])] for _, x in CATCHMENT_STOPS]
+    nodes.append([_micro(_wgs84(0.0, 0.0)[0]), _micro(_wgs84(0.0, 0.0)[1])])
+    edges = [(2, 0, 4000), (0, 1, 400)]
+    geom_offset = []
+    delta_x: list[int] = []
+    delta_y: list[int] = []
+    for a, b, _ in edges:
+        geom_offset.append(len(delta_x))
+        delta_x.append(nodes[b][0] - nodes[a][0])
+        delta_y.append(nodes[b][1] - nodes[a][1])
+    geom_offset.append(len(delta_x))
+    origin_lon, origin_lat = _wgs84(origin.x, origin.y)
+    dest_lon, dest_lat = _wgs84(destination.x, destination.y)
+    return {
+        "network": {
+            "origin_lon": ORIGIN_LON,
+            "origin_lat": ORIGIN_LAT,
+            "stops": [
+                {
+                    "id": stop_id,
+                    "name": stop_id,
+                    "location": {"x": x, "y": 0.0},
+                    "is_station": False,
+                }
+                for stop_id, x in CATCHMENT_STOPS
+            ],
+            "routes": [],
+            "vehicle_types": [],
+            "services": [],
+            "periods": [{"id": "am", "start_minute": 360, "end_minute": 540}],
+        },
+        "graph": {
+            "nodes": nodes,
+            "edges": edges,
+            "geomOffset": geom_offset,
+            "geomDelta": [delta_x, delta_y],
+        },
+        "origin": {"lon": origin_lon, "lat": origin_lat},
+        "destination": {"lon": dest_lon, "lat": dest_lat},
+    }
+
+
+def _ts_build(tmp_path: Path, sources: tuple[str, ...]) -> None:
+    node = shutil.which("node")
+    if node is None or not TSC_JS.exists():
+        return
+    result = subprocess.run(
+        [
+            node,
+            str(TSC_JS),
+            *(str(SRC / source) for source in sources),
+            "--outDir",
+            str(tmp_path),
+            "--rootDir",
+            str(SRC),
+            "--module",
+            "esnext",
+            "--target",
+            "es2022",
+            "--ignoreConfig",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=FRONTEND,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"tsc не собрал стенд:\n{result.stdout}\n{result.stderr}")
+    _fix_emitted_specifiers(tmp_path)
+
+
+@pytest.mark.skipif(
+    not TSC_JS.exists() or shutil.which("node") is None,
+    reason="node или typescript не установлены: TS-паритет не проверяется",
+)
+def test_street_walk_catchment_is_45_minutes(tmp_path: Path) -> None:
+    """Лимит доступа к остановке - время, а не радиус: 45 минут при 1.5 м/с.
+
+    TS раньше ограничивал кэтчмент радиусом 500 м, из-за чего остановка в
+    километре от двери была недостижима, хотя игра разрешает 2700 с ходьбы.
+    Остановка на 4000 м - это 2666.7 с, в лимите; на 4400 м - 2933.3 с, уже
+    нет, хотя по графу граф достижима.
+    """
+    _ts_build(tmp_path, ("street-walk.ts",))
+    (tmp_path / "probe.mjs").write_text(CATCHMENT_PROBE, encoding="utf-8")
+    run = subprocess.run(
+        [
+            shutil.which("node"),
+            str(tmp_path / "probe.mjs"),
+            json.dumps(_catchment_spec()),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
+    )
+    if run.returncode != 0:
+        pytest.fail(f"стенд не отработал:\n{run.stdout}\n{run.stderr}")
+    # JSON.stringify отдаёт Infinity как null - это и есть "недостижима".
+    access = json.loads(run.stdout)["access"]
+
+    # near в лимите, far за ним: 4000/1.5/60 = 44.444 мин.
+    assert access[0] == pytest.approx(4000.0 / 1.5 / 60.0, abs=1e-2)
+    assert access[1] is None, "остановка на 4400 м не должна попадать в кэтчмент"
+
+    # Тот же предел с другой стороны, через конфиг роутера.
+    network, graph, origin, destination = _catchment_fixture()
+    router = TransitRouter(network, road_graph=graph)
+    python_access, _ = router._street_door_minutes(origin, destination)
+    assert set(python_access) == {"near"}
+
+
 @pytest.mark.skipif(
     not TSC_JS.exists() or shutil.which("node") is None,
     reason="node или typescript не установлены: TS-паритет не проверяется",
@@ -326,5 +496,7 @@ def test_door_to_door_matches_python(tmp_path: Path) -> None:
         assert abs(actual["durationMin"] - reference["durationMin"]) <= (
             DURATION_TOLERANCE_MIN
         ), f"нога {actual}: TS {actual['durationMin']} != Python {reference['durationMin']}"
-    assert abs(ts["walkToMin"] - 3.6) <= DURATION_TOLERANCE_MIN
+    # Точка запроса в 300 м от b, при игровых 1.5 м/с это 200 с = 3.3333 мин.
+    assert abs(ts["walkToMin"] - 3.3333) <= DURATION_TOLERANCE_MIN
+    # c стоит ровно в точке назначения, последняя нога нулевая.
     assert abs(ts["walkFromMin"] - 0.0) <= DURATION_TOLERANCE_MIN

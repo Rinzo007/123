@@ -25,7 +25,6 @@ def test_wait_is_tracked_separately_from_transit_runtime():
                 transit_constant=0.5,
                 car_constant=-0.5,
                 walk_constant=-3.0,
-                bike_constant=-3.0,
             ),
         ),
     )

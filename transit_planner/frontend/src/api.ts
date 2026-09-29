@@ -207,7 +207,6 @@ export interface AssignmentResponse {
     transit_trips: number;
     car_trips: number;
     walk_trips: number;
-    bike_trips: number;
     transit_share: number;
     average_transit_time_min: number;
     average_transfers: number;
@@ -325,7 +324,6 @@ export interface CityAssignmentResponse {
     transit_trips: number;
     car_trips: number;
     walk_trips: number;
-    bike_trips: number;
     transit_share: number;
     average_transit_time_min: number;
     average_transfers: number;
@@ -450,7 +448,6 @@ export interface ScenarioPayload {
     centroid_y: number;
     population?: number;
     jobs?: number;
-    no_car_share?: number;
   }>;
   config: { period_id: string };
   economics_config?: {

@@ -16,6 +16,7 @@ import {
   GAME_ARRIVAL_GAP_S,
   GAME_INCOME_LADDER_SIZE,
   GAME_MIN_SENSIBLE_DRIVING_DISTANCE_M,
+  GAME_WALKING_SPEED_KPH,
   GAME_WALK_MIN,
   GAME_WAIT_MIN,
   gameModeSplit,
@@ -26,8 +27,6 @@ import {
 
 /** Value of time: `model.json` → `vot_s_per_eur`. */
 export const REFERENCE_VOT_S_PER_EUR = 360;
-/** `model.json` → `no_car_effectiveness`. */
-export const REFERENCE_NO_CAR_EFFECTIVENESS = 0.78;
 /** `model.json` → `journey_choice`.wait_weight (Wardman Table 5 mean). */
 export const REFERENCE_WAIT_WEIGHT = 1.72;
 /** `model.json` → `transfer`.rider_bias_s, converted to minutes. */
@@ -46,18 +45,12 @@ export const REFERENCE_CAR_PARKING_EUR = 1.5;
 export const REFERENCE_CAR_PARKING_S = 240;
 export const REFERENCE_CAR_CIRCUITY = 1.3;
 /** `model.json` → `mobility`. */
-export const REFERENCE_NO_CAR_SHARE = 0.35;
-export const REFERENCE_TWO_WHEEL_SHARE = 0.3;
-export const REFERENCE_TWO_WHEEL_SPEED_KPH = 15.12;
-export const REFERENCE_TWO_WHEEL_REACH_M = 7000;
-export const REFERENCE_TWO_WHEEL_PER_KM_EUR = 0.03;
 
 export interface ChoiceConfig {
   valueOfTimeSPerEur: number;
   transitConstant: number;
   carConstant: number;
   walkConstant: number;
-  bikeConstant: number;
   transitFareWeight: number;
   transitWaitWeight: number;
   transitBiasMinutes: number;
@@ -71,16 +64,7 @@ export interface ChoiceConfig {
   carParkingMinutes: number;
   carCircuity: number;
   walkCircuity: number;
-  bikeCircuity: number;
-  bikeCostPerKmEur: number;
-  bikeFixedMinutes: number;
-  bikeTimeFactor: number;
-  bikeReachM: number;
-  twoWheelShare: number;
   walkSpeedKph: number;
-  bikeSpeedKph: number;
-  noCarShare: number;
-  noCarEffectiveness: number;
   minSensibleDrivingM: number;
   arrivalGapMinutes: number;
 }
@@ -90,7 +74,6 @@ export const DEFAULT_CHOICE_CONFIG: ChoiceConfig = {
   transitConstant: 0,
   carConstant: 0,
   walkConstant: 0,
-  bikeConstant: 0,
   transitFareWeight: 0,
   transitWaitWeight: REFERENCE_WAIT_WEIGHT,
   transitBiasMinutes: REFERENCE_TRANSFER_RIDER_BIAS_S / 60,
@@ -104,16 +87,7 @@ export const DEFAULT_CHOICE_CONFIG: ChoiceConfig = {
   carParkingMinutes: REFERENCE_CAR_PARKING_S / 60,
   carCircuity: REFERENCE_CAR_CIRCUITY,
   walkCircuity: 1.33 * REFERENCE_TRANSFER_WALK_MULTIPLIER,
-  bikeCircuity: 1.25,
-  bikeCostPerKmEur: REFERENCE_TWO_WHEEL_PER_KM_EUR,
-  bikeFixedMinutes: REFERENCE_CAR_PARKING_S / 60,
-  bikeTimeFactor: 1.5,
-  bikeReachM: REFERENCE_TWO_WHEEL_REACH_M,
-  twoWheelShare: REFERENCE_TWO_WHEEL_SHARE,
-  walkSpeedKph: 5.0,
-  bikeSpeedKph: REFERENCE_TWO_WHEEL_SPEED_KPH,
-  noCarShare: REFERENCE_NO_CAR_SHARE,
-  noCarEffectiveness: REFERENCE_NO_CAR_EFFECTIVENESS,
+  walkSpeedKph: GAME_WALKING_SPEED_KPH,
   minSensibleDrivingM: GAME_MIN_SENSIBLE_DRIVING_DISTANCE_M,
   arrivalGapMinutes: GAME_ARRIVAL_GAP_S / 60,
 };
@@ -143,20 +117,11 @@ export function validateChoiceConfig(config: ChoiceConfig): void {
     throw new Error("Transit transfer burdens are invalid");
   }
   nonNegative("car_cost_per_km_eur", config.carCostPerKmEur);
-  nonNegative("bike_cost_per_km_eur", config.bikeCostPerKmEur);
   nonNegative("car_parking_eur", config.carParkingEur);
   nonNegative("car_parking_minutes", config.carParkingMinutes);
   positive("car_circuity", config.carCircuity);
   positive("walk_circuity", config.walkCircuity);
-  positive("bike_circuity", config.bikeCircuity);
-  nonNegative("bike_fixed_minutes", config.bikeFixedMinutes);
-  positive("bike_time_factor", config.bikeTimeFactor);
-  nonNegative("bike_reach_m", config.bikeReachM);
   positive("walk_speed_kph", config.walkSpeedKph);
-  positive("bike_speed_kph", config.bikeSpeedKph);
-  unit("no_car_share", config.noCarShare);
-  unit("no_car_effectiveness", config.noCarEffectiveness);
-  unit("two_wheel_share", config.twoWheelShare);
   nonNegative("min_sensible_driving_m", config.minSensibleDrivingM);
   nonNegative("arrival_gap_minutes", config.arrivalGapMinutes);
 }
@@ -206,8 +171,6 @@ export interface ModeUtilities {
   walk: number;
   car: number;
   transit: number;
-  bike: number;
-  rest: number;
 }
 
 export interface UtilitiesInput {
@@ -215,11 +178,9 @@ export interface UtilitiesInput {
   carTimeMin: number;
   /** `null` means "no transit connection at all" and yields -Infinity. */
   transitTimeMin: number | null;
-  bikeTimeMin?: number | null;
   transitWaitMin?: number;
   transitFare?: number;
   carDistanceKm?: number;
-  bikeDistanceKm?: number | null;
   baseTimeMin?: number | null;
   transitAccessWalkMin?: number;
   transitEgressWalkMin?: number;
@@ -242,21 +203,6 @@ export function utilities(input: UtilitiesInput, config: ChoiceConfig = DEFAULT_
       })
       - config.transitFareWeight * (input.transitFare ?? 0);
 
-  const hasBikeDistance = input.bikeDistanceKm !== undefined && input.bikeDistanceKm !== null;
-  const bikeDistanceKm = !hasBikeDistance ? 0 : Math.max(0, input.bikeDistanceKm!);
-  const bikeDistanceM = bikeDistanceKm * 1000 * config.bikeCircuity;
-  const excessDistanceM = Math.max(0, bikeDistanceM - config.bikeReachM);
-  // Without a distance the caller supplies the time directly; with one the
-  // distance drives the time, matching choice.py exactly.
-  const bikeTravelMinutes = !hasBikeDistance && input.bikeTimeMin !== undefined && input.bikeTimeMin !== null
-    ? Math.max(0, input.bikeTimeMin)
-    : (bikeDistanceM / config.bikeSpeedKph) * 60 / 1000;
-  const excessTravelMinutes = (excessDistanceM / config.bikeSpeedKph) * 60 / 1000;
-  const bikeGeneralizedMinutes =
-    config.bikeFixedMinutes
-    + config.bikeTimeFactor * (bikeTravelMinutes + excessTravelMinutes)
-    + (bikeDistanceM / 1000) * config.bikeCostPerKmEur * config.valueOfTimeSPerEur / 60;
-  const bike = config.bikeConstant - coefficient * bikeGeneralizedMinutes;
 
   const walkGeneralizedMinutes = config.walkCircuity * input.walkTimeMin;
   const carDistanceKm = input.carDistanceKm ?? 0;
@@ -274,24 +220,18 @@ export function utilities(input: UtilitiesInput, config: ChoiceConfig = DEFAULT_
     + (carDistanceKm * config.carCostPerKmEur + config.carParkingEur)
     * config.valueOfTimeSPerEur
     / 60;
-  const rest = input.baseTimeMin === undefined || input.baseTimeMin === null
-    ? Number.NEGATIVE_INFINITY
-    : config.transitConstant - coefficient * Math.max(0, input.baseTimeMin);
-
   return {
     walk: config.walkConstant - coefficient * walkGeneralizedMinutes,
     car: config.carConstant - coefficient * carGeneralizedMinutes,
     transit,
-    bike,
-    rest,
   };
 }
 
-export type ModeShare = "transit" | "car" | "walk" | "bike" | "rest";
+export type ModeShare = "transit" | "car" | "walk";
 export type ModeProbabilities = Record<ModeShare, number>;
 
 const EMPTY_PROBABILITIES: ModeProbabilities = {
-  transit: 0, car: 0, walk: 0, bike: 0, rest: 0,
+  transit: 0, car: 0, walk: 0,
 };
 
 export interface GameProbabilitiesInput {
@@ -305,10 +245,6 @@ export interface GameProbabilitiesInput {
   transitEgressWalkMin?: number;
   transitTransferWalkMin?: number;
   transitTransfers?: number;
-  bikeTimeMin?: number;
-  bikeDistanceKm?: number;
-  carAvailability?: number;
-  restTimeMin?: number | null;
   transitAvailable?: boolean;
   population?: number;
   applyMinTransitChoice?: boolean;
@@ -320,9 +256,6 @@ export interface GameProbabilitiesInput {
  * Port of `game_probabilities` в `src/transit_planner/choice.py`. Случайной
  * полезности нет: доля режима получается интегрированием по детерминированной
  * лестнице дохода, поэтому у разных ступеней дохода разные победители.
- *
- * Велосипед - добавка планировщика, в игре его нет: он отбирается из доли
- * ходьбы и потому не увеличивает активный спрос.
  */
 export function gameProbabilities(
   input: GameProbabilitiesInput,
@@ -348,8 +281,6 @@ export function gameProbabilities(
     carDistanceM,
     transitFare: input.transitFare ?? 0,
     transitAvailable: input.transitAvailable !== false,
-    carAvailability: input.carAvailability ?? 1,
-    restTimeMin: input.restTimeMin ?? null,
     population: input.population ?? GAME_INCOME_LADDER_SIZE,
     applyMinTransitChoice: input.applyMinTransitChoice !== false,
   });
@@ -358,89 +289,34 @@ export function gameProbabilities(
     transit: split.transit,
     car: split.car,
     walk: split.walk,
-    bike: 0,
-    rest: split.rest,
   };
-  if (input.bikeTimeMin !== undefined || input.bikeDistanceKm !== undefined) {
-    const bikeUtility = input.bikeDistanceKm !== undefined
-      ? Math.max(0, input.bikeDistanceKm) * 1.25 / 15.12 * 60
-      : Math.max(0, input.bikeTimeMin ?? 0);
-    const active = walkPerceivedSec + bikeUtility;
-    if (active > 0) {
-      const bikeShare = split.walk * bikeUtility / active;
-      result.bike = bikeShare;
-      result.walk = split.walk - bikeShare;
-    }
-  }
   return result;
 }
 
-export interface ProbabilitiesInput {
-  carAvailability?: number;
-  bikeAvailability?: number;
-  noCarShare?: number;
-}
-
-export function probabilities(
-  values: ModeUtilities,
-  input: ProbabilitiesInput = {},
-): ModeProbabilities {
-  const carAvailability = input.carAvailability ?? 1;
-  const bikeAvailability = input.bikeAvailability ?? 1;
-  const noCarShare = input.noCarShare ?? REFERENCE_NO_CAR_SHARE;
-  const unit = (name: string, value: number) => {
-    if (!(value >= 0 && value <= 1)) throw new Error(`${name} must be in [0, 1]`);
-  };
-  unit("car_availability", carAvailability);
-  unit("bike_availability", bikeAvailability);
-  unit("no_car_share", noCarShare);
-
-  const entries: Array<[ModeShare, number, number]> = [
-    ["transit", values.transit, 1],
-    ["car", values.car, carAvailability],
-    ["walk", values.walk, 1],
-    ["bike", values.bike, bikeAvailability],
-    ["rest", values.rest, 1],
+export function probabilities(values: ModeUtilities): ModeProbabilities {
+  const entries: Array<[ModeShare, number]> = [
+    ["transit", values.transit],
+    ["car", values.car],
+    ["walk", values.walk],
   ];
   const finite = entries.filter(([, value]) => value !== Number.NEGATIVE_INFINITY);
   if (finite.length === 0) return { ...EMPTY_PROBABILITIES };
   const maximum = Math.max(...finite.map(([, value]) => value));
 
-  let transit = 0;
-  let car = 0;
-  let walk = 0;
-  let bike = 0;
-  let rest = 0;
-  for (const [key, value, availability] of entries) {
-    const weight = value === Number.NEGATIVE_INFINITY ? 0 : Math.exp(value - maximum) * availability;
-    if (key === "transit") transit = weight;
-    else if (key === "car") car = weight;
-    else if (key === "walk") walk = weight;
-    else if (key === "bike") bike = weight;
-    else rest = weight;
+  const weights: Partial<Record<ModeShare, number>> = {};
+  for (const [key, value] of entries) {
+    weights[key] = value === Number.NEGATIVE_INFINITY ? 0 : Math.exp(value - maximum);
   }
 
-  const active = walk + bike;
-  const withoutCar = transit + active + rest;
-  const withCar = withoutCar + car;
-  if (withCar <= 0) return { ...EMPTY_PROBABILITIES };
-
-  // Группировка множителей повторяет choice.py: сначала умножение, потом
-  // деление. Иначе меняется порядок округления float.
-  const denominatorWithoutCar = Math.max(withoutCar, 1e-300);
-  const activeShare =
-    (1 - noCarShare) * active / withCar + noCarShare * active / denominatorWithoutCar;
-  const bikeRatio = active > 0 ? bike / active : 0;
+  const total = (weights.transit ?? 0) + (weights.car ?? 0) + (weights.walk ?? 0);
+  if (total <= 0) return { ...EMPTY_PROBABILITIES };
 
   return {
-    transit: (1 - noCarShare) * transit / withCar + noCarShare * transit / denominatorWithoutCar,
-    car: (1 - noCarShare) * car / withCar,
-    walk: activeShare * (1 - bikeRatio),
-    bike: activeShare * bikeRatio,
-    rest: (1 - noCarShare) * rest / withCar + noCarShare * rest / denominatorWithoutCar,
+    transit: (weights.transit ?? 0) / total,
+    car: (weights.car ?? 0) / total,
+    walk: (weights.walk ?? 0) / total,
   };
 }
-
 /**
  * Split transit demand by inverse generalized travel cost.
  *

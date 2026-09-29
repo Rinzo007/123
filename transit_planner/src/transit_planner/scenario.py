@@ -153,7 +153,6 @@ def compare_scenarios(
         ("average_transfers", base_metrics.average_transfers, alternative_metrics.average_transfers),
         ("max_load_ratio", base.assignment.max_load_ratio, alternative.assignment.max_load_ratio),
         ("passenger_km", base.analytics.passenger_km, alternative.analytics.passenger_km),
-        ("bike_trips", base_metrics.bike_trips, alternative_metrics.bike_trips),
     )
     if base.economics is not None and alternative.economics is not None:
         base_economics = base.economics

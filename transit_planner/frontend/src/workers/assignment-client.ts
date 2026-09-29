@@ -149,7 +149,6 @@ function toAssignmentResponse(result: AssignmentWorkerResult): AssignmentRespons
       transit_trips: result.metrics.transitTrips,
       car_trips: result.metrics.carTrips,
       walk_trips: result.metrics.walkTrips,
-      bike_trips: result.metrics.bikeTrips,
       transit_share: result.metrics.transitShare,
       average_transit_time_min: result.metrics.averageTransitTimeMin,
       average_transfers: result.metrics.averageTransfers,

@@ -2,13 +2,6 @@ import type { NetworkPayload } from "../types";
 import { planningPreview, probe, keepNetwork, type PlanningPreview, type ScenarioProbe } from "../simulation/preview";
 import { routeWithRaptor, type RaptorJourney } from "./routing";
 
-import {
-  EvaluationClient,
-  solveDemand,
-  type DemandBatch,
-  type DemandOutput,
-} from "./reference-runtime";
-
 export type EvaluationSummary = {
   lines: number;
   stops: number;
@@ -35,18 +28,9 @@ export function networkCounts(network: NetworkPayload): NetworkCounts {
   };
 }
 
-export type DemandBatchResult = DemandOutput;
-
-export function solveDemandStrategy(
-  batch: DemandBatch,
-): Promise<DemandBatchResult> {
-  return solveDemand(batch);
-}
-
-export function createEvaluationClient(workerCount?: number): EvaluationClient {
-  return new EvaluationClient(workerCount);
-}
-
 export function disposeComputationWorkers(): void {
-  // EvaluationClient owns the actual evaluation worker pool.
+  // Reference-оценка и reference-воркер выбора спроса удалены: их движки содержали
+  // цикл равновесия и frequency-based insertion, которых нет ни в одном игровом
+  // модуле, а исходников для проверки нет. Спрос считает demand-воркер, оценку
+  // пассажиропотоков - assignment-воркер; пулы у них собственные.
 }

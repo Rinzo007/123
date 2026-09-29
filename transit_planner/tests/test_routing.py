@@ -421,51 +421,127 @@ def test_range_query_departure_cap_is_configurable() -> None:
     assert journey.legs
 
 
-def make_street_network() -> tuple[Network, RoadGraph]:
+def make_street_network(*, far_stop: bool = False) -> tuple[Network, RoadGraph]:
     network = Network()
-    for stop_id, x in (("a", 0), ("b", 1000), ("c", 1600)):
+    stops = (("a", 0), ("b", 1000), ("c", 1600))
+    if far_stop:
+        stops = stops + (("d", 5000),)
+    for stop_id, x in stops:
         network.add_stop(Stop(stop_id, stop_id.upper(), Point(x, 0)))
     network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 90))
     network.add_period(ServicePeriod("am", 360, 540))
-    network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b", "c")))
+    network.add_route(Route("r1", "1", TransitMode.BUS, tuple(s for s, _ in stops)))
     network.add_service(Service("svc", "r1", "bus", {"am": 10}))
 
     graph = RoadGraph()
-    for node_id, x in ((1, 0), (2, 1000), (3, 1600), (10, 500)):
+    nodes = [(1, 0), (2, 1000), (3, 1600), (10, 500)]
+    if far_stop:
+        nodes.append((4, 5000))
+    for node_id, x in nodes:
         graph.add_node(RoadNode(node_id, float(x), 0.0))
     graph.add_edge(RoadEdge("aq", 1, 10, 500.0, 30.0, "residential"))
     graph.add_edge(RoadEdge("qb", 10, 2, 500.0, 30.0, "residential"))
     graph.add_edge(RoadEdge("bc", 2, 3, 600.0, 30.0, "residential"))
+    if far_stop:
+        graph.add_edge(RoadEdge("cd", 3, 4, 3400.0, 30.0, "residential"))
     return network, graph
 
 
 def test_door_to_door_searches_every_stop_within_walking_catchment():
-    network, graph = make_street_network()
+    # Пункт назначения вынесен на 5 км: пешком 4.5 км - это 50 минут при
+    # игровых 1.5 м/с, то есть за пределами 45-минутного лимита доступа,
+    # поэтому пешком идти нельзя и остаётся автобус.
+    network, graph = make_street_network(far_stop=True)
     router = TransitRouter(network, road_graph=graph)
+
+    access, egress = router._street_door_minutes(
+        Point(500.0, 0.0), Point(5000.0, 0.0)
+    )
+
+    # В catchment входят все остановки дороже старых 500 м, но не D:
+    # 4.5 км пешком это 50 минут, лимит игры - 45.
+    assert set(access) == {"a", "b", "c"}
+    assert access["a"] == pytest.approx(access["b"])
+    assert access["c"] > access["b"]
+    assert egress["d"] == pytest.approx(0.0)
+    # D недостижима пешком от точкиorigin, но достижима из другой точки.
+    assert egress["b"] > 0.0
 
     journey = router.shortest_from_points(
         Point(500.0, 0.0),
-        Point(1600.0, 0.0),
+        Point(5000.0, 0.0),
         origin_id="door",
         destination_id="hall",
         period_id="am",
     )
 
     assert journey is not None
-    # A and B are equally far on foot, but boarding at B saves a transit
-    # segment. The search must consider B, not only the tied nearest stop.
-    assert journey.origin_stop_id == "b"
-    assert journey.destination_stop_id == "c"
     assert journey.legs[0].kind == "access"
-    assert (journey.legs[0].from_id, journey.legs[0].to_id) == ("door", "b")
-    assert journey.legs[0].duration_min == pytest.approx(6.0)
+    assert journey.legs[0].from_id == "door"
     assert journey.legs[-1].kind == "egress"
-    assert (journey.legs[-1].from_id, journey.legs[-1].to_id) == ("c", "hall")
-    assert journey.legs[-1].duration_min == 0.0
-    assert journey.duration_min == pytest.approx(
-        journey.legs[0].duration_min
-        + network.route_segment_run_time_min(network.routes["r1"], 1)
+    assert journey.legs[-1].to_id == "hall"
+    assert journey.legs[-1].from_id == "d"
+    # Посадка идёт в остановку из catchment, а пешая нога считается по
+    # игровым 1.5 м/с.
+    assert journey.origin_stop_id in {"a", "b", "c"}
+    assert journey.legs[0].duration_min == pytest.approx(
+        access[journey.origin_stop_id]
     )
+    assert journey.legs[0].duration_min == pytest.approx(
+        (500.0 if journey.origin_stop_id in {"a", "b"} else 1100.0) / 1.5 / 60.0
+    )
+
+
+def test_door_to_door_walking_catchment_is_45_minutes():
+    """Лимит доступа к остановке - время, а не радиус: 2700 с при 1.5 м/с."""
+    network = Network()
+    network.add_stop(Stop("far", "Far", Point(4000, 0)))
+    network.add_period(ServicePeriod("am", 360, 540))
+
+    graph = RoadGraph()
+    graph.add_node(RoadNode(1, 0.0, 0.0))
+    graph.add_node(RoadNode(2, 4000.0, 0.0))
+    graph.add_edge(RoadEdge("link", 1, 2, 4000.0, 30.0, "residential"))
+    router = TransitRouter(network, road_graph=graph)
+
+    # 4000 м / 1.5 м/с = 2666.7 с < 2700 с - остановка в пределах лимита.
+    access, _ = router._street_door_minutes(Point(0.0, 0.0), Point(0.0, 0.0))
+    assert set(access) == {"far"}
+    assert access["far"] == pytest.approx(4000.0 / 1.5 / 60.0)
+
+    # 4400 м / 1.5 м/с = 2933.3 с > 2700 с - остановка выпадает из
+    # catchment, хотя "far" по-прежнему достижима.
+    graph.add_node(RoadNode(3, 4400.0, 0.0))
+    graph.add_edge(RoadEdge("link2", 2, 3, 400.0, 30.0, "residential"))
+    network.add_stop(Stop("farther", "Farther", Point(4400, 0)))
+    access, _ = router._street_door_minutes(Point(0.0, 0.0), Point(0.0, 0.0))
+    assert set(access) == {"far"}
+
+    # Лимит виден прямо в тексте ошибки, когда ни одна остановка не
+    # достижима пешком.
+    tight = TransitRouter(
+        network, road_graph=graph, config=RouterConfig(max_walk_to_from_station_s=1.0)
+    )
+    with pytest.raises(ValueError, match="1 s"):
+        tight._street_door_minutes(Point(0.0, 0.0), Point(0.0, 0.0))
+
+
+def test_door_to_door_walking_speed_matches_the_game():
+    """Пешая нога считается по игровым 1.5 м/с, то есть 5.4 км/ч."""
+    network, graph = make_street_network(far_stop=True)
+    router = TransitRouter(network, road_graph=graph)
+    assert router.config.walking_speed_kph == pytest.approx(5.4)
+
+    journey = router.shortest_from_points(
+        Point(500.0, 0.0),
+        Point(5000.0, 0.0),
+        origin_id="door",
+        destination_id="hall",
+        period_id="am",
+    )
+    access_leg = journey.legs[0]
+    distance_m = 500.0 if journey.origin_stop_id in {"a", "b"} else 1100.0
+    assert access_leg.duration_min == pytest.approx(distance_m / 1.5 / 60.0)
 
 
 def test_door_to_door_without_street_graph_is_an_error():

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from math import hypot, inf, isfinite
 from typing import Callable
 
+from . import game_rules
 from .geo import Point
 from .network import Network, Stop
 from .reference_model import (
@@ -43,8 +44,14 @@ class Journey:
 
 @dataclass(frozen=True, slots=True)
 class RouterConfig:
-    walking_speed_kph: float = 5.0
+    walking_speed_kph: float = game_rules.WALKING_SPEED_KPH
     default_transit_speed_kph: float = 20.0
+    # Игра ограничивает подход к остановке временем, а не радиусом:
+    # MAX_WALK_TO_FROM_STATION_S = 2700 с (45 минут) по дорожному пути.
+    max_walk_to_from_station_s: float = game_rules.MAX_WALK_TO_FROM_STATION_S
+    # Радиус пешеходной связи между остановками (пересадка). В игре он
+    # задан временем MAX_TRANSFER_WALKING_TIME_S = 600 с; здесь оставлен как
+    # расстояние, потому что пересадка - не access/egress.
     walk_transfer_radius_m: float = 500.0
     road_snap_max_m: float = 150.0
     wait_weight: float = 1.0
@@ -58,6 +65,8 @@ class RouterConfig:
     def __post_init__(self) -> None:
         if self.walking_speed_kph <= 0 or self.default_transit_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
+        if self.max_walk_to_from_station_s < 0:
+            raise ValueError("max_walk_to_from_station_s cannot be negative")
         if self.walk_transfer_radius_m < 0:
             raise ValueError("walk_transfer_radius_m cannot be negative")
         if self.road_snap_max_m < 0:
@@ -171,9 +180,10 @@ class TransitRouter:
     ) -> tuple[dict[str, float], dict[str, float]]:
         """Closed-door walk times from and to every reachable transit stop.
 
-        The shared pedestrian catchment is walk_transfer_radius_m. It is a
-        street-path budget, not a straight-line radius: point-to-node and
-        node-to-stop connector hops are part of the distance.
+        The pedestrian catchment is a time budget, exactly as in the game:
+        `MAX_WALK_TO_FROM_STATION_S` = 2700 s (45 minutes) of walking measured
+        on the street path. Point-to-node and node-to-stop connector hops are
+        part of that walk, so the limit is not a straight-line radius.
         """
         graph, _ = self._require_street_graph()
         origin_node, origin_offset_m = self._snap_street_point(origin, "Origin")
@@ -186,7 +196,7 @@ class TransitRouter:
         destination_search = graph.walking_search(
             destination_node, walking_speed_kph=self.config.walking_speed_kph
         )
-        limit_m = self.config.walk_transfer_radius_m
+        limit_s = self.config.max_walk_to_from_station_s
         access: dict[str, float] = {}
         egress: dict[str, float] = {}
         for stop_id, snap in self._stop_road_snaps.items():
@@ -200,8 +210,9 @@ class TransitRouter:
                     + origin_graph_m * self.config.walking_speed_kph / 60.0 * 1000.0
                     + stop_offset_m
                 )
-                if access_m <= limit_m or abs(access_m - limit_m) <= 1e-9:
-                    access[stop_id] = self._walk_minutes(access_m)
+                access_s = self._walk_minutes(access_m) * 60.0
+                if access_s <= limit_s or abs(access_s - limit_s) <= 1e-9:
+                    access[stop_id] = access_s / 60.0
             destination_graph_m = destination_search.minutes.get(snap.road_node_id)
             if destination_graph_m is not None:
                 egress_m = (
@@ -209,18 +220,19 @@ class TransitRouter:
                     + destination_graph_m * self.config.walking_speed_kph / 60.0 * 1000.0
                     + destination_offset_m
                 )
-                if egress_m <= limit_m or abs(egress_m - limit_m) <= 1e-9:
-                    egress[stop_id] = self._walk_minutes(egress_m)
+                egress_s = self._walk_minutes(egress_m) * 60.0
+                if egress_s <= limit_s or abs(egress_s - limit_s) <= 1e-9:
+                    egress[stop_id] = egress_s / 60.0
 
         if not access:
             raise ValueError(
                 "No transit stop is reachable on foot from the origin within "
-                f"{limit_m:g} m"
+                f"{limit_s:g} s"
             )
         if not egress:
             raise ValueError(
                 "No transit stop can reach the destination on foot within "
-                f"{limit_m:g} m"
+                f"{limit_s:g} s"
             )
         return access, egress
 
@@ -630,6 +642,14 @@ class TransitRouter:
             segment_penalties=segment_penalties,
         )
         if legs is None:
+            return None
+        if not any(leg.kind == "transit" for leg in legs):
+            # Access seed plus foot-paths can reach a stop that egress reaches
+            # from, producing a label that is entirely walking. A pedestrian
+            # does not board a stop, so such a path is not a transit journey
+            # and must not be returned from the router. The game compares
+            # walk-only against transit at the demand-pair level, in
+            # assignment, not by routing the walk through stops here.
             return None
 
         adjusted = _add_intermediate_dwell(self.network, legs)

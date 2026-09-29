@@ -157,6 +157,7 @@ export function assignDemand(input: AssignmentWorkerInput): AssignmentWorkerResu
   const { capacity, platformM } = sectionCapacityAndPlatforms(input.network, input.periodId);
   const sectionCapacity: SectionCapacity[] = capacity;
   const dwell = stopDwellCoefficients(input.network, input.periodId);
+  // Времена сегментов нужны для развёртки рейса в ноги по секциям.
   const runTimes = segmentRunTimes(input.network);
   const zones = new Map(input.zones.map((zone) => [zone.id, zone]));
   const totalTrips = input.pairs.reduce((sum, pair) => sum + Math.max(0, pair.tripsPerDay), 0);
@@ -172,6 +173,10 @@ export function assignDemand(input: AssignmentWorkerInput): AssignmentWorkerResu
     zoneStops.set(zone.id, index);
   }
 
+  // Итеративный цикл подмешивает в выбор штраф за тесноту секций и интервальные
+  // множители. В игре (popCommuteWorker) обратной связи по загрузке нет:
+  // getModeChoice берёт времена из расписания и времени суток. Цикл -
+  // планировщиковая надстройка, а не зеркало игры.
   let segmentPenalties = new Map<string, number>();
   let headwayFactors = new Map<string, number>();
   let snapshot: AssignmentSnapshot | null = null;
@@ -215,6 +220,8 @@ export function assignDemand(input: AssignmentWorkerInput): AssignmentWorkerResu
     const journeysPerPair: AssignmentJourney[][] = [];
     const accessWalk: number[] = [];
     const egressWalk: number[] = [];
+    // Счётчик пар обнуляется на каждой итерации: он описывает текущий проход,
+    // а не сумму по всем проходам.
     unroutedPairs = 0;
 
     input.pairs.forEach((pair) => {

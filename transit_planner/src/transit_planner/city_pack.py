@@ -20,8 +20,6 @@ from .binary_pack import (
     encode_zones_bin,
 )
 from .control_totals import (
-    ZoneControl,
-    anchor_to_control,
     jobs_from_workplace_floor_area,
 )
 from .demand_points import load_demand_points
@@ -42,7 +40,6 @@ from .population_raster import (
 )
 from .study_area import StudyArea
 from .urban import (
-    FLOOR_AREA_PER_PERSON_M2,
     BuildingFootprint,
     effective_floors,
     polygon_area_m2,
@@ -356,50 +353,6 @@ def jobs_by_purpose(
     }
 
 
-def _residential_population_by_zone(
-    buildings: tuple[BuildingFootprint, ...],
-    classifications: tuple[BuildingClassification, ...],
-    zones: tuple[DemandZone, ...],
-    *,
-    origin_lon: float,
-    origin_lat: float,
-) -> dict[str, float]:
-    """Оценка населения снизу вверх: жилая площадь зданий на человека.
-
-    Это форма распределения, а не итог. Итог приходит из растра населения
-    (см. `population_raster`), и оценка масштабируется под него.
-    """
-    from .urban import FLOOR_AREA_PER_PERSON_M2
-
-    if not classifications or not buildings:
-        return {}
-
-    residential = {
-        item.building_id
-        for item in classifications
-        if item.building_class is BuildingClass.RESIDENTIAL and item.floor_area_m2 > 0
-    }
-    totals: dict[str, float] = {zone.id: 0.0 for zone in zones}
-    for building in buildings:
-        if building.id not in residential:
-            continue
-        centroid = _building_centroid(building)
-        if centroid is None:
-            continue
-        point = project_wgs84_point(
-            centroid, origin_lon=origin_lon, origin_lat=origin_lat
-        )
-        nearest = _nearest_zone(zones, point)
-        if nearest is None:
-            continue
-        totals[nearest.id] += building.area_m2 * effective_floors(building)
-    return {
-        zone_id: floor_area / FLOOR_AREA_PER_PERSON_M2
-        for zone_id, floor_area in totals.items()
-        if floor_area > 0
-    }
-
-
 def _nearest_zone(zones: tuple[DemandZone, ...], point: Point) -> DemandZone | None:
     return min(
         zones,
@@ -542,9 +495,6 @@ def build_city_zones(
     )
     enriched = aggregate_place_attractions(zones, projected_places)
     classifications = classify_buildings(buildings)
-    residential: dict[str, float] = _residential_population_by_zone(
-        buildings, classifications, zones, origin_lon=origin_lon, origin_lat=origin_lat
-    )
     workplace_area = _workplace_floor_area_by_zone(
         buildings, classifications, zones, origin_lon=origin_lon, origin_lat=origin_lat
     )
@@ -553,22 +503,23 @@ def build_city_zones(
         by_purpose=True,
     )
 
-    # Форма распределения - из зданий, величина - из растра населения. Без
-    # растра остаётся оценка снизу вверх, и тогда это пишется в provenance.
-    method = "overture_buildings"
+    # Население берётся только из растра контрольных итогов. Оценка «жилая
+    # площадь делить на площадь на человека» удалена: она опиралась на
+    # FLOOR_AREA_PER_PERSON_M2, то есть на константу без источника, и при
+    # отсутствии растра молча выдавала бы неопределённое население.
     population_controls: dict[str, float] = {}
     if population_controls_factory is not None:
         population_controls = population_controls_factory(zones)
+    residential = {
+        zone_id: people
+        for zone_id, people in population_controls.items()
+        if people > 0
+    }
     if population_controls:
-        residential, _control_report = anchor_to_control(
-            residential,
-            tuple(
-                ZoneControl(zone_id=zone_id, population=people)
-                for zone_id, people in sorted(population_controls.items())
-            ),
-        )
         method = "raster_control_total"
+        _control_report = None
     else:
+        method = "raster_control_missing"
         _control_report = None
 
     # Занятость: рабочие здания задают форму, население - величину. Так
@@ -593,14 +544,10 @@ def build_city_zones(
             by_zone.setdefault(zone_id, {})[purpose] = round(value, 3)
     for zone in enriched:
         work = zone.attractions.get("work", 0.0)
-        other = sum(
-            value
-            for purpose, value in zone.attractions.items()
-            if purpose != "work"
-        )
-        # Здания побеждают прокси мест: у POI нет объёма, а у здания есть.
-        # Если зданий нет, остаётся прежний прокси.
-        population = residential.get(zone.id, other)
+        # Население только из растра. Прокси мест (важность POI) как источник
+        # населения удалён: это не население, и без растра зона остаётся пустой,
+        # а pack помечается как raster_control_missing в provenance.
+        population = residential.get(zone.id, 0.0)
         # Типизированная занятость заменяет прокси по тем же ключам purpose:
         # аттракции зоны уходят прямо в слой соответствующего назначения.
         attractions = by_zone.get(zone.id, {})
@@ -746,11 +693,10 @@ def _pack_provenance(
             "demand_points": "population and jobs read from an external demand-point set; "
             "the field is taken as given and is not recalibrated against the raster, "
             "buildings or a census",
-            "raster_control_total": "distribution shape from Overture residential floor area, "
-            "magnitude from the GHS-POP raster (2030 projection, not a census count)",
-            "overture_buildings": "Overture footprint x num_floors / assumed floor area per person, "
-            "undercounts where Overture building coverage is missing",
-            "place_importance_proxy": "place-importance proxy, not calibrated to any population statistic",
+            "raster_control_total": "population read from the GHS-POP raster "
+            "(2030 projection, not a census count), distributed over the zone grid",
+            "raster_control_missing": "NO POPULATION: the raster was unavailable, so zones "
+            "carry zero population and the pack must not be used for assignment",
         }[population_method],
         "jobs are a closed labour market: the total equals the population, with the "
         "spatial shape taken from workplace-classified building floor area",
@@ -761,7 +707,6 @@ def _pack_provenance(
     parameters: dict = {
         "snapMaxDistanceM": snap_max_distance_m,
         "populationMethod": population_method,
-        "floorAreaPerPersonM2": FLOOR_AREA_PER_PERSON_M2,
     }
 
     return {
@@ -992,7 +937,7 @@ def build_overture_city_pack(
     elif population_raster_info:
         population_method = "raster_control_total"
     else:
-        population_method = "overture_buildings" if buildings else "place_importance_proxy"
+        population_method = "raster_control_missing"
     files = {
         "streets.json": json.dumps(
             streets, ensure_ascii=False, separators=(",", ":")

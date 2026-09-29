@@ -84,7 +84,7 @@ def test_economics_endpoint_calculates_report():
 
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0)))
-    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("b", "B", Point(10_000, 0)))
     network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80, 2.0))
     network.add_period(ServicePeriod("peak", 0, 60))
     network.add_route(Route("r1", "1", TransitMode.BUS, ("a", "b")))
@@ -101,7 +101,7 @@ def test_economics_endpoint_calculates_report():
         }],
         "zones": [
             {"id": "a", "centroid_x": 0.0, "centroid_y": 0.0},
-            {"id": "b", "centroid_x": 1000.0, "centroid_y": 0.0},
+            {"id": "b", "centroid_x": 10_000.0, "centroid_y": 0.0},
         ],
         "config": {"period_id": "peak", "max_access_distance_m": 0},
         "economics_config": {
@@ -112,7 +112,7 @@ def test_economics_endpoint_calculates_report():
     })
 
     assert result["scenario_id"] == "demo"
-    assert result["economics"]["daily_vehicle_km"] == 12.0
+    assert result["economics"]["daily_vehicle_km"] == 120.0
     assert result["economics"]["daily_fare_revenue"] > 0
     assert result["economics"]["annual_operating_cost"] == result["economics"]["daily_operating_cost"] * 365
 
@@ -242,7 +242,7 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
 
     network = Network()
     network.add_stop(Stop("a", "A", Point(0, 0)))
-    network.add_stop(Stop("b", "B", Point(1000, 0)))
+    network.add_stop(Stop("b", "B", Point(10_000, 0)))
     network.add_vehicle_type(VehicleType("bus", "Bus", TransitMode.BUS, 80, 2.0))
     network.add_period(ServicePeriod("am", 360, 540))
     network.add_period(ServicePeriod("pm", 900, 1080))
@@ -250,10 +250,19 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
     network.add_service(Service("svc", "r1", "bus", {"am": 10, "pm": 10}))
 
     from transit_planner.assignment import AssignmentConfig, assign_demand
+    from transit_planner.city import DemandZone
     from transit_planner.demand import DemandMatrix, ODPairDemand
+    zones = {
+        "a": DemandZone(id="a", centroid_x=0.0, centroid_y=0.0, population=100.0, jobs=0.0),
+        "b": DemandZone(id="b", centroid_x=10_000.0, centroid_y=0.0, population=0.0, jobs=100.0),
+    }
     demand = DemandMatrix((ODPairDemand("a", "b", 100),))
-    am = assign_demand(network, demand, config=AssignmentConfig(period_id="am", max_access_distance_m=0))
-    pm = assign_demand(network, demand, config=AssignmentConfig(period_id="pm", max_access_distance_m=0))
+    am = assign_demand(
+        network, demand, config=AssignmentConfig(period_id="am", max_access_distance_m=0), zones=zones
+    )
+    pm = assign_demand(
+        network, demand, config=AssignmentConfig(period_id="pm", max_access_distance_m=0), zones=zones
+    )
     temporal = TemporalAssignmentResult((
         PeriodAssignment("am", 100.0, am),
         PeriodAssignment("pm", 100.0, pm),
@@ -279,7 +288,7 @@ def test_city_assignment_exposes_temporal_economics(monkeypatch):
         "economics_config": {"period_id": "am", "fare_per_transit_trip": 2.0},
     })
 
-    assert result["economics"]["daily_vehicle_km"] == 72.0
+    assert result["economics"]["daily_vehicle_km"] == 720.0
     assert len(result["periods"]) == 2
     assert all("economics" in period for period in result["periods"])
     assert all("services" in period for period in result["periods"])

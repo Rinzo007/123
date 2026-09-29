@@ -28,6 +28,11 @@ from transit_planner.places import CityPlace
 
 
 def test_build_city_zones_grids_places_into_taz():
+    """Сетка TAZ строится по местам, но население приходит из растра.
+
+    Прокси мест (важность POI) населением больше не считается: без растра
+    контрольных итогов зоны пустые, и это проверяется явно.
+    """
     places = tuple(
         CityPlace(
             id=f"p{index}",
@@ -43,14 +48,46 @@ def test_build_city_zones_grids_places_into_taz():
     assert all(zone.id.startswith("z") for zone in zones)
     total_population = sum(zone.population for zone in zones)
     total_jobs = sum(zone.jobs for zone in zones)
-    assert total_jobs > 0.0
-    assert total_population > 0.0
+    assert total_population == pytest.approx(0.0), (
+        "население без растра не оценивается по площади и не берётся из важности POI"
+    )
     work_zones = [zone for zone in zones if zone.jobs > 0.0]
-    assert work_zones, "office places must create employment"
+    assert not work_zones, (
+        "office places без населения не создают занятость: рынок труда "
+        "уравнивается на население, а оно нулевое"
+    )
+    assert total_jobs == pytest.approx(0.0), (
+        "занятость без населения не имеет величины: рынок труда закрыт на него"
+    )
     assert all(
         (zone.centroid_x - min(zone.centroid_x for zone in zones)) >= 0
         for zone in zones
     )
+
+
+def test_build_city_zones_reads_population_from_raster_controls():
+    places = tuple(
+        CityPlace(
+            id=f"p{index}",
+            name=f"Place {index}",
+            location=Point(39.0 + index * 0.01, 51.0),
+            basic_category="office",
+            importance=10.0,
+        )
+        for index in range(4)
+    )
+    zones = build_city_zones(
+        places,
+        origin_lon=39.0,
+        origin_lat=51.0,
+        population_controls_factory=lambda _zones: {
+            f"z{index:04d}_0000": 250.0 for index in range(4)
+        },
+    )
+    total = sum(zone.population for zone in zones)
+    assert total == pytest.approx(1000.0)
+    # Занятость равна населению: закрытый рынок труда.
+    assert sum(zone.jobs for zone in zones) == pytest.approx(total, rel=1e-6)
 
 
 def minimal_pack_files() -> dict[str, bytes]:

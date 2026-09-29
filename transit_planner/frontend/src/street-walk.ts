@@ -1,17 +1,23 @@
+import { GAME_MAX_WALK_TO_FROM_STATION_S, GAME_WALKING_SPEED_KPH } from "./game-rules";
 import { fromLocalMeters, toLocalMeters } from "./projection";
 import { snapStreetPoint, type StreetGraph } from "./street-graph";
 import type { NetworkPayload } from "./types";
 
 /** Pedestrian speed, mirroring RouterConfig.walking_speed_kph. */
-export const STREET_WALK_KPH = 5.0;
-/** Shared pedestrian catchment, mirroring walk_transfer_radius_m. */
-export const STREET_ACCESS_RADIUS_M = 500.0;
+export const STREET_WALK_KPH = GAME_WALKING_SPEED_KPH;
+/**
+ * Pedestrian catchment as a walking time budget, mirroring
+ * RouterConfig.max_walk_to_from_station_s: 45 minutes, exactly as in the game.
+ * The transfer catchment is a separate, shorter limit in the game; this budget
+ * is only about reaching a stop from a door and back.
+ */
+export const STREET_WALK_LIMIT_MIN = GAME_MAX_WALK_TO_FROM_STATION_S / 60;
 /** Maximum connector hop from a point or stop to the street graph. */
 export const STREET_SNAP_MAX_M = 150.0;
 /** TKST road class produced for motorways by _road_class_code. */
 const MOTORWAY_STREET_CLASS = 4;
 /** Closed-door budget comparison needs the same edge tolerance as Python. */
-const METRE_TOLERANCE = 1e-9;
+const MINUTE_TOLERANCE = 1e-9;
 
 export interface StreetWalkCsr {
   nodeCount: number;
@@ -284,7 +290,7 @@ export interface StreetDoorRequest {
   origin: { lon: number; lat: number };
   destination: { lon: number; lat: number };
   walkingSpeedKph?: number;
-  accessRadiusM?: number;
+  maxWalkMin?: number;
   snapMaxM?: number;
 }
 
@@ -292,8 +298,8 @@ export interface StreetDoorRequest {
  * Street-graph access/egress for every transit stop.
  *
  * Query points and stops first snap to graph nodes; graph minutes plus both
- * straight connector hops must fit the shared pedestrian catchment. There is
- * no Euclidean fallback for disconnected pairs.
+ * straight connector hops must fit the walking time budget. There is no
+ * Euclidean fallback for disconnected pairs.
  */
 export function planStreetDoorAccess(request: StreetDoorRequest): StreetDoorAccess {
   const {
@@ -302,11 +308,11 @@ export function planStreetDoorAccess(request: StreetDoorRequest): StreetDoorAcce
     origin,
     destination,
     walkingSpeedKph = STREET_WALK_KPH,
-    accessRadiusM = STREET_ACCESS_RADIUS_M,
+    maxWalkMin = STREET_WALK_LIMIT_MIN,
     snapMaxM = STREET_SNAP_MAX_M,
   } = request;
-  if (!Number.isFinite(accessRadiusM) || accessRadiusM < 0) {
-    throw new Error("Радиус пешеходной доступности должен быть неотрицательным");
+  if (!Number.isFinite(maxWalkMin) || maxWalkMin < 0) {
+    throw new Error("Пешеходный лимит доступа должен быть неотрицательным временем");
   }
   if (!(snapMaxM >= 0)) throw new Error("Порог привязки к графу должен быть неотрицательным");
 
@@ -378,10 +384,11 @@ export function planStreetDoorAccess(request: StreetDoorRequest): StreetDoorAcce
   }
 
   const csr = buildStreetWalkCsr(graph, walkingSpeedKph);
-  const budgetMin = (accessRadiusM / 1000 / walkingSpeedKph) * 60;
+  // The search budget may only cover the graph part of the walk, so it is a
+  // valid superset of the full budget the filter below enforces.
   const wanted = stopNodes.filter((node) => node >= 0);
-  const originTree = searchStreetWalk(csr, originSnap.node, wanted, budgetMin);
-  const destinationTree = searchStreetWalk(csr, destinationSnap.node, wanted, budgetMin);
+  const originTree = searchStreetWalk(csr, originSnap.node, wanted, maxWalkMin);
+  const destinationTree = searchStreetWalk(csr, destinationSnap.node, wanted, maxWalkMin);
   const accessTimeMin = new Float64Array(network.stops.length).fill(Number.POSITIVE_INFINITY);
   const egressTimeMin = new Float64Array(network.stops.length).fill(Number.POSITIVE_INFINITY);
   for (let stop = 0; stop < network.stops.length; stop += 1) {
@@ -389,21 +396,23 @@ export function planStreetDoorAccess(request: StreetDoorRequest): StreetDoorAcce
     if (node < 0) continue;
     const accessGraphM = originTree.minutes[node] * (walkingSpeedKph / 60) * 1000;
     const accessM = originOffsetM + accessGraphM + stopOffsetM[stop];
-    if (Number.isFinite(accessM) && accessM <= accessRadiusM + METRE_TOLERANCE) {
-      accessTimeMin[stop] = streetWalkMinutes(accessM, walkingSpeedKph);
+    const accessMin = streetWalkMinutes(accessM, walkingSpeedKph);
+    if (Number.isFinite(accessMin) && accessMin <= maxWalkMin + MINUTE_TOLERANCE) {
+      accessTimeMin[stop] = accessMin;
     }
     const egressGraphM = destinationTree.minutes[node] * (walkingSpeedKph / 60) * 1000;
     const egressM = stopOffsetM[stop] + egressGraphM + destinationOffsetM;
-    if (Number.isFinite(egressM) && egressM <= accessRadiusM + METRE_TOLERANCE) {
-      egressTimeMin[stop] = streetWalkMinutes(egressM, walkingSpeedKph);
+    const egressMin = streetWalkMinutes(egressM, walkingSpeedKph);
+    if (Number.isFinite(egressMin) && egressMin <= maxWalkMin + MINUTE_TOLERANCE) {
+      egressTimeMin[stop] = egressMin;
     }
   }
 
   if (!accessTimeMin.some((value) => Number.isFinite(value))) {
-    throw new Error(`Ни одна остановка недоступна пешком в пределах ${accessRadiusM} м от начала`);
+    throw new Error(`Ни одна остановка не достижима пешком от начала за ${maxWalkMin} мин`);
   }
   if (!egressTimeMin.some((value) => Number.isFinite(value))) {
-    throw new Error(`Ни одна остановка недоступна пешком в пределах ${accessRadiusM} м до конца`);
+    throw new Error(`Ни одна остановка не достигает конца пешком за ${maxWalkMin} мин`);
   }
   return {
     graph,

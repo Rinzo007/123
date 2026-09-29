@@ -102,10 +102,10 @@ VEHICLE_TYPES = [
     VehicleType(id="vt_tram", name="Tram", mode=TransitMode.TRAM, capacity=250),
 ]
 ZONES = [
-    DemandZone("z1", 50.0, 0.0, population=1000.0, jobs=100.0, no_car_share=0.3),
-    DemandZone("z2", 1150.0, 0.0, population=800.0, jobs=200.0, no_car_share=0.6),
+    DemandZone("z1", 50.0, 0.0, population=1000.0, jobs=100.0),
+    DemandZone("z2", 1150.0, 0.0, population=800.0, jobs=200.0),
     # Далеко за пределами access_m любого режима: остановки быть не должно.
-    DemandZone("z_far", 9000.0, 0.0, population=100.0, jobs=10.0, no_car_share=0.5),
+    DemandZone("z_far", 9000.0, 0.0, population=100.0, jobs=10.0),
 ]
 # Посадки по (service, stop) для расчёта интервальных множителей.
 SERVICE_BOARDINGS = {
@@ -392,7 +392,7 @@ def test_nearest_stop_respects_mode_access_limit() -> None:
     # z_far далеко от всех остановок — остановки нет ни при каком радиусе.
     assert _nearest_stop_id(network, ZONES[2], 1500.0, "am") is None
     # Ближайшая к x=480 остановка — s2 (600 м), она в пределах bus access_m.
-    near = DemandZone("z", 480.0, 0.0, population=10.0, jobs=1.0, no_car_share=0.0)
+    near = DemandZone("z", 480.0, 0.0, population=10.0, jobs=1.0)
     assert _nearest_stop_id(network, near, 1500.0, "am") == "s2"
     # Тот же пункт, но радиус меньше расстояния до s2 — остановки нет.
     assert _nearest_stop_id(network, near, 100.0, "am") is None

@@ -19,7 +19,6 @@ export interface DemandZone {
   population: number;
   jobs: number;
   attractions: Record<string, number>;
-  noCarShare: number;
 }
 
 export interface ODPairDemand {

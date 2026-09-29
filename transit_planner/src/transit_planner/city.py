@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .geo import BoundingBox
-from .reference_model import REFERENCE_MOBILITY
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,15 +30,12 @@ class DemandZone:
     population: float = 0.0
     jobs: float = 0.0
     purpose_attractions: tuple[tuple[str, float], ...] = ()
-    no_car_share: float = REFERENCE_MOBILITY.no_car_share
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("Demand zone id cannot be empty")
         if self.population < 0 or self.jobs < 0:
             raise ValueError("Population and jobs cannot be negative")
-        if not 0.0 <= self.no_car_share <= 1.0:
-            raise ValueError("no_car_share must be in [0, 1]")
         if any(value < 0 for _, value in self.purpose_attractions):
             raise ValueError("Purpose attractions cannot be negative")
         keys = [purpose for purpose, _ in self.purpose_attractions]

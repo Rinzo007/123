@@ -21,7 +21,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from transit_planner.reference_model import REFERENCE_MOBILITY  # noqa: E402
 
 SRC = ROOT / "frontend" / "src"
 TSC_JS = ROOT / "frontend" / "node_modules" / "typescript" / "lib" / "tsc.js"
@@ -171,16 +170,3 @@ def test_app_uses_the_assignment_worker() -> None:
     assert "row.periodId === period.id" in source
 
 
-def test_zones_carry_no_car_share_from_the_reference_model() -> None:
-    """Колонки зон несут долю без автомобиля из подвижностного профиля."""
-    model = json.loads((ROOT / "src" / "transit_planner" / "model.json").read_text(encoding="utf-8"))
-    assert REFERENCE_MOBILITY.no_car_share == pytest.approx(
-        float(model["mobility"]["no_car_share"])
-    )
-    demand_ts = (SRC / "workers" / "demand.ts").read_text(encoding="utf-8")
-    assert "no_car_share" in demand_ts
-    assert "REFERENCE_MOBILITY_NO_CAR_SHARE" in demand_ts
-    # Захардкоженное 0.35 внутри воркера означало бы, что доля игнорируется.
-    worker_ts = (SRC / "workers" / "demand.worker.ts").read_text(encoding="utf-8")
-    assert "noCarShare: 0.35" not in worker_ts
-    assert "input.noCarShare[index]" in worker_ts

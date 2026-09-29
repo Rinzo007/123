@@ -26,10 +26,9 @@ import {
   saveProject,
   saveUiSettings,
 } from "./storage";
-import { createEvaluationClient, disposeComputationWorkers, networkCounts } from "./workers";
+import { disposeComputationWorkers, networkCounts } from "./workers";
 import { assignDemandInWorker, demandStreetsFromLoads } from "./workers/assignment-client";
 import type { AssignmentPair, AssignmentZone } from "./assignment-model";
-import { runRuntimePreview } from "./workers/reference-runtime";
 import { buildReferenceDemand, referenceDemandWorkerRequest } from "./workers/demand";
 import { MapNetworkEditor, type MapEditorMode } from "./map-network-editor";
 import { RouteEditor } from "./planning/route-editor";
@@ -140,7 +139,7 @@ let previousSegmentSignatures: Map<string, string> | null = null;
 let lastPlanningPreview: PlanningPreview | null = null;
 let lastProbeDelta: ReturnType<typeof probe>["delta"] | null = null;
 const cpVariant = new URLSearchParams(location.search).get("cp-variant") || "control";
-let evaluationClient: ReturnType<typeof createEvaluationClient> | null = null;
+// Reference-оценка выключена, пула воркеров для неё больше нет.
 let showRoads = true;
 let showRoadSpeed = false;
 let showStops = true;
@@ -946,7 +945,6 @@ async function runPreview(): Promise<void> {
     previousSegmentSignatures = segmentSignatures(network);
     lastPlanningPreview = planningPreview(network);
     evaluationSummary = networkCounts(network);
-    if (!evaluationClient) evaluationClient = createEvaluationClient();
     if (!populationZones) {
       throw new Error("Зоны населения не загружены: обновите «Данные Overture» (WorldPop)");
     }
@@ -958,7 +956,11 @@ async function runPreview(): Promise<void> {
         originLat: network.origin_lat,
       }),
     );
-    await runRuntimePreview(evaluationClient, network, built.response);
+    // Reference-оценка выключена: её движок evaluation-runtime.js удалён вместе
+    // с хеш-бандлом, а во всех игровых модулях цикла равновесия и штрафа за
+    // тесноту нет. Звонить в поднятый, но не отвечающий воркер нельзя - это
+    // зависание, поэтому вызов убран, а не заглушен. Проверочный пассажиропоток
+    // ниже считается в браузере напрямую через assignment-воркер.
     // Спрос выбранного периода, а не суточная матрица: период задаёт расписание,
     // и считать пассажиропоток по всем суткам сразу нельзя.
     const period = PERIODS.find((item) => item.id === journeyPeriodId);
@@ -980,7 +982,6 @@ async function runPreview(): Promise<void> {
       centroidY: zone.centroid_y,
       population: zone.population,
       jobs: zone.jobs,
-      noCarShare: zone.no_car_share,
     }));
     const periodDeparture = parseClockToMinute(journeyDepartureClock);
     if (periodDeparture < period.start_minute || periodDeparture >= period.end_minute) {
@@ -1342,7 +1343,7 @@ function renderResults(): void {
       ["Общий спрос", assignmentResult.metrics.total_trips],
       ["Общественный транспорт", assignmentResult.metrics.transit_trips],
       ["Автомобиль", assignmentResult.metrics.car_trips],
-      ["Пешком / велосипед", assignmentResult.metrics.walk_trips + assignmentResult.metrics.bike_trips],
+      ["Пешком", assignmentResult.metrics.walk_trips],
       ["Среднее время", assignmentResult.metrics.average_transit_time_min],
       ["Пересадки", assignmentResult.metrics.average_transfers],
       ["Макс. загрузка", assignmentResult.max_load_ratio * 100],
@@ -1601,7 +1602,6 @@ for (const [element, key] of toggleInputs) {
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) mapNetworkEditor?.redo(); else mapNetworkEditor?.undo(); renderPropertyPanel(); render(); return; }
   if (event.key !== "Escape" || !busy) return;
-  evaluationClient?.cancel();
   busy = false;
   setStatus("Расчёт отменён");
   render();
@@ -1720,8 +1720,6 @@ async function refreshEvaluation(): Promise<void> {
 
 window.addEventListener("beforeunload", () => {
   if (autosaveTimer) clearTimeout(autosaveTimer);
-  evaluationClient?.close();
-  evaluationClient = null;
   disposeComputationWorkers();
   map?.remove();
 });

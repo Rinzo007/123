@@ -69,4 +69,4 @@ P7 — экспорт, производительность и развёрты�
 
 ### Соответствие референсу
 
-Frontend использует один Vite entry без UI-фреймворка, MapLibre GL JS 5.24.0, собственное IndexedDB-хранилище `takt/kv`, gzip через `CompressionStream`, reference Web Worker runtime (matrix/routing/demand-choice/evaluation) и бинарный TLC1-кэш дорожной геометрии. Манифесты city packs с SHA-256, версионированием и TKBL-контейнерами — цель Этапа 2 дорожной карты; на текущий момент partial/битые реализации удалены (Этап 1), загрузка pack будет перестроена.
+Frontend использует один Vite entry без UI-фреймворка, MapLibre GL JS 5.24.0, собственное IndexedDB-хранилище `takt/kv`, gzip через `CompressionStream`, собственный Web Worker runtime (routing/demand/assignment) и бинарный TLC1-кэш дорожной геометрии. Манифесты city packs с SHA-256, версионированием и TKBL-контейнерами — цель Этапа 2 дорожной карты; на текущий момент partial/битые реализации удалены (Этап 1), загрузка pack будет перестроена.

@@ -24,7 +24,6 @@ TRANSFERRED = (
     "input.zones.y",
     "input.zones.population",
     "input.zones.jobs",
-    "input.zones.noCarShare",
     "input.zones.attractions",
     "input.places.lon",
     "input.places.lat",

@@ -85,10 +85,10 @@ VEHICLE_TYPES = [
 ]
 
 ZONES = {
-    "z1": DemandZone("z1", 0.0, 0.0, population=5000.0, jobs=200.0, no_car_share=0.8),
-    "z2": DemandZone("z2", 1000.0, 0.0, population=3000.0, jobs=100.0, no_car_share=0.2),
-    "z3": DemandZone("z3", 3000.0, 0.0, population=2000.0, jobs=900.0, no_car_share=0.5),
-    "z4": DemandZone("z4", 4000.0, 0.0, population=1500.0, jobs=300.0, no_car_share=0.6),
+    "z1": DemandZone("z1", 0.0, 0.0, population=5000.0, jobs=200.0),
+    "z2": DemandZone("z2", 1000.0, 0.0, population=3000.0, jobs=100.0),
+    "z3": DemandZone("z3", 3000.0, 0.0, population=2000.0, jobs=900.0),
+    "z4": DemandZone("z4", 4000.0, 0.0, population=1500.0, jobs=300.0),
 }
 
 # --- Пары спроса --------------------------------------------------------
@@ -205,7 +205,7 @@ import { DEFAULT_CHOICE_CONFIG } from "./choice.js";
 const spec = JSON.parse(process.argv[2]);
 const zones = new Map(spec.zones.map((z) => [z.id, {
   id: z.id, centroidX: z.x, centroidY: z.y,
-  population: z.population, jobs: z.jobs, noCarShare: z.no_car_share,
+  population: z.population, jobs: z.jobs,
 }]));
 const pairs = spec.pairs.map((p) => ({
   originZoneId: p[0], destinationZoneId: p[1], tripsPerDay: p[2], baseTimeMin: p[3],
@@ -264,7 +264,9 @@ def _build_network() -> Network:
     )
 
 
-def _access_egress_python(network: Network, pairs, zone_stops, walking_speed_kph=5.0):
+def _access_egress_python(
+    network: Network, pairs, zone_stops, walking_speed_kph=None
+):
     """Ходьба зона→остановка ровно так, как её считает эталонный _assign_once.
 
     Значения нельзя задавать произвольно: при неверном подходе транзитная
@@ -272,6 +274,10 @@ def _access_egress_python(network: Network, pairs, zone_stops, walking_speed_kph
     от нуля с обеих сторон, а расхождение теряется.
     """
     from transit_planner.assignment import _walk_minutes
+    from transit_planner.game_rules import WALKING_SPEED_KPH
+
+    if walking_speed_kph is None:
+        walking_speed_kph = WALKING_SPEED_KPH
 
     access: list[float] = []
     egress: list[float] = []
@@ -366,7 +372,7 @@ def _ts_snapshot(tmp_path: Path) -> dict | None:
     payload = {
         "zones": [
             {"id": z.id, "x": z.centroid_x, "y": z.centroid_y,
-             "population": z.population, "jobs": z.jobs, "no_car_share": z.no_car_share}
+             "population": z.population, "jobs": z.jobs}
             for z in ZONES.values()
         ],
         "pairs": [[p.origin_zone_id, p.destination_zone_id, p.trips_per_day, p.base_time_min] for p in PAIRS],
@@ -439,6 +445,7 @@ def test_assign_once_matches_python(tmp_path: Path) -> None:
     )
 
     metrics = ts["metrics"]
+    mismatches: list[str] = []
     # TS использует camelCase, эталон — snake_case; сверка идёт по общему ключу.
     camel_to_snake = {
         "totalTrips": "total_trips",
@@ -448,9 +455,8 @@ def test_assign_once_matches_python(tmp_path: Path) -> None:
         "transitShare": "transit_share",
         "averageTransitTimeMin": "average_transit_time_min",
         "averageTransfers": "average_transfers",
-        "bikeTrips": "bike_trips",
         "averageWaitTimeMin": "average_wait_time_min",
-        "restTrips": "rest_trips",
+
         "deniedBoardings": "denied_boardings",
     }
     assert set(metrics) == set(camel_to_snake), (
@@ -464,17 +470,15 @@ def test_assign_once_matches_python(tmp_path: Path) -> None:
         "transit_share": snapshot.metrics.transit_share,
         "average_transit_time_min": snapshot.metrics.average_transit_time_min,
         "average_transfers": snapshot.metrics.average_transfers,
-        "bike_trips": snapshot.metrics.bike_trips,
         "average_wait_time_min": snapshot.metrics.average_wait_time_min,
-        "rest_trips": snapshot.metrics.rest_trips,
         "denied_boardings": snapshot.metrics.denied_boardings,
     }
     for snake, value in expected_metrics.items():
         key = next(k for k, v in camel_to_snake.items() if v == snake)
         left = float(metrics[key])
-        assert abs(left - value) <= TOLERANCE * max(1.0, abs(value)), (
-            f"metrics/{snake}: TS {left} != Python {value}"
-        )
+        if abs(left - value) > TOLERANCE * max(1.0, abs(value)):
+            mismatches.append(f"metrics/{snake}: TS {left} != Python {value}")
+    assert not mismatches, "расхождение Python и TS:\n  " + "\n  ".join(mismatches)
 
     assert abs(float(ts["unserved"]) - snapshot.unserved) <= TOLERANCE, (
         f"unserved: TS {ts['unserved']} != Python {snapshot.unserved}"
@@ -557,23 +561,6 @@ def test_strict_fit_boarding_reports_denied() -> None:
     )
     assert snapshot.metrics.denied_boardings > 0.0
     assert any(section.denied_boardings > 0.0 for section in snapshot.section_loads)
-
-
-def test_no_car_share_uses_origin_zone() -> None:
-    """Доля households без авто берётся из зоны отправления."""
-    config = AssignmentConfig(period_id="am")
-    network = _build_network()
-    router = TransitRouter(network, config=RouterConfig())
-    without_car = _assign_once(
-        network, DemandMatrix((ODPairDemand("z1", "z3", 1000.0, base_time_min=32.0),)),
-        router, config, ZONES, {"z1": "s1", "z3": "s4"}, {}, {},
-    )
-    with_car = _assign_once(
-        network, DemandMatrix((ODPairDemand("z3", "z1", 1000.0, base_time_min=32.0),)),
-        router, config, ZONES, {"z1": "s1", "z3": "s4"}, {}, {},
-    )
-    # z1: no_car_share 0.8, z3: 0.5 — обратная пара обязана дать больше авто.
-    assert with_car.metrics.car_trips > without_car.metrics.car_trips
 
 
 def test_crowding_feedback_damping_and_convergence() -> None:

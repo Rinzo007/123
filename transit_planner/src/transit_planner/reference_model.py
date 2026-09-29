@@ -116,25 +116,6 @@ class ReferenceCarProfile:
     parking_eur: float = 1.5
     parking_s: float = 240.0
     circuity: float = 1.3
-@dataclass(frozen=True, slots=True)
-class ReferenceMobilityProfile:
-    no_car_share: float = 0.35
-    two_wheel_share: float = 0.30
-    two_wheel_speed_kph: float = 15.12
-    two_wheel_reach_m: float = 7000.0
-    two_wheel_per_km_eur: float = 0.03
-
-    def __post_init__(self) -> None:
-        if not 0.0 <= self.no_car_share <= 1.0:
-            raise ValueError("no_car_share must be in [0, 1]")
-        if not 0.0 <= self.two_wheel_share <= 1.0:
-            raise ValueError("two_wheel_share must be in [0, 1]")
-        if self.two_wheel_speed_kph <= 0:
-            raise ValueError("two_wheel_speed_kph must be positive")
-        if self.two_wheel_reach_m < 0:
-            raise ValueError("two_wheel_reach_m cannot be negative")
-        if self.two_wheel_per_km_eur < 0:
-            raise ValueError("two_wheel_per_km_eur cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,8 +173,6 @@ REFERENCE_CAR = ReferenceCarProfile(
     parking_s=float(_MODEL_DATA["car"]["parking_s"]),
     circuity=float(_MODEL_DATA["car"]["circuity"]),
 )
-REFERENCE_MOBILITY = ReferenceMobilityProfile(**_MODEL_DATA["mobility"])
-REFERENCE_NO_CAR_EFFECTIVENESS = float(_MODEL_DATA["no_car_effectiveness"])
 REFERENCE_JOURNEY_CHOICE = ReferenceJourneyChoiceProfile(
     **{
         key: value

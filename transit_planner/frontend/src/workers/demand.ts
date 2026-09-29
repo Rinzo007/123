@@ -2,7 +2,6 @@ import type { FeatureCollection } from "../geojson";
 import type { ReferenceDemandResponse } from "../api";
 import { fromLocalMeters, toLocalMeters } from "../projection";
 import {
-  REFERENCE_MOBILITY_NO_CAR_SHARE,
   REFERENCE_PERIODS,
   REFERENCE_PURPOSES,
 } from "../reference-model";
@@ -51,7 +50,6 @@ export interface ReferenceDemandZoneColumn {
   population: number;
   jobs: number;
   /** Share of households without a car; drives mode choice for this zone. */
-  no_car_share: number;
 }
 
 export interface ReferenceDemandBuilt {
@@ -90,7 +88,6 @@ function zoneColumnsFromInput(input: DemandWorkerRequestInput): {
       centroid_y: input.zones.y[index],
       population,
       jobs,
-      no_car_share: input.zones.noCarShare[index] ?? 0,
     });
   });
   return { pts, zones };
@@ -197,7 +194,6 @@ export function buildReferenceDemand(
         input.zones.y.buffer,
         input.zones.population.buffer,
         input.zones.jobs.buffer,
-        input.zones.noCarShare.buffer,
         input.zones.attractions.buffer,
         input.places.lon.buffer,
         input.places.lat.buffer,
@@ -287,7 +283,6 @@ export function populationZonesToWorkerInput(
   const y = new Float64Array(count);
   const population = new Float64Array(count);
   const jobs = new Float64Array(count);
-  const noCarShare = new Float64Array(count);
   const attractions = new Float64Array(count * attractionKeys.length);
   const ids: string[] = [];
   features.forEach((feature, index) => {
@@ -298,18 +293,13 @@ export function populationZonesToWorkerInput(
     y[index] = local.y;
     population[index] = Number(properties.population ?? 0);
     jobs[index] = Number(properties.jobs ?? 0);
-    // WorldPop не несёт доли без автомобиля, поэтому берётся подвижностный
-    // профиль модели, а не выдуманное число.
-    noCarShare[index] = Number(
-      properties.no_car_share ?? REFERENCE_MOBILITY_NO_CAR_SHARE,
-    );
     const zoneAttractions = (properties.purpose_attractions ?? {}) as Record<string, unknown>;
     attractionKeys.forEach((key, keyIndex) => {
       attractions[index * attractionKeys.length + keyIndex] = Number(zoneAttractions[key] ?? 0);
     });
     ids.push(String(properties.id ?? `zone-${index}`));
   });
-  return { ids, x, y, population, jobs, noCarShare, attractionKeys, attractions };
+  return { ids, x, y, population, jobs, attractionKeys, attractions };
 }
 
 export function placesToWorkerInput(places: FeatureCollection): DemandPlaceInput {

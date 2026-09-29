@@ -23,7 +23,7 @@ from .overture_network import OvertureNetworkProvider
 from .projection import project_local_point_wgs84
 from .reference_demand import (build_reference_demand_layers, build_temporal_demand,
                                 enrich_zones_with_places)
-from .reference_model import REFERENCE_MOBILITY, REFERENCE_PURPOSE_LAYERS, TrackRow
+from .reference_model import REFERENCE_PURPOSE_LAYERS, TrackRow
 from .scenario import ScenarioDefinition, compare_scenarios, run_scenario
 from .serialization import network_from_dict
 from .temporal_assignment import assign_temporal_demand
@@ -51,7 +51,7 @@ def econ(p, period):
 
 def scenario(p,d):
     pairs=tuple(ODPairDemand(str(x["origin_zone_id"]),str(x["destination_zone_id"]),float(x["trips_per_day"]),str(x.get("purpose","all")),None if x.get("base_time_min") is None else float(x["base_time_min"])) for x in p.get("demand",[]))
-    zones=tuple(DemandZone(str(x["id"]),float(x["centroid_x"]),float(x["centroid_y"]),population=float(x.get("population",0)),jobs=float(x.get("jobs",0)),no_car_share=float(x.get("no_car_share",REFERENCE_MOBILITY.no_car_share))) for x in p.get("zones",[]))
+    zones=tuple(DemandZone(str(x["id"]),float(x["centroid_x"]),float(x["centroid_y"]),population=float(x.get("population",0)),jobs=float(x.get("jobs",0))) for x in p.get("zones",[]))
     return ScenarioDefinition(str(p.get("id",d)),str(p.get("name",p.get("id",d))),network_from_dict(p["network"]),DemandMatrix(pairs),AssignmentConfig(**p.get("config",{"period_id":"am"})),zones)
 
 def result_dict(x): return {k:getattr(x,k) for k in ("daily_vehicle_km","daily_fleet_cost","daily_operating_cost","daily_fare_revenue","annual_fleet_cost","annual_operating_cost","annual_fare_revenue","operating_cost_per_transit_trip","revenue_per_transit_trip")}
@@ -160,7 +160,7 @@ def city_assignment(p:dict):
     try:
         n=network_from_dict(p["network"]); b=bounds(float(p["south"]),float(p["west"]),float(p["north"]),float(p["east"])); lon=float(p.get("origin_lon",(b[1]+b[3])/2)); lat=float(p.get("origin_lat",(b[0]+b[2])/2)); z=generate_zones_from_population_raster(raster,bbox=b,origin_lon=lon,origin_lat=lat); pl=OverturePlacesProvider(source=src(p.get("release")),bbox=b).load_places(); td=build_temporal_demand(enrich_zones_with_places(z,pl,origin_lon=lon,origin_lat=lat)); ac=AssignmentConfig(**p["config"]); tr=assign_temporal_demand(n,td,zones={x.id:x for x in z},config=ac); ec=econ(p,ac.period_id); te=calculate_temporal_economics(n,tr,config=ec); total=aggregate_temporal_economics(n,tr,config=ec)
     except (KeyError,TypeError,ValueError,OSError,RuntimeError,TimeoutError) as x:raise HTTPException(502,str(x)) from x
-    r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"assignment":{"metrics":asdict(r.metrics),"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
+    r=tr.aggregate(); return {"data":{"zones":len(z),"places":len(pl),"od_pairs":len(td.pairs),"total_demand_trips":tr.total_demand_trips},"assignment":{"metrics":asdict(r.metrics),"iterations":r.iterations,"max_load_ratio":r.max_load_ratio,"unserved_transit_demand":r.unserved_transit_demand},"economics":result_dict(total),"periods":[{"period_id":x.period_id,"demand_trips":x.demand_trips,"transit_trips":x.result.metrics.transit_trips,"services":[asdict(_service_analytics(n,sid,x.period_id,assignment=x.result)) for sid in n.services if x.period_id in n.services[sid].headway_by_period],"economics":result_dict(te[i])} for i,x in enumerate(tr.periods)]}
 
 
 @app.post("/api/v1/analytics")

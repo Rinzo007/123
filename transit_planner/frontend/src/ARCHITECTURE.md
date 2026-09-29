@@ -5,7 +5,7 @@
 - core/ — command history, geometry helpers, topology validation.
 - network-editor.ts / map-network-editor.ts — transactional editing of physical network topology.
 - api.ts — transport boundary to the FastAPI backend (data preparation only).
-- workers/ — CPU-heavy browser computations: matrix, routing, demand-choice, evaluation runtime; all heavy input/output uses typed arrays and transferable ArrayBuffers.
+- workers/ — CPU-heavy browser computations: routing, demand, assignment; all heavy input/output uses typed arrays and transferable ArrayBuffers.
 - simulation/ — analytical planning preview over the network model.
 - storage.ts — IndexedDB `takt/kv` with gzip records and localStorage UI settings.
 - line-cache.ts — TLC1 binary cache of road geometry.

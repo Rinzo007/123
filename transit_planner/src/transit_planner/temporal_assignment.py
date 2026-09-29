@@ -44,24 +44,10 @@ class TemporalAssignmentResult:
             for period in self.periods
         )
 
-    @property
-    def total_bike_trips(self) -> float:
-        return sum(
-            period.result.metrics.bike_trips
-            for period in self.periods
-        )
-
-    @property
-    def total_rest_trips(self) -> float:
-        return sum(
-            period.result.metrics.rest_trips
-            for period in self.periods
-        )
-
     def aggregate(self) -> AssignmentResult:
         if not self.periods:
             return AssignmentResult(
-                metrics=AssignmentMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                metrics=AssignmentMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
                 route_flows=(),
                 section_loads=(),
                 stop_flows=(),
@@ -75,8 +61,6 @@ class TemporalAssignmentResult:
         transit = self.total_transit_trips
         car = self.total_car_trips
         walk = self.total_walk_trips
-        bike = self.total_bike_trips
-        rest = self.total_rest_trips
         weighted_time = sum(
             period.result.metrics.average_transit_time_min * period.result.metrics.transit_trips
             for period in self.periods
@@ -130,11 +114,9 @@ class TemporalAssignmentResult:
                 transit_share=0.0 if total <= 0 else transit / total,
                 average_transit_time_min=0.0 if transit <= 0 else weighted_time / transit,
                 average_transfers=0.0 if transit <= 0 else weighted_transfers / transit,
-                bike_trips=bike,
                 average_wait_time_min=(
                     0.0 if transit <= 0 else weighted_wait / transit
                 ),
-                rest_trips=rest,
             ),
             route_flows=tuple(RouteFlow(route_id, values[0], values[1]) for route_id, values in sorted(route_acc.items())),
             section_loads=tuple(SectionLoad(route_id, from_id, to_id, values[0], values[1]) for (route_id, from_id, to_id), values in sorted(section_acc.items())),

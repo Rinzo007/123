@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil, sqrt
 
+from . import game_rules
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
 from .choice import (
@@ -16,7 +17,6 @@ from .network import Network
 from .routing import Journey, TransitRouter
 from .reference_model import (
     CROWDED_LOAD_RATIO,
-    REFERENCE_MOBILITY,
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
     SEVERE_LOAD_RATIO,
@@ -76,9 +76,7 @@ class AssignmentMetrics:
     transit_share: float
     average_transit_time_min: float
     average_transfers: float
-    bike_trips: float = 0.0
     average_wait_time_min: float = 0.0
-    rest_trips: float = 0.0
     denied_boardings: float = 0.0
 
 
@@ -105,8 +103,7 @@ class AssignmentResult:
 class AssignmentConfig:
     period_id: str
     car_speed_kph: float = 30.0
-    walking_speed_kph: float = 5.0
-    bike_speed_kph: float = 15.12
+    walking_speed_kph: float = game_rules.WALKING_SPEED_KPH
     choice: ChoiceConfig = ChoiceConfig()
     crowding_start_ratio: float = 0.85
     iterations: int = 6
@@ -118,7 +115,7 @@ class AssignmentConfig:
     alternative_diversity_penalty_min: float = 15.0
 
     def __post_init__(self) -> None:
-        if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0 or self.bike_speed_kph <= 0:
+        if self.car_speed_kph <= 0 or self.walking_speed_kph <= 0:
             raise ValueError("Speeds must be positive")
         if self.crowding_start_ratio < 0:
             raise ValueError("crowding_start_ratio cannot be negative")
@@ -158,6 +155,10 @@ def assign_demand(
         for zone_id in zones
     }
 
+    # Итеративный цикл подмешивает в выбор штраф за тесноту секций и
+    # интервальные множители. В игре (popCommuteWorker) обратной связи по
+    # загрузке нет: getModeChoice берёт времена из расписания и времени суток.
+    # Цикл - планировщиковая надстройка, а не зеркало игры.
     segment_crowding_penalties: dict[tuple[str, str, str], float] = {}
     service_headway_factors: dict[str, float] = {}
     snapshot: _FlowSnapshot | None = None
@@ -260,7 +261,7 @@ def _assign_once(
     stop_boardings: dict[str, float] = {}
     stop_alightings: dict[str, float] = {}
     stop_transfers: dict[str, float] = {}
-    total_transit = total_car = total_walk = total_bike = total_rest = 0.0
+    total_transit = total_car = total_walk = 0.0
     denied_boardings = 0.0
     weighted_transit_time = weighted_transfers = weighted_wait = 0.0
     unserved = 0.0
@@ -274,7 +275,6 @@ def _assign_once(
         distance_m = _distance_between_zones(pair, zones)
         walk_time = distance_m / 1000.0 / config.walking_speed_kph * 60.0
         car_time = distance_m / 1000.0 / config.car_speed_kph * 60.0
-        bike_time = distance_m / 1000.0 / config.bike_speed_kph * 60.0
 
         origin_stop_id = zone_stops.get(pair.origin_zone_id) or _resolve_stop(network, pair.origin_zone_id)
         destination_stop_id = zone_stops.get(pair.destination_zone_id) or _resolve_stop(network, pair.destination_zone_id)
@@ -343,15 +343,6 @@ def _assign_once(
             else sum(leg.duration_min for leg in journey.legs if leg.kind == "walk")
         )
         transit_time = journey_generalized[0] if journey_generalized else None
-        no_car_share = _no_car_share(
-            pair,
-            zones,
-            default_share=config.choice.no_car_share,
-        )
-        car_availability = 1.0 - min(
-            1.0,
-            no_car_share * config.choice.no_car_effectiveness,
-        )
         probs = game_probabilities(
             walk_time_min=walk_time,
             car_time_min=car_time,
@@ -366,10 +357,6 @@ def _assign_once(
             transit_egress_walk_min=egress_walk_min,
             transit_transfer_walk_min=journey_transfer_walk,
             transit_transfers=journey_transfers,
-            bike_time_min=bike_time,
-            bike_distance_km=distance_m / 1000.0,
-            car_availability=car_availability,
-            rest_time_min=pair.base_time_min,
         )
 
         transit_trips = trips * probs["transit"]
@@ -378,13 +365,9 @@ def _assign_once(
         )
         car_trips = trips * probs["car"]
         walk_trips = trips * probs["walk"]
-        bike_trips = trips * probs["bike"]
-        rest_trips = trips * probs["rest"]
         total_transit += transit_trips
         total_car += car_trips
         total_walk += walk_trips
-        total_bike += bike_trips
-        total_rest += rest_trips
 
         if journey is None:
             unserved += transit_trips
@@ -398,7 +381,6 @@ def _assign_once(
                 transit_time=transit_time or 0.0,
                 walk_time=walk_time,
                 car_time=car_time,
-                bike_time=bike_time,
                 transfers=journey.transfers,
                 wait_min=journey_wait,
                 transit_fare=config.transit_fare,
@@ -553,11 +535,9 @@ def _assign_once(
         transit_share=0.0 if total <= 0 else total_transit / total,
         average_transit_time_min=0.0 if total_transit <= 0 else weighted_transit_time / total_transit,
         average_transfers=0.0 if total_transit <= 0 else weighted_transfers / total_transit,
-        bike_trips=total_bike,
         average_wait_time_min=(
             0.0 if total_transit == 0 else weighted_wait / total_transit
         ),
-        rest_trips=total_rest,
         denied_boardings=denied_boardings,
     )
     losses = tuple(
@@ -579,44 +559,6 @@ def _assign_once(
     )
 
 
-def _no_car_share(
-    pair: ODPairDemand,
-    zones: dict[str, DemandZone],
-    *,
-    default_share: float,
-) -> float:
-    zone = zones.get(pair.origin_zone_id)
-    if zone is not None:
-        return zone.no_car_share
-    return default_share if 0.0 <= default_share <= 1.0 else REFERENCE_MOBILITY.no_car_share
-
-def _service_headway_feedback(
-    network: Network,
-    snapshot: _FlowSnapshot,
-    period_id: str,
-) -> dict[str, float]:
-    period = network.periods[period_id]
-    period_hours = (period.end_minute - period.start_minute) / 60.0
-    stop_rows = {(service_id, stop_id): value for service_id, stop_id, value in snapshot.service_stop_boardings}
-    factors: dict[str, float] = {}
-    for service in network.services.values():
-        headway = service.headway_by_period.get(period_id)
-        if headway is None:
-            continue
-        route = network.routes[service.route_id]
-        stop_boardings = tuple(
-            stop_rows.get((service.id, stop_id), 0.0)
-            for stop_id in route.stop_ids
-        )
-        factors[service.id] = headway_unevenness_factor(
-            route.mode.value,
-            headway,
-            period_hours,
-            stop_boardings,
-            route_closed=route.closed,
-            both_ways=route.both_ways,
-        )
-    return factors
 
 
 def _classify_demand_loss(
@@ -624,7 +566,6 @@ def _classify_demand_loss(
     transit_time: float,
     walk_time: float,
     car_time: float,
-    bike_time: float,
     transfers: int,
     wait_min: float,
     transit_fare: float,
@@ -635,7 +576,7 @@ def _classify_demand_loss(
         return "crowd"
     if wait_min > 0.5 * transit_time:
         return "wait"
-    best_alternative = min(walk_time, car_time, bike_time)
+    best_alternative = min(walk_time, car_time)
     if transit_fare > 0.0 and fare_weight * transit_fare >= 0.5 * transit_time:
         return "price"
     if transfers > 0 and transit_time > best_alternative:
@@ -728,6 +669,35 @@ def _section_capacity_and_platforms(
         ),
         platform_m,
     )
+
+
+def _service_headway_feedback(
+    network: Network,
+    snapshot: _FlowSnapshot,
+    period_id: str,
+) -> dict[str, float]:
+    period = network.periods[period_id]
+    period_hours = (period.end_minute - period.start_minute) / 60.0
+    stop_rows = {(service_id, stop_id): value for service_id, stop_id, value in snapshot.service_stop_boardings}
+    factors: dict[str, float] = {}
+    for service in network.services.values():
+        headway = service.headway_by_period.get(period_id)
+        if headway is None:
+            continue
+        route = network.routes[service.route_id]
+        stop_boardings = tuple(
+            stop_rows.get((service.id, stop_id), 0.0)
+            for stop_id in route.stop_ids
+        )
+        factors[service.id] = headway_unevenness_factor(
+            route.mode.value,
+            headway,
+            period_hours,
+            stop_boardings,
+            route_closed=route.closed,
+            both_ways=route.both_ways,
+        )
+    return factors
 
 
 def _segment_crowding_penalties(

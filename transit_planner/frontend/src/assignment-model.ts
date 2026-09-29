@@ -120,7 +120,6 @@ export interface AssignmentZone {
   centroidY: number;
   population: number;
   jobs: number;
-  noCarShare: number;
 }
 
 export interface AssignmentPair {
@@ -133,7 +132,6 @@ export interface AssignmentPair {
 export interface AssignmentConfig {
   carSpeedKph: number;
   walkingSpeedKph: number;
-  bikeSpeedKph: number;
   crowdingStartRatio: number;
   iterations: number;
   damping: number;
@@ -146,8 +144,7 @@ export interface AssignmentConfig {
 
 export const DEFAULT_ASSIGNMENT_CONFIG: AssignmentConfig = {
   carSpeedKph: 30.0,
-  walkingSpeedKph: 5.0,
-  bikeSpeedKph: 15.12,
+  walkingSpeedKph: 5.4,
   crowdingStartRatio: 0.85,
   iterations: 6,
   damping: 0.5,
@@ -192,9 +189,7 @@ export interface AssignmentMetrics {
   transitShare: number;
   averageTransitTimeMin: number;
   averageTransfers: number;
-  bikeTrips: number;
   averageWaitTimeMin: number;
-  restTrips: number;
   deniedBoardings: number;
 }
 
@@ -217,7 +212,6 @@ export function validateAssignmentConfig(config: AssignmentConfig): void {
   };
   positive("car_speed_kph", config.carSpeedKph);
   positive("walking_speed_kph", config.walkingSpeedKph);
-  positive("bike_speed_kph", config.bikeSpeedKph);
   nonNegative("crowding_start_ratio", config.crowdingStartRatio);
   positive("iterations", config.iterations);
   if (!(config.damping > 0 && config.damping <= 1)) {
@@ -257,7 +251,6 @@ export interface DemandLossInput {
   transitTime: number;
   walkTime: number;
   carTime: number;
-  bikeTime: number;
   transfers: number;
   waitMin: number;
   transitFare: number;
@@ -268,22 +261,12 @@ export interface DemandLossInput {
 export function classifyDemandLoss(input: DemandLossInput): string {
   if (input.routePenalized) return "crowd";
   if (input.waitMin > 0.5 * input.transitTime) return "wait";
-  const bestAlternative = Math.min(input.walkTime, input.carTime, input.bikeTime);
+  const bestAlternative = Math.min(input.walkTime, input.carTime);
   if (input.transitFare > 0 && input.fareWeight * input.transitFare >= 0.5 * input.transitTime) {
     return "price";
   }
   if (input.transfers > 0 && input.transitTime > bestAlternative) return "transfer";
   return "ride";
-}
-
-export function noCarShareFor(
-  pair: AssignmentPair,
-  zones: Map<string, AssignmentZone>,
-  defaultShare: number,
-): number {
-  const zone = zones.get(pair.originZoneId);
-  if (zone) return zone.noCarShare;
-  return defaultShare >= 0 && defaultShare <= 1 ? defaultShare : 0.35;
 }
 
 export interface AssignOnceInput {
@@ -328,8 +311,6 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
   let totalTransit = 0;
   let totalCar = 0;
   let totalWalk = 0;
-  let totalBike = 0;
-  let totalRest = 0;
   let deniedBoardings = 0;
   let weightedTransitTime = 0;
   let weightedTransfers = 0;
@@ -348,7 +329,6 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
     const distanceM = distanceBetweenZones(pair, zones);
     const walkTime = (distanceM / 1000 / config.walkingSpeedKph) * 60;
     const carTime = (distanceM / 1000 / config.carSpeedKph) * 60;
-    const bikeTime = (distanceM / 1000 / config.bikeSpeedKph) * 60;
 
     const accessWalkMin = input.accessWalkMin[pairIndex] ?? 0;
     const egressWalkMin = input.egressWalkMin[pairIndex] ?? 0;
@@ -389,8 +369,6 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
     const bestTransfers = best?.transfers ?? 0;
     const bestTransferWalk = transferWalks[0] ?? 0;
     const transitTime = generalized.length > 0 ? generalized[0] : null;
-    const share = noCarShareFor(pair, zones, choice.noCarShare);
-    const carAvailability = 1 - Math.min(1, share * choice.noCarEffectiveness);
 
     const probs = gameProbabilities({
       walkTimeMin: walkTime,
@@ -403,10 +381,6 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
       transitEgressWalkMin: egressWalkMin,
       transitTransferWalkMin: bestTransferWalk,
       transitTransfers: bestTransfers,
-      bikeTimeMin: bikeTime,
-      bikeDistanceKm: distanceM / 1000,
-      carAvailability,
-      restTimeMin: pair.baseTimeMin,
       // `best` - это undefined при пустом journeys, а не null, поэтому
       // строгое сравнение с null считало бы транзит доступным.
       transitAvailable: best != null,
@@ -416,13 +390,9 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
     const alternativeShares = journeys.length > 0 ? alternativeProbabilities(generalized) : [];
     const carTrips = trips * probs.car;
     const walkTrips = trips * probs.walk;
-    const bikeTrips = trips * probs.bike;
-    const restTrips = trips * probs.rest;
     totalTransit += transitTrips;
     totalCar += carTrips;
     totalWalk += walkTrips;
-    totalBike += bikeTrips;
-    totalRest += restTrips;
 
     if (!best) {
       unserved += transitTrips;
@@ -441,7 +411,6 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
         transitTime: generalized[0] ?? 0,
         walkTime,
         carTime,
-        bikeTime,
         transfers: bestTransfers,
         waitMin: bestWait,
         transitFare: config.transitFare,
@@ -550,9 +519,7 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
       transitShare: total <= 0 ? 0 : totalTransit / total,
       averageTransitTimeMin: totalTransit <= 0 ? 0 : weightedTransitTime / totalTransit,
       averageTransfers: totalTransit <= 0 ? 0 : weightedTransfers / totalTransit,
-      bikeTrips: totalBike,
       averageWaitTimeMin: totalTransit === 0 ? 0 : weightedWait / totalTransit,
-      restTrips: totalRest,
       deniedBoardings,
     },
     routeFlows,

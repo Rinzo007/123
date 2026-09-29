@@ -7,8 +7,6 @@ from . import game_rules
 from .reference_model import (
     REFERENCE_CAR,
     REFERENCE_JOURNEY_CHOICE,
-    REFERENCE_MOBILITY,
-    REFERENCE_NO_CAR_EFFECTIVENESS,
     REFERENCE_TRANSIT_BURDENS,
     REFERENCE_TRANSFER,
     REFERENCE_VOT_S_PER_EUR,
@@ -27,7 +25,6 @@ class ChoiceConfig:
     transit_constant: float = 0.0
     car_constant: float = 0.0
     walk_constant: float = 0.0
-    bike_constant: float = 0.0
     transit_fare_weight: float = 0.0
     transit_wait_weight: float = REFERENCE_JOURNEY_CHOICE.wait_weight
     transit_bias_minutes: float = REFERENCE_TRANSFER.rider_bias_s / 60.0
@@ -45,16 +42,7 @@ class ChoiceConfig:
     car_parking_minutes: float = REFERENCE_CAR.parking_s / 60.0
     car_circuity: float = REFERENCE_CAR.circuity
     walk_circuity: float = 1.33 * REFERENCE_TRANSFER.walk_multiplier
-    bike_circuity: float = 1.25
-    bike_cost_per_km_eur: float = REFERENCE_MOBILITY.two_wheel_per_km_eur
-    bike_fixed_minutes: float = REFERENCE_CAR.parking_s / 60.0
-    bike_time_factor: float = 1.5
-    bike_reach_m: float = REFERENCE_MOBILITY.two_wheel_reach_m
-    two_wheel_share: float = REFERENCE_MOBILITY.two_wheel_share
-    walk_speed_kph: float = 5.0
-    bike_speed_kph: float = REFERENCE_MOBILITY.two_wheel_speed_kph
-    no_car_share: float = REFERENCE_MOBILITY.no_car_share
-    no_car_effectiveness: float = REFERENCE_NO_CAR_EFFECTIVENESS
+    walk_speed_kph: float = game_rules.WALKING_SPEED_KPH
     min_sensible_driving_m: float = game_rules.MIN_SENSIBLE_DRIVING_DISTANCE_M
     arrival_gap_minutes: float = game_rules.ARRIVAL_GAP_S / 60.0
 
@@ -76,22 +64,14 @@ class ChoiceConfig:
             or self.transit_burden_multiple_min < self.transit_burden_first_min
         ):
             raise ValueError("Transit transfer burdens are invalid")
-        if self.car_cost_per_km_eur < 0 or self.bike_cost_per_km_eur < 0:
+        if self.car_cost_per_km_eur < 0:
             raise ValueError("Mode operating cost cannot be negative")
         if self.car_parking_eur < 0 or self.car_parking_minutes < 0:
             raise ValueError("Parking cost and time cannot be negative")
-        if self.car_circuity <= 0 or self.walk_circuity <= 0 or self.bike_circuity <= 0:
+        if self.car_circuity <= 0 or self.walk_circuity <= 0:
             raise ValueError("Circuity factors must be positive")
-        if self.bike_fixed_minutes < 0 or self.bike_time_factor <= 0 or self.bike_reach_m < 0:
-            raise ValueError("Bike time parameters are invalid")
-        if self.walk_speed_kph <= 0 or self.bike_speed_kph <= 0:
-            raise ValueError("Walking and cycling speeds must be positive")
-        if not 0.0 <= self.no_car_share <= 1.0:
-            raise ValueError("no_car_share must be in [0, 1]")
-        if not 0.0 <= self.no_car_effectiveness <= 1.0:
-            raise ValueError("no_car_effectiveness must be in [0, 1]")
-        if not 0.0 <= self.two_wheel_share <= 1.0:
-            raise ValueError("two_wheel_share must be in [0, 1]")
+        if self.walk_speed_kph <= 0:
+            raise ValueError("Walking speed must be positive")
         if self.min_sensible_driving_m < 0:
             raise ValueError("min_sensible_driving_m cannot be negative")
         if self.arrival_gap_minutes < 0:
@@ -154,8 +134,6 @@ class ModeUtilities:
     walk: float
     car: float
     transit: float
-    bike: float
-    rest: float = 0.0
 
 
 def utilities(
@@ -163,12 +141,9 @@ def utilities(
     walk_time_min: float,
     car_time_min: float,
     transit_time_min: float | None,
-    bike_time_min: float | None = None,
     transit_wait_min: float = 0.0,
     transit_fare: float = 0.0,
     car_distance_km: float = 0.0,
-    bike_distance_km: float | None = None,
-    base_time_min: float | None = None,
     transit_access_walk_min: float = 0.0,
     transit_egress_walk_min: float = 0.0,
     transit_transfer_walk_min: float = 0.0,
@@ -192,27 +167,6 @@ def utilities(
             - config.transit_fare_weight * transit_fare
         )
     )
-    has_bike_distance = bike_distance_km is not None
-    bike_distance_km = 0.0 if bike_distance_km is None else max(0.0, bike_distance_km)
-    bike_distance_m = bike_distance_km * 1000.0 * config.bike_circuity
-    excess_distance_m = max(0.0, bike_distance_m - config.bike_reach_m)
-    bike_travel_minutes = (
-        max(0.0, bike_time_min)
-        if not has_bike_distance and bike_time_min is not None
-        else bike_distance_m / config.bike_speed_kph * 60.0 / 1000.0
-    )
-    excess_travel_minutes = (
-        excess_distance_m / config.bike_speed_kph * 60.0 / 1000.0
-    )
-    bike_generalized_minutes = (
-        config.bike_fixed_minutes
-        + config.bike_time_factor * (bike_travel_minutes + excess_travel_minutes)
-        + bike_distance_m / 1000.0
-        * config.bike_cost_per_km_eur
-        * config.value_of_time_s_per_eur / 60.0
-    )
-    bike = config.bike_constant - coefficient * bike_generalized_minutes
-
     walk_generalized_minutes = config.walk_circuity * walk_time_min
     car_distance_m = max(0.0, car_distance_km) * 1000.0
     # Короткая поездка неудобна: заводить, разгоняться, искать парковку, -
@@ -231,84 +185,38 @@ def utilities(
             + config.car_parking_eur
         ) * config.value_of_time_s_per_eur / 60.0
     )
-    rest = (
-        float("-inf")
-        if base_time_min is None
-        else config.transit_constant
-        - coefficient * max(0.0, base_time_min)
-    )
     return ModeUtilities(
         walk=config.walk_constant - coefficient * walk_generalized_minutes,
         car=config.car_constant - coefficient * car_generalized_minutes,
         transit=transit,
-        bike=bike,
-        rest=rest,
     )
 
 
-def probabilities(
-    values: ModeUtilities,
-    *,
-    car_availability: float = 1.0,
-    bike_availability: float = 1.0,
-    no_car_share: float = REFERENCE_MOBILITY.no_car_share,
-) -> dict[str, float]:
-    if not 0.0 <= car_availability <= 1.0:
-        raise ValueError("car_availability must be in [0, 1]")
-    if not 0.0 <= bike_availability <= 1.0:
-        raise ValueError("bike_availability must be in [0, 1]")
-    if not 0.0 <= no_car_share <= 1.0:
-        raise ValueError("no_car_share must be in [0, 1]")
-
+def probabilities(values: ModeUtilities) -> dict[str, float]:
     entries = (
-        ("transit", values.transit, 1.0),
-        ("car", values.car, car_availability),
-        ("walk", values.walk, 1.0),
-        ("bike", values.bike, bike_availability),
-        ("rest", values.rest, 1.0),
+        ("transit", values.transit),
+        ("car", values.car),
+        ("walk", values.walk),
     )
-    finite_values = tuple(value for _, value, _ in entries if value != float("-inf"))
+    finite_values = tuple(value for _, value in entries if value != float("-inf"))
     if not finite_values:
-        return {key: 0.0 for key, _, _ in entries}
+        return {key: 0.0 for key, _ in entries}
     maximum = max(finite_values)
     weights = {
-        key: (
-            0.0
-            if value == float("-inf")
-            else exp(value - maximum) * availability
-        )
-        for key, value, availability in entries
+        key: 0.0 if value == float("-inf") else exp(value - maximum)
+        for key, value in entries
     }
 
-    transit = weights["transit"]
-    car = weights["car"]
-    active = weights["walk"] + weights["bike"]
-    rest = weights["rest"]
-    with_car = transit + car + active + rest
-    without_car = transit + active + rest
-    if with_car <= 0.0:
-        return {key: 0.0 for key, _, _ in entries}
-
-    denominator_without_car = max(without_car, 1e-300)
-    active_share = (
-        (1.0 - no_car_share) * active / with_car
-        + no_car_share * active / denominator_without_car
-    )
-    bike_ratio = weights["bike"] / active if active > 0.0 else 0.0
+    total = sum(weights.values())
+    if total <= 0.0:
+        return {key: 0.0 for key, _ in entries}
 
     return {
-        "transit": (
-            (1.0 - no_car_share) * transit / with_car
-            + no_car_share * transit / denominator_without_car
-        ),
-        "car": (1.0 - no_car_share) * car / with_car,
-        "walk": active_share * (1.0 - bike_ratio),
-        "bike": active_share * bike_ratio,
-        "rest": (
-            (1.0 - no_car_share) * rest / with_car
-            + no_car_share * rest / denominator_without_car
-        ),
+        "transit": weights["transit"] / total,
+        "car": weights["car"] / total,
+        "walk": weights["walk"] / total,
     }
+
 
 def game_probabilities(
     *,
@@ -322,10 +230,6 @@ def game_probabilities(
     transit_egress_walk_min: float = 0.0,
     transit_transfer_walk_min: float = 0.0,
     transit_transfers: int = 0,
-    bike_time_min: float | None = None,
-    bike_distance_km: float | None = None,
-    car_availability: float = 1.0,
-    rest_time_min: float | None = None,
     transit_available: bool = True,
     population: int = game_rules.INCOME_LADDER_SIZE,
     apply_min_transit_choice: bool = True,
@@ -365,44 +269,17 @@ def game_probabilities(
         perceived,
         car_distance_m=car_distance_km * 1000.0,
         transit_fare=transit_fare,
-        car_availability=car_availability,
-        rest_time_min=rest_time_min,
         transit_available=transit_available,
         population=population,
         apply_min_transit_choice=apply_min_transit_choice,
     )
-    result = {
+    return {
         "transit": split["transit"],
         "car": split["car"],
         "walk": split["walk"],
-        "bike": 0.0,
-        "rest": split["rest"],
     }
-    if bike_time_min is not None or bike_distance_km is not None:
-        bike_utility = _bike_perceived_minutes(
-            bike_time_min, bike_distance_km,
-        )
-        walk_utility = perceived.walk
-        active = walk_utility + bike_utility
-        if active > 0.0:
-            bike_share = split["walk"] * bike_utility / active
-            result["bike"] = bike_share
-            result["walk"] = split["walk"] - bike_share
-    return result
 
 
-def _bike_perceived_minutes(
-    bike_time_min: float | None,
-    bike_distance_km: float | None,
-) -> float:
-    """Воспринимаемое время велосипеда в минутах, для доли внутри ходьбы.
-
-    Велосипеда в игре нет, поэтому своей шкалы у него тоже нет: берётся
-    та же единица езды, что и у прочих альтернатив.
-    """
-    if bike_distance_km is not None:
-        return max(0.0, bike_distance_km) * 1.25 / 15.12 * 60.0
-    return max(0.0, bike_time_min or 0.0)
 
 
 def alternative_probabilities(

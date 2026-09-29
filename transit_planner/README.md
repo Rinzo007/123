@@ -91,7 +91,7 @@ Service хранит headway по каждому периоду и может д
 
 Frontend построен на Vanilla TypeScript + Vite/Rollup + MapLibre GL JS 5.24.0. Состояние сети и проекта хранится непосредственно в runtime, проекты и кэш Overture хранятся в IndexedDB, настройки интерфейса — в localStorage.
 
-Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/main.ts` → `src/app.ts`, ручной DOM, MapLibre, reference worker runtime (matrix/routing/demand-choice/evaluation) и бинарный TLC1-кэш дорожной геометрии. Манифесты city packs с SHA-256 и TKBL-контейнеры — цель Этапа 2; битые заглушки предыдущих попыток удалены на Этапе 1.
+Архитектура интерфейса ориентирована на предоставленный референс: один entry `src/main.ts` → `src/app.ts`, ручной DOM, MapLibre, собственный worker runtime (routing/demand/assignment) и бинарный TLC1-кэш дорожной геометрии. Манифесты city packs с SHA-256 и TKBL-контейнеры — цель Этапа 2; битые заглушки предыдущих попыток удалены на Этапе 1.
 
 
 ## Полноценное приложение
@@ -160,10 +160,6 @@ frontend/src/
 ├── simulation/
 │   └── preview.ts
 ├── workers/
-│   ├── reference-runtime.ts
-│   ├── evaluation-runtime.js
-│   ├── evaluation.worker.ts
-│   ├── demand-choice.worker.ts
 │   ├── routing.ts
 │   └── routing.worker.ts
 ├── journey.ts
@@ -223,9 +219,9 @@ Frontend:
 - fallback маршрутизации: подмена Overture-маршрута прямой линией удалена (`routeGeoJSON` → `emptyRouteGeoJSON`), ошибка при недоступности расчёта;
 - synthetic demand: стаб `toDemandInput` (плоские 1000 поездок) удалён, `runRuntimePreview` требует authoritative OD и бросает явную ошибку;
 - fallback evaluation: `runClientPreview` без воркера переименован в честный `networkCounts`, reference-модель `/data/model.json` больше не деградирует в `{}`;
-- fallback сборки: хеш-бандл `/assets/evaluation.worker-jRuvxHc_.js` заменён статическим импортом `evaluation-runtime.js` (Vite переименовывает чанк сам);
+- fallback сборки: хеш-бандл `/assets/evaluation.worker-jRuvxHc_.js` удалён вместе с `evaluation-runtime.js`; reference-оценка в браузере выключена целиком (см. ниже);
 - дублирующие TS-реализации: удалены 15 мёртвых модулей (~1000 строк), включая `rraptor.ts` с битым импортом, дубли валидаторов, редакторов и кэшей;
-- worker-контракты: `routing/demand-choice` workers изолированы (`export {}`), устранены глобальные коллизии;
+- worker-контракты: `routing` worker изолирован (`export {}`), устранены глобальные коллизии;
 - storage: повреждённый или бесформенный JSON настроек даёт явную ошибку; реальная ошибка IndexedDB при восстановлении проекта выводится в статус;
 - timetable/fleet/routing: отсутствующий headway = пустое расписание/нулевой парк, отсутствующий period = явная ошибка (не 20 мин и не 0–1440);
 - mode cost: `DEFAULT_ROW_COST` индексируется `TransitMode` и компиляторно исчерпывающ, подмена `?? 1` и мёртвые ветки row-классификации удалены;
@@ -322,7 +318,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 - авторская модель (`routing.py::_build_walking_neighbors`) строит пешеходные пересадки по прямой линии между остановками с радиусом 500 м и скоростью 5 км/ч; walk access/egress в ней отсутствует — `origin`/`destination` это сами остановки. Frontend-пакер делает ровно то же (0.5 км / 5 км/ч = 6 мин), поэтому расхождения в фиделити нет;
 - `assignment.py::_walk_minutes` для zone→stop использует прямую линию так же, поэтому street-distance walk не улучшает паритет с Python, а меняет метод;
-- единственный живой матричный путь — внутри транспилированного `evaluation-runtime.js`: свой пул из `public/assets/reference-matrix.worker.js` (собственный CSR, кэш `routePools`/`warmLoads`, гейт `stops >= 1200` и whitelist hostname). Он не строит матрицу по Overture TKST;
+- матричный путь был единственным в транспилированном `evaluation-runtime.js`: пул из `public/assets/reference-matrix.worker.js` (собственный CSR, кэш `routePools`/`warmLoads`, гейт `stops >= 1200` и whitelist hostname). Он не строил матрицу по Overture TKST, а вместе с воркером удалён, поэтому своего матричного пути в проекте больше нет;
 - собственный `matrix.worker.ts` вместе с `solveMatrix`/`solveRoadMatrix` **не имел ни одного вызова**, то есть был мёртвым близнецом вендоренного воркера. Удалён.
 
 Вместо несуществующей матрицы закрыта реальная дыра Этапа 3 — инвалидация кэша street graph:
@@ -333,9 +329,9 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Проверено: `python -m pytest tests -q` → 211 passed; `npx tsc --noEmit` → 0; `npx vite build` → успешно.
 
-Не сделано (сознательно):
+Сделано позже:
 
-- `demand-choice.worker.ts` / `solveDemand` — тоже без вызовов (0 ссылок), но это faithful Wardman mode-share из Этапа 1, а покрытие mode choice вендоренным рантаймом не проверено; удаление требует отдельного решения, а не побочного tidy-up в Этапе 4.
+- `demand-choice.worker.ts` / `solveDemand` / `reference-runtime.ts` — удалены. Воркер был faithful Wardman mode-share с frequency-based insertion, но не имел ни одного вызова (0 ссылок), а исходников для проверки покрытия mode choice нет. Вместе с ним удалён обёртка `solveDemandStrategy` и весь тип `DemandBatch`/`DemandOutput`. Выбор режима считает `choice.ts` по правилу игры (argmin по лестнице дохода), спрос — `demand.ts`.
 
 ### Этап 5 — Routing Worker
 
@@ -390,7 +386,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Перенести основной nested logit: car; transit; walk; bike / two-wheel.
 
-Сделать: инкрементальный nested logit; frequency-based insertion (референс: `demand-choice.worker.ts`); per-mode generalized cost; mobility constraints; typed-array output; incremental recalculation.
+Сделать: инкрементальный nested logit; per-mode generalized cost; mobility constraints; typed-array output; incremental recalculation.
 
 Перенесено в TS (`frontend/src/choice.ts`): `ChoiceConfig` с полной валидацией; `transitGeneralizedMinutes` с нелинейной нагрузкой от пересадок; `utilities` для пяти режимов (car/transit/walk/bike/rest) с корректной обработкой `-Infinity`; `probabilities` (multinomial logit с долей households без автомобиля и ограничением доступности режимов); `alternativeProbabilities` — split транзитного спроса по обобщённой стоимости.
 
@@ -398,7 +394,7 @@ Overture streets → street graph → compressed binary graph → routing worker
 
 Проверено: `python -m pytest tests -q` → 276 passed; `npx tsc --noEmit` → 0.
 
-Не перенесено: инкрементальный nested logit и frequency-based insertion из `demand-choice.worker.ts` — они относятся к отдельному слою выбора и не нужны assignment-движку, который считает распределение по одному набору обобщённых стоимостей.
+Не перенесено: инкрементальный nested logit и frequency-based insertion — воркер с ними удалён как непроверяемый (0 вызовов, нет исходников), а assignment-движку они не нужны: он считает распределение по одному набору обобщённых стоимостей.
 
 ### Этап 6.5 — Assignment в браузере
 
@@ -450,7 +446,7 @@ python tools/browser_check.py
 
 Статус: 🔄 частично готов
 
-Reference evaluation живёт в `evaluation-runtime.js` (init/run/cancel, epoch, baseline T, layers) и вызывается только через `EvaluationClient` — worker недоступен/не готов → явная ошибка.
+Reference evaluation (init/run/cancel, epoch, baseline T, layers) выключена целиком: удалены `evaluation-runtime.js`, хеш-бандл, пул `EvaluationClient`, `evaluation.worker.ts` и вызов из `runPreview`. Причина — движок содержал цикл равновесия и штраф за тесноту, которых нет ни в одном игровом модуле, а исходников для проверки нет. Вместо вызова в поднятый, но не отвечающий воркер (это зависание) вызов убран; проверочный пассажиропоток считает assignment-воркер, demand — `demand-choice.worker.ts`.
 
 Добавить: reuseError; trackId + segment invalidation; incremental evaluation; planningPreview поверх worker-результатов; полный расчёт network → segment loads → PLF → fleet → headway → CAPEX/OPEX → city result; probe(base, candidate).
 

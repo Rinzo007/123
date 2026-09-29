@@ -80,5 +80,3 @@ export const REFERENCE_PURPOSES: readonly ReferencePurposeRow[] = [
   },
 ] as const;
 
-/** `model.json` → `mobility`.no_car_share: WorldPop zones carry no such attribute. */
-export const REFERENCE_MOBILITY_NO_CAR_SHARE = 0.35;

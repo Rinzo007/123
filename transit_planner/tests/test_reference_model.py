@@ -9,8 +9,6 @@ from transit_planner.reference_model import (
     EXTREME_LOAD_RATIO,
     REFERENCE_MODE_PROFILES,
     REFERENCE_CAR,
-    REFERENCE_MOBILITY,
-    REFERENCE_NO_CAR_EFFECTIVENESS,
     REFERENCE_PERIODS,
     REFERENCE_TRANSFER,
     REFERENCE_PURPOSE_LAYERS,
@@ -55,8 +53,6 @@ def test_reference_generalized_cost_defaults():
     assert REFERENCE_TRANSFER.per_m_s == 0.25
     assert REFERENCE_CAR.cost_per_km_eur == 0.25
     assert REFERENCE_CAR.parking_s == 240.0
-    assert REFERENCE_MOBILITY.two_wheel_speed_kph == 15.12
-    assert REFERENCE_MOBILITY.two_wheel_reach_m == 7000.0
 
 
 def test_crowding_thresholds_match_model_levels():
@@ -120,10 +116,6 @@ def test_reference_minimum_headway_rules():
     assert minimum_track_headway_min(30.0) == 2.0
 
 
-def test_reference_mobility_includes_no_car_defaults():
-    assert REFERENCE_MOBILITY.no_car_share == 0.35
-    assert REFERENCE_NO_CAR_EFFECTIVENESS == 0.78
-
 
 def test_lateral_speed_limit_uses_mode_acceleration():
     from transit_planner.reference_model import lateral_speed_limit_kph
@@ -140,12 +132,3 @@ def test_headway_unevenness_factor_matches_zero_demand_baseline():
     expected = 1.0 + (90.0 / 600.0) ** 2
     assert headway_unevenness_factor("bus", 10.0, 3.0) == expected
     assert headway_unevenness_factor("metro", 10.0, 3.0, (10000.0,)) >= 1.0
-
-
-def test_reference_crowding_time_multiplier():
-    from transit_planner.reference_model import crowding_time_multiplier
-
-    assert crowding_time_multiplier(0.85) == 1.0
-    assert crowding_time_multiplier(1.0) == 1.33
-    assert crowding_time_multiplier(1.5) == 2.43
-    assert crowding_time_multiplier(4.0) == 2.43

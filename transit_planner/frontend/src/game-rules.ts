@@ -36,6 +36,13 @@ export const GAME_HOURS_WORKED_PER_YEAR = 1860;
 export const GAME_MINIMUM_INCOME = 15000;
 export const GAME_MAXIMUM_INCOME = 200000;
 export const GAME_AVG_DRIVING_SPEED_MPS = 11.1;
+/**
+ * Скорость ходьбы по дорожному пути в игре: 1.5 м/с, то есть ровно
+ * 5.4 км/ч. Домашний (прямолинейный) режим игры быстрее, но парсер
+ * отдаёт 1.5 м/с.
+ */
+export const GAME_WALKING_SPEED_MPS = 1.5;
+export const GAME_WALKING_SPEED_KPH = 1.5 * 3.6;
 export const GAME_MIN_DRIVING_SECONDS = 60;
 export const GAME_MIN_GAP_MINUTES = 90;
 
@@ -115,7 +122,15 @@ export function valueOfTimeEurPerSecond(incomePerYear: number): number {
  *
  * Для малых аргументов берётся ряд Тейлора erf, для остальных - непрерывная
  * дробь Лаплаца, которая сходится машинно точно.
+ *
+ * Порог и число членов подобраны так, чтобы обе ветви давали ошибку не
+ * больше 1e-16: ряд Тейлора точен до |x| = 1.5 (дальше начинается
+ * взаимное сокращение членов), а обратная дробь Лапласа на 1.5 выходит уже
+ * на машинную точность.
  */
+const ERFC_LAPLACE_SWITCH = 1.5;
+const ERFC_LAPLACE_TERMS = 120;
+
 function erfSmall(x: number): number {
   // erf(x) = (2/sqrt(pi)) * sum (-1)^n x^(2n+1) / (n! (2n+1))
   let term = x;
@@ -130,29 +145,21 @@ function erfSmall(x: number): number {
 
 function erfcContinuedFraction(x: number): number {
   // erfc(x) = exp(-x^2)/sqrt(pi) * 1/(x + (1/2)/(x + 1/(x + (3/2)/(x + ...))))
-  // Lentz для устойчивой оценки непрерывной дроби.
-  const tiny = 1e-300;
-  let f = tiny;
-  let c = f;
-  let d = 0;
-  for (let i = 0; i < 300; i += 1) {
-    const a = i === 0 ? 1 : i * 0.5;
-    d = x + a;
-    if (Math.abs(d) < tiny) d = tiny;
-    c = f + a / d;
-    if (Math.abs(c) < tiny) c = tiny;
-    d = 1 / c;
-    const delta = c * d;
-    f *= delta;
-    if (Math.abs(delta - 1) < 1e-17) break;
+  //
+  // Дробь Лапласа считается с конца, а не по Ленцу: у нуля прямая
+  // рекурсия diverges, обратная же сходится и при x = 1.5 даёт точность
+  // 0 ulp, а ряд Тейлора на том же пороге - 1e-16.
+  let u = x;
+  for (let n = ERFC_LAPLACE_TERMS - 1; n >= 1; n -= 1) {
+    u = x + (n * 0.5) / u;
   }
-  return Math.exp(-x * x) / Math.sqrt(Math.PI) * f;
+  return Math.exp(-x * x) / Math.sqrt(Math.PI) / u;
 }
 
 function erfCx(x: number): number {
   const sign = x < 0 ? -1 : 1;
   const a = Math.abs(x);
-  const value = a < 0.6 ? 1 - erfSmall(a) : erfcContinuedFraction(a);
+  const value = a < ERFC_LAPLACE_SWITCH ? 1 - erfSmall(a) : erfcContinuedFraction(a);
   return sign > 0 ? value : 2 - value;
 }
 
@@ -228,11 +235,15 @@ export function perceivedDrivingSeconds(
     + GAME_PARKING_TIME_S * 2 * GAME_PARKING_SEARCH_MIN;
 }
 
-/** Чисто пеший вариант: по умолчанию 1.39, в игре без него. */
+/**
+ * Чисто пеший вариант: в игре НЕ взвешивается 1.39, применяется только
+ * аэропортный 1.87. Флага такого в игре нет - реестр фич-флагов полный.
+ * Поведение игры воспроизведено; `applyWalkMultiplier` оставлен для сверки.
+ */
 export function perceivedWalkOnlySeconds(
   walkS: number,
   toAirport = false,
-  applyWalkMultiplier = true,
+  applyWalkMultiplier = false,
 ): number {
   const base = Math.max(0, walkS);
   if (toAirport) return base * GAME_AIRPORT_WALK_MIN;
@@ -275,15 +286,13 @@ export interface GameSplitInput {
   transitFare: number;
   toAirport?: boolean;
   transitAvailable?: boolean;
-  carAvailability?: number;
-  restTimeMin?: number | null;
   population?: number;
   applyMinTransitChoice?: boolean;
   applyWalkMultiplier?: boolean;
 }
 
 export type GameModeShares = {
-  transit: number; car: number; walk: number; rest: number;
+  transit: number; car: number; walk: number;
 };
 
 /**
@@ -292,7 +301,7 @@ export type GameModeShares = {
  */
 export function gameModeSplit(input: GameSplitInput): GameModeShares {
   const population = input.population ?? GAME_INCOME_LADDER_SIZE;
-  const counts = { transit: 0, car: 0, walk: 0, rest: 0 };
+  const counts = { transit: 0, car: 0, walk: 0 };
   if (population <= 0) return counts;
   for (let index = 0; index < population; index += 1) {
     const income = incomeForPerson(index, population);
@@ -309,10 +318,6 @@ export function gameModeSplit(input: GameSplitInput): GameModeShares {
     const candidates: [keyof GameModeShares, number][] = [["car", costs.driving]];
     if (input.transitAvailable !== false) candidates.push(["transit", costs.transit]);
     candidates.push(["walk", costs.walking]);
-    if (input.restTimeMin !== undefined && input.restTimeMin !== null) {
-      candidates.push(["rest", Math.max(0, input.restTimeMin) * 60
-        * valueOfTimeEurPerSecond(income)]);
-    }
     let bestKey: keyof GameModeShares = candidates[0][0];
     let best = candidates[0][1];
     for (const [key, cost] of candidates) {
@@ -324,26 +329,11 @@ export function gameModeSplit(input: GameSplitInput): GameModeShares {
     counts.car += counts.transit;
     counts.transit = 0;
   }
-  const carAvailability = input.carAvailability ?? 1;
-  if (carAvailability < 1) {
-    const before = counts.car;
-    counts.car = before * carAvailability;
-    const displaced = before - counts.car;
-    const active = counts.transit + counts.walk + counts.rest;
-    if (active > 0) {
-      counts.transit += displaced * counts.transit / active;
-      counts.walk += displaced * counts.walk / active;
-      counts.rest += displaced * counts.rest / active;
-    } else {
-      counts.rest += displaced;
-    }
-  }
-  const total = counts.transit + counts.car + counts.walk + counts.rest;
-  if (total <= 0) return { transit: 0, car: 0, walk: 0, rest: 0 };
+  const total = counts.transit + counts.car + counts.walk;
+  if (total <= 0) return { transit: 0, car: 0, walk: 0 };
   return {
     transit: counts.transit / total,
     car: counts.car / total,
     walk: counts.walk / total,
-    rest: counts.rest / total,
   };
 }

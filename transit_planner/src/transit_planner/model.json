@@ -315,15 +315,7 @@
     "parking_s": 240,
     "circuity": 1.3
   },
-  "mobility": {
-    "no_car_share": 0.35,
-    "two_wheel_share": 0.3,
-    "two_wheel_speed_kph": 15.12,
-    "two_wheel_reach_m": 7000,
-    "two_wheel_per_km_eur": 0.03
-  },
   "vot_s_per_eur": 360,
-  "no_car_effectiveness": 0.78,
   "crowding": {
     "crowded": 1,
     "severe": 2,

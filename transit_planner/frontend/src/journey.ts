@@ -59,7 +59,7 @@ export interface JourneyRequest {
   rangeWindowMin?: number;
   maxTransfers?: number;
   walkingSpeedKph?: number;
-  accessRadiusM?: number;
+  maxWalkMin?: number;
   /** Generalized-cost preset; default is Table 5 (JOURNEY_CHOICE_TABLE5). */
   choiceWeights?: RaptorChoiceWeights;
 }
@@ -288,7 +288,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     rangeWindowMin = 30,
     maxTransfers = 4,
     walkingSpeedKph,
-    accessRadiusM,
+    maxWalkMin,
     choiceWeights,
   } = request;
   if (!streetGraph) {
@@ -306,7 +306,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     rangeWindowMin,
     maxTransfers,
     walkingSpeedKph ?? "",
-    accessRadiusM ?? "",
+    maxWalkMin ?? "",
     choiceWeights ? `${choiceWeights.walk}|${choiceWeights.wait}|${choiceWeights.shift}` : "",
   ].join("|");
   const cache = cacheFor(streetGraph);
@@ -325,7 +325,7 @@ export async function planJourney(request: JourneyRequest): Promise<JourneyPlan>
     origin,
     destination,
     walkingSpeedKph,
-    accessRadiusM,
+    maxWalkMin,
   });
   const { journey, patterns } = await routeWithRaptor(
     network,
