@@ -24,6 +24,7 @@ from .control_totals import (
     anchor_to_control,
     jobs_from_workplace_floor_area,
 )
+from .demand_points import load_demand_points
 from .building_class import (
     BuildingClass,
     BuildingClassification,
@@ -730,6 +731,7 @@ def _pack_provenance(
     building_classes: dict | None = None,
     study_area: StudyArea | None = None,
     population_raster_info: dict | None = None,
+    demand_points_info: dict | None = None,
 ) -> dict:
     """Откуда взялись цифры пака: источник, параметры, итоги, оговорки.
 
@@ -741,6 +743,9 @@ def _pack_provenance(
     caveat_list = [
         "population is a built-area estimate, not census: "
         + {
+            "demand_points": "population and jobs read from an external demand-point set; "
+            "the field is taken as given and is not recalibrated against the raster, "
+            "buildings or a census",
             "raster_control_total": "distribution shape from Overture residential floor area, "
             "magnitude from the GHS-POP raster (2030 projection, not a census count)",
             "overture_buildings": "Overture footprint x num_floors / assumed floor area per person, "
@@ -795,6 +800,7 @@ def _pack_provenance(
         "caveats": caveat_list,
         "buildingClassification": building_classes or {},
         "studyArea": study_area.to_provenance() if study_area is not None else None,
+        "demandPoints": demand_points_info or None,
         "populationRaster": population_raster_info or None,
     }
 
@@ -837,6 +843,7 @@ def build_overture_city_pack(
     bbox: tuple[float, float, float, float] | None = None,
     zones: tuple[DemandZone, ...] = (),
     study_area: StudyArea | None = None,
+    demand_points_path: str | Path | None = None,
 ) -> tuple[CityPackManifest, dict[str, bytes]]:
     """Собирает пак города.
 
@@ -844,6 +851,12 @@ def build_overture_city_pack(
     bbox, описанному границей, а затем дороги, здания и POI отсекаются по
     самому полигону. Без этого в пак попадает всё, что лежит в
     описывающем прямоугольнике, а у Тамбова это 54.5% лишней площади.
+
+    `demand_points_path` заменяет сетку TAZ внешним набором точек спроса: у
+    эталонного набора это десятки тысяч зон с населением и занятостью в
+    каждой, тогда как сетка даёт сотни. Когда точки заданы, население берётся
+    из них, а не из растра или площади зданий, - собственная величина
+    источника точнее любой оценки.
     """
     if study_area is not None:
         bbox = study_area.bbox
@@ -865,9 +878,21 @@ def build_overture_city_pack(
     ).load()
     buildings, water = _clip_to_study_area(buildings, water, study_area)
 
+    points_info: dict = {}
+    if demand_points_path is not None and not zones:
+        zones, points_source = load_demand_points(
+            demand_points_path,
+            origin_lon=network.origin_lon,
+            origin_lat=network.origin_lat,
+            inside=study_area.contains if study_area is not None else None,
+        )
+        points_info = points_source.to_provenance()
+
     population_raster_info: dict = {}
     raster_read = None
-    if bbox is not None:
+    # Растр нужен только когда зоны строятся сеткой: у внешних точек своя
+    # величина населения, и подмена её оценкой была бы ухудшением.
+    if bbox is not None and not points_info:
         raster_path = find_population_raster(bbox=bbox)
         if raster_path is not None:
             raster = PopulationRaster(path=raster_path)
@@ -962,7 +987,9 @@ def build_overture_city_pack(
     ]
 
     model_path = Path(__file__).with_name("model.json")
-    if population_raster_info:
+    if demand_points_info:
+        population_method = "demand_points"
+    elif population_raster_info:
         population_method = "raster_control_total"
     else:
         population_method = "overture_buildings" if buildings else "place_importance_proxy"
@@ -1001,6 +1028,7 @@ def build_overture_city_pack(
             ) if buildings else {},
             study_area=study_area,
             population_raster_info=population_raster_info,
+            demand_points_info=points_info,
         ),
     )
 
