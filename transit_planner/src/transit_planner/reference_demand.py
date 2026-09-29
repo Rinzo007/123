@@ -437,14 +437,12 @@ def build_demand_layers(
 def build_temporal_demand(
     zones: tuple[DemandZone, ...],
     *,
-    trip_rate: float = 0.12,
     decay: float = 0.08,
     speed_kph: float = 30.0,
 ) -> TemporalDemandMatrix:
     commuter = gravity_od(
         zones,
         parameters=GravityParameters(speed_kph=speed_kph, decay=decay),
-        trip_rate=trip_rate,
     )
     rows: list[PeriodODPairDemand] = []
 
@@ -476,7 +474,6 @@ def build_temporal_demand(
 def build_temporal_demand_two_sided(
     zones: tuple[DemandZone, ...],
     *,
-    trip_rate: float = 0.12,
     decay: float = 0.08,
     speed_kph: float = 30.0,
 ) -> TemporalDemandMatrix:
@@ -492,7 +489,6 @@ def build_temporal_demand_two_sided(
     commuter = gravity_od(
         zones,
         parameters=GravityParameters(speed_kph=speed_kph, decay=decay),
-        trip_rate=trip_rate,
     )
     rows: list[PeriodODPairDemand] = []
     dominant_share = tuple(
@@ -521,12 +517,9 @@ def build_temporal_demand_two_sided(
 def build_daily_demand(
     zones: tuple[DemandZone, ...],
     *,
-    trip_rate: float = 0.12,
     decay: float = 0.08,
     reference_speed_kph: float = 30.0,
 ) -> DemandMatrix:
-    if trip_rate < 0:
-        raise ValueError("trip_rate cannot be negative")
     if decay <= 0:
         raise ValueError("decay must be positive")
     if reference_speed_kph <= 0:
@@ -540,7 +533,6 @@ def build_daily_demand(
             speed_kph=reference_speed_kph,
             decay=decay,
         ),
-        trip_rate=trip_rate,
     )
     layers = build_demand_layers(zones)
     pairs = [

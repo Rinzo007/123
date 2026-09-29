@@ -26,12 +26,20 @@ def gravity_od(
     zones: tuple[DemandZone, ...],
     *,
     parameters: GravityParameters = GravityParameters(),
-    trip_rate: float = 0.12,
 ) -> DemandMatrix:
-    if trip_rate < 0:
-        raise ValueError("trip_rate cannot be negative")
+    """Гравитационная матрица трудовых поездок.
 
-    productions = {z.id: max(0.0, z.population * trip_rate) for z in zones}
+    Productions - это занятость зоны, то есть ровно столько поездок на
+    работу, сколько в ней работников. Множителя вида `население x 0.12` здесь
+    нет намеренно: он ничего не измерял, а оба эталонных бандла дают одну
+    трудовую поездку на работника в сутки - у киевского residents равно jobs
+    равно числу поездок, и столько же получается, если productions равно
+    занятости. Там, где занятости нет (пустые jobs), productions берётся из
+    населения, иначе матрица схлопнулась бы в ноль.
+    """
+    productions = {z.id: max(0.0, z.jobs) for z in zones}
+    if sum(productions.values()) <= 0:
+        productions = {z.id: max(0.0, z.population) for z in zones}
     attraction_base = {z.id: max(0.0, z.jobs) for z in zones}
     if sum(attraction_base.values()) <= 0:
         attraction_base = {z.id: max(0.0, z.population) for z in zones}

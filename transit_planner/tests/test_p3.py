@@ -41,10 +41,10 @@ def test_gravity_od_balances_to_origin_production():
     demand = gravity_od(
         zones,
         parameters=GravityParameters(speed_kph=30, decay=0.01),
-        trip_rate=0.1,
     )
     assert isinstance(demand, DemandMatrix)
-    assert abs(demand.total_trips_per_day - 150.0) < 1e-9
+    # Productions = занятость: 100 + 900.
+    assert abs(demand.total_trips_per_day - 1000.0) < 1e-9
 
 
 def test_stop_snapping_uses_nearest_road_node():

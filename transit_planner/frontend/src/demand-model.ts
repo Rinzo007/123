@@ -149,16 +149,21 @@ export function aggregatePlaceAttractions(
 export function gravityOd(
   zones: DemandZone[],
   parameters: GravityParameters = DEFAULT_GRAVITY_PARAMETERS,
-  tripRate = 0.12,
 ): DemandMatrix {
-  if (tripRate < 0) throw new Error("trip_rate cannot be negative");
   if (parameters.speedKph <= 0) throw new Error("speed_kph must be positive");
   if (parameters.decay <= 0) throw new Error("decay must be positive");
   if (!(parameters.intrazonalFactor > 0 && parameters.intrazonalFactor <= 1)) {
     throw new Error("intrazonal_factor must be in (0, 1]");
   }
 
-  const productions = new Map(zones.map((zone) => [zone.id, Math.max(0, zone.population * tripRate)]));
+  // Productions = занятость зоны, то есть одна поездка на работника в сутки.
+  // Множителя вида `население x 0.12` здесь нет намеренно: он ничего не
+  // измерял. Если занятости нет, productions берётся из населения, иначе
+  // матрица схлопнулась бы в ноль.
+  let productions = new Map(zones.map((zone) => [zone.id, Math.max(0, zone.jobs)]));
+  if ([...productions.values()].reduce((sum, value) => sum + value, 0) <= 0) {
+    productions = new Map(zones.map((zone) => [zone.id, Math.max(0, zone.population)]));
+  }
   const attractionBase = new Map(zones.map((zone) => [zone.id, Math.max(0, zone.jobs)]));
   let totalAttraction = [...attractionBase.values()].reduce((sum, value) => sum + value, 0);
   if (totalAttraction <= 0) {
@@ -491,11 +496,10 @@ export function buildTemporalDemand(
   zones: DemandZone[],
   periods: ReferencePeriod[],
   purposes: ReferencePurposeLayer[],
-  tripRate = 0.12,
   decay = 0.08,
   speedKph = 30,
 ): TemporalDemandMatrix {
-  const commuter = gravityOd(zones, { speedKph, decay, intrazonalFactor: 0.5 }, tripRate);
+  const commuter = gravityOd(zones, { speedKph, decay, intrazonalFactor: 0.5 });
   const rows: PeriodODPairDemand[] = [];
   const commuterPeriodShare = periods.map((period) => (period.outboundShare + period.returnShare) / 2);
   for (const pair of commuter.pairs) {
@@ -521,14 +525,12 @@ export function buildTemporalDemand(
 export function buildDailyDemand(
   zones: DemandZone[],
   purposes: ReferencePurposeLayer[],
-  tripRate = 0.12,
   decay = 0.08,
   referenceSpeedKph = 30,
 ): DemandMatrix {
-  if (tripRate < 0) throw new Error("trip_rate cannot be negative");
   if (decay <= 0) throw new Error("decay must be positive");
   if (referenceSpeedKph <= 0) throw new Error("reference_speed_kph must be positive");
-  const commuter = gravityOd(zones, { speedKph: referenceSpeedKph, decay, intrazonalFactor: 0.5 }, tripRate);
+  const commuter = gravityOd(zones, { speedKph: referenceSpeedKph, decay, intrazonalFactor: 0.5 });
   const layers = buildDemandLayers(zones, purposes);
   const pairs: ODPairDemand[] = commuter.pairs
     .filter((pair) => pair.tripsPerDay > 0)

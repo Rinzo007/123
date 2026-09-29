@@ -34,7 +34,6 @@ ZONES = [
     ("z2", 800.0, 0.0, 200.0, 900.0),
     ("z3", 0.0, 1500.0, 50.0, 50.0),
 ]
-TRIP_RATE = 0.12
 SPEED_KPH = 30.0
 DECAY = 0.08
 INTRAZONAL = 0.5
@@ -50,7 +49,7 @@ const zones = spec.zones.map(([id, x, y, population, jobs]) => ({
 }));
 const matrix = gravityOd(zones, {
   speedKph: spec.speedKph, decay: spec.decay, intrazonalFactor: spec.intrazonal,
-}, spec.tripRate);
+});
 process.stdout.write(JSON.stringify(matrix.pairs.map((p) => [
   p.originZoneId, p.destinationZoneId, p.tripsPerDay, p.baseTimeMin,
 ])));
@@ -94,7 +93,7 @@ def _ts_pairs(tmp_path: Path) -> list[tuple[str, str, float, float | None]] | No
     payload = json.dumps(
         {
             "zones": [list(zone) for zone in ZONES],
-            "tripRate": TRIP_RATE,
+            
             "speedKph": SPEED_KPH,
             "decay": DECAY,
             "intrazonal": INTRAZONAL,
@@ -124,7 +123,6 @@ def _python_pairs() -> list[tuple[str, str, float, float | None]]:
             decay=DECAY,
             intrazonal_factor=INTRAZONAL,
         ),
-        trip_rate=TRIP_RATE,
     )
     return [
         (pair.origin_zone_id, pair.destination_zone_id, pair.trips_per_day, pair.base_time_min)
@@ -158,10 +156,14 @@ def test_gravity_od_matches_python(tmp_path: Path) -> None:
 
 
 def test_gravity_od_conserves_productions() -> None:
-    """Р независимо от разбиения: сумма поездок = production каждой зоны."""
+    """R независимо от разбиения: сумма поездок = production каждой зоны.
+
+    Production - это занятость зоны: одна поездка на работника в сутки.
+    Множителя `население x 0.12` больше нет.
+    """
     pairs = _python_pairs()
     by_origin: dict[str, float] = {}
     for origin, _destination, trips, _base in pairs:
         by_origin[origin] = by_origin.get(origin, 0.0) + trips
-    for zone_id, _x, _y, population, _jobs in ZONES:
-        assert by_origin[zone_id] == pytest.approx(population * TRIP_RATE, abs=1e-9)
+    for zone_id, _x, _y, _population, jobs in ZONES:
+        assert by_origin[zone_id] == pytest.approx(jobs, abs=1e-9)

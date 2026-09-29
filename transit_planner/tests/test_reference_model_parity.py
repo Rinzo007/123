@@ -125,11 +125,13 @@ def test_gravity_parameters_match_python_defaults() -> None:
     source = (ROOT / "frontend" / "src" / "demand-model.ts").read_text(encoding="utf-8")
     params = signature(build_temporal_demand).parameters
 
-    def ts_default(name: str, fallback: str) -> str:
+    def ts_default(name: str) -> str:
         match = re.search(rf"{name} = ([0-9.]+)", source)
         assert match is not None, f"{name} не найден в demand-model.ts"
         return match.group(1)
 
-    assert float(ts_default("tripRate", "0.12")) == params["trip_rate"].default
-    assert float(ts_default("decay", "0.08")) == params["decay"].default
-    assert float(ts_default("speedKph", "30")) == params["speed_kph"].default
+    assert float(ts_default("decay")) == params["decay"].default
+    assert float(ts_default("speedKph")) == params["speed_kph"].default
+    # Множителя productions в TS больше нет: падение означало бы, что он вернулся
+    # в виде дефолта где-то в demand-model.
+    assert "tripRate" not in source, "tripRate вернулся в demand-model.ts"
