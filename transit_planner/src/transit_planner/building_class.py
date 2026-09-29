@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .urban import BuildingFootprint
+from .urban import BuildingFootprint, is_residential_building
 
 
 class BuildingClass(str, Enum):
@@ -81,6 +81,32 @@ INERT_OVERTURE_CLASSES = frozenset({
     "synagogue",
 })
 
+# Рабочие места типизируются по назначению здания, а не одной суммой.
+# Так поступает и эталонный киевский бандл: у него рабочая сторона размечена
+# типами (UNI, HOS, AIR, MUS), и спецспрос рождается из них, а не добавляется
+# отдельно. Ключи совпадают с purpose в модели спроса, поэтому тип сразу
+# попадает в существующий слой, а не в обход него.
+WORKPLACE_PURPOSE_BY_CLASS: dict[str, str] = {
+    "college": "edu",
+    "university": "edu",
+    "school": "edu",
+    "kindergarten": "edu",
+    "hospital": "health",
+    "clinic": "health",
+    "retail": "shop",
+    "shop": "shop",
+    "supermarket": "shop",
+    "department_store": "shop",
+    "hotel": "night",
+    "restaurant": "night",
+    "cafe": "night",
+    "airport": "air",
+    "airport_terminal": "air",
+    "bus_station": "air",
+}
+# Здания без указанного назначения остаются общей работой.
+GENERIC_WORKPLACE_PURPOSE = "work"
+
 # Этажность, при которой крупный контур скорее производственный, а крупный
 # контур с малой этажностью - жилой. Границы взяты из морфологии, а не из
 # предположения о городе: проверяются тестами на синтетических зданиях.
@@ -120,6 +146,7 @@ class BuildingClassification:
     confidence: float
     outcomes: tuple[SignalOutcome, ...] = ()
     floor_area_m2: float = 0.0
+    workplace_purpose: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -128,6 +155,7 @@ class BuildingClassification:
             "decidedBy": self.decided_by,
             "confidence": round(self.confidence, 3),
             "floorAreaM2": round(self.floor_area_m2, 1),
+            "workplacePurpose": self.workplace_purpose,
             "signals": [outcome.to_dict() for outcome in self.outcomes],
         }
 
@@ -254,7 +282,25 @@ def _finish(
         confidence=confidence,
         outcomes=tuple(outcomes),
         floor_area_m2=floor_area,
+        workplace_purpose=workplace_purpose_for(building),
     )
+
+
+def workplace_purpose_for(building: BuildingFootprint) -> str | None:
+    """Назначение рабочего здания как ключ purpose, либо None для не-работы.
+
+    Тип ставится только рабочим зданиям и только если назначение известно из
+    класса Overture: угадывать по морфологии нельзя, иначе склад стал бы
+    больницей.
+    """
+    if not is_residential_building(building) and (
+        (building.building_class or "").strip().lower() not in WORKPLACE_OVERTURE_CLASSES
+    ):
+        return None
+    raw = (building.building_class or "").strip().lower()
+    if raw in WORKPLACE_PURPOSE_BY_CLASS:
+        return WORKPLACE_PURPOSE_BY_CLASS[raw]
+    return GENERIC_WORKPLACE_PURPOSE if raw in WORKPLACE_OVERTURE_CLASSES else None
 
 
 def _class_from_overture(value: str) -> BuildingClass:

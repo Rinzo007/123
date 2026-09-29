@@ -328,6 +328,34 @@ def _grid_cell_size(extent_m: float) -> float:
     return min(2000.0, max(200.0, round(extent_m / 24.0)))
 
 
+def jobs_by_purpose(
+    workplace_area_by_purpose: dict[str, dict[str, float]],
+    population_total: float,
+) -> dict[str, dict[str, float]]:
+    """Занятость, разложенная по типам рабочих зданий.
+
+    Киевский эталон делает то же самое: рабочая сторона размечена типами
+    (университеты, больницы, аэропорты, музеи), и спецспрос получается сам, из
+    занятости, а не добавляется отдельным слоем поверх гравитации.
+
+    Величина везде одна - население: рынок труда закрыт, сумма jobs равна
+    сумме residents. Типы лишь задают, как эта сумма делится между зонами.
+    """
+    cleaned = {
+        purpose: {zone: area for zone, area in bucket.items() if area > 0}
+        for purpose, bucket in workplace_area_by_purpose.items()
+    }
+    total_area = sum(sum(bucket.values()) for bucket in cleaned.values())
+    if total_area <= 0 or population_total <= 0:
+        return {}
+    return {
+        purpose: {
+            zone: population_total * area / total_area for zone, area in bucket.items()
+        }
+        for purpose, bucket in cleaned.items()
+    }
+
+
 def _residential_population_by_zone(
     buildings: tuple[BuildingFootprint, ...],
     classifications: tuple[BuildingClassification, ...],
@@ -389,16 +417,23 @@ def _workplace_floor_area_by_zone(
     *,
     origin_lon: float,
     origin_lat: float,
-) -> dict[str, float]:
-    """Площадь рабочих зданий по зонам - основание для распределения занятости."""
+    by_purpose: bool = False,
+) -> dict:
+    """Площадь рабочих зданий по зонам - основание для занятости.
+
+    С `by_purpose=True` возвращает `{purpose: {zone_id: площадь}}`. Тип
+    здания важнее его размера: именно он определяет, в какой purpose уйдут
+    поездки, а без разбивки вся занятость сливается в общую `work`.
+    """
     if not classifications or not buildings:
-        return {}
+        return {} if by_purpose else {}
     workplace = {
         item.building_id
         for item in classifications
         if item.building_class is BuildingClass.WORKPLACE
     }
-    totals: dict[str, float] = {zone.id: 0.0 for zone in zones}
+    by_id = {item.building_id: item for item in classifications}
+    totals: dict = {zone.id: 0.0 for zone in zones} if not by_purpose else {}
     for building in buildings:
         if building.id not in workplace:
             continue
@@ -411,7 +446,18 @@ def _workplace_floor_area_by_zone(
         nearest = _nearest_zone(zones, point)
         if nearest is None:
             continue
-        totals[nearest.id] += building.area_m2 * effective_floors(building)
+        area = building.area_m2 * effective_floors(building)
+        if not by_purpose:
+            totals[nearest.id] += area
+            continue
+        purpose = by_id[building.id].workplace_purpose or "work"
+        bucket = totals.setdefault(purpose, {})
+        bucket[nearest.id] = bucket.get(nearest.id, 0.0) + area
+    if by_purpose:
+        return {
+            purpose: {zone: area for zone, area in bucket.items() if area > 0}
+            for purpose, bucket in totals.items()
+        }
     return {zone_id: area for zone_id, area in totals.items() if area > 0}
 
 
@@ -502,6 +548,10 @@ def build_city_zones(
     workplace_area = _workplace_floor_area_by_zone(
         buildings, classifications, zones, origin_lon=origin_lon, origin_lat=origin_lat
     )
+    workplace_by_purpose = _workplace_floor_area_by_zone(
+        buildings, classifications, zones, origin_lon=origin_lon, origin_lat=origin_lat,
+        by_purpose=True,
+    )
 
     # Форма распределения - из зданий, величина - из растра населения. Без
     # растра остаётся оценка снизу вверх, и тогда это пишется в provenance.
@@ -534,6 +584,13 @@ def build_city_zones(
     )
 
     result: list[DemandZone] = []
+    typed_jobs = jobs_by_purpose(workplace_by_purpose, sum(residential.values()))
+    # Разворачиваем один раз: иначе сумма по зоне считалась бы заново для
+    # каждой зоны, то есть квадратично по числу purpose.
+    by_zone: dict[str, dict[str, float]] = {}
+    for purpose, bucket in typed_jobs.items():
+        for zone_id, value in bucket.items():
+            by_zone.setdefault(zone_id, {})[purpose] = round(value, 3)
     for zone in enriched:
         work = zone.attractions.get("work", 0.0)
         other = sum(
@@ -544,11 +601,17 @@ def build_city_zones(
         # Здания побеждают прокси мест: у POI нет объёма, а у здания есть.
         # Если зданий нет, остаётся прежний прокси.
         population = residential.get(zone.id, other)
+        # Типизированная занятость заменяет прокси по тем же ключам purpose:
+        # аттракции зоны уходят прямо в слой соответствующего назначения.
+        attractions = by_zone.get(zone.id, {})
+        jobs = sum(attractions.values()) if attractions else jobs_by_zone.get(zone.id, work)
         result.append(
             replace(
                 zone,
                 population=population,
-                jobs=jobs_by_zone.get(zone.id, work),
+                jobs=jobs,
+                purpose_attractions=tuple(sorted(attractions.items()))
+                or zone.purpose_attractions,
             )
         )
     return tuple(result)
