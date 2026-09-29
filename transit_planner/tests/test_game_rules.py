@@ -15,14 +15,21 @@ from transit_planner.game_rules import (
     MIN_TRANSIT_CHOICE,
     PerceivedMinutes,
     airport_parking_cost,
+    circular_gap_s,
+    congested_share,
     driving_seconds,
     driving_time_multiplier,
     home_work_departure_pair,
     income_for_person,
     inverse_normal_cdf,
+    journey_origin,
+    mode_costs,
     parking_search_minutes,
+    perceived_driving_seconds,
     perceived_minutes,
+    perceived_walk_only_seconds,
     short_drive_penalty,
+    value_of_time_eur_per_second,
     value_of_time_s_per_eur,
     walking_seconds,
     wait_seconds,
@@ -80,25 +87,40 @@ def test_inverse_normal_cdf_clamps_beyond_domain() -> None:
 
 
 def test_income_grows_with_index_and_stays_in_bounds() -> None:
-    incomes = [income_for_person(i, total=100) for i in range(100)]
-    assert incomes[0] == 15_000.0
-    assert incomes[-1] > incomes[len(incomes) // 2]
+    incomes = [income_for_person(i, total=200) for i in range(200)]
+    # Первый человек не упирается в отсечку: анти-кластеризация перерисовывает
+    # квантиль, поэтому нижние 15 000 недостижимы.
+    assert min(incomes) > 15_000.0
+    assert incomes[199] >= incomes[100] > incomes[0]
     assert all(15_000.0 <= value <= 200_000.0 for value in incomes)
 
 
 def test_income_is_deterministic() -> None:
-    assert income_for_person(7, total=100) == income_for_person(7, total=100)
+    assert income_for_person(7, total=200) == income_for_person(7, total=200)
 
 
-def test_airport_and_college_income_shift() -> None:
-    base = income_for_person(50, total=100)
-    assert income_for_person(50, total=100, to_airport=True) == pytest.approx(base * 1.5)
-    assert income_for_person(50, total=100, at_college=True) == pytest.approx(base * 0.6)
+def test_income_multiplier_shifts_mean_not_spread() -> None:
+    """Множитель применяется к среднему, разброс остаётся прежним."""
+    base = income_for_person(120, total=200)
+    airport = income_for_person(120, total=200, job_id="AIR_CLT_T1")
+    college = income_for_person(120, total=200, job_id="UNI_UNCC")
+    assert airport - base == pytest.approx(30_000.0, rel=0.05)
+    assert base - college == pytest.approx(24_000.0, rel=0.05)
 
 
-def test_value_of_time_is_income_over_hours() -> None:
-    assert value_of_time_s_per_eur(60_000.0) == pytest.approx(60_000.0 / 1860.0)
-    assert value_of_time_s_per_eur(-5.0) == 0.0
+def test_value_of_time_matches_documented_control_points() -> None:
+    """Документ, раздел 5.1: 15 000 -> 446.4, 60 000 -> 111.6, 200 000 -> 33.5 с/евро."""
+    assert value_of_time_s_per_eur(15_000.0) == pytest.approx(446.4, rel=1e-3)
+    assert value_of_time_s_per_eur(60_000.0) == pytest.approx(111.6, rel=1e-3)
+    assert value_of_time_s_per_eur(200_000.0) == pytest.approx(33.48, rel=1e-3)
+
+
+def test_value_of_time_reciprocal_forms_agree() -> None:
+    assert value_of_time_eur_per_second(60_000.0) == pytest.approx(
+        1.0 / value_of_time_s_per_eur(60_000.0)
+    )
+    assert value_of_time_eur_per_second(60_000.0) * 3600.0 == pytest.approx(32.258, rel=1e-3)
+    assert value_of_time_s_per_eur(0.0) == 0.0
 
 
 def test_driving_time_scales_with_congestion() -> None:
@@ -182,3 +204,81 @@ def test_path_rules_match_parsed_values() -> None:
     assert MAX_TRANSFERS == 4
     assert MAX_WALK_TO_FROM_STATION_S == 45 * 60
     assert CONGESTION_FULL_AT_MIN == 2.0
+
+
+def test_parking_adds_constant_perceived_seconds() -> None:
+    """Раздел 5.2: +180*2*1.6 = 576 с к каждой авто-поездке независимо от длины."""
+    for drive in (300.0, 600.0, 1800.0):
+        assert perceived_driving_seconds(drive) - drive == pytest.approx(576.0)
+
+
+def test_congested_share_follows_demand_multiplier() -> None:
+    assert congested_share(1.0) == 0.0
+    assert congested_share(1.5) == pytest.approx(0.5)
+    assert congested_share(2.0) == 1.0
+    assert congested_share(0.8) == 0.0
+    assert congested_share(9.0) == 1.0
+
+
+def test_peak_congestion_amplifies_drive_time() -> None:
+    free = perceived_driving_seconds(600.0, traffic_multiplier=1.0)
+    peak = perceived_driving_seconds(600.0, traffic_multiplier=1.5)
+    # 600 * 1.5 * (1 + 0.5*0.33) = 1048.5, плюс постоянные 576.
+    assert peak - 576.0 == pytest.approx(1048.5)
+
+
+def test_walk_only_skips_walk_multiplier_like_the_game() -> None:
+    """Раздел 5.3: чисто пеший вариант не взвешивается 1.39 - это, судя по
+    разбору, неточность игры, но она воспроизводится."""
+    assert perceived_walk_only_seconds(1200.0) == 1200.0
+    assert perceived_walk_only_seconds(
+        1200.0, apply_walk_multiplier=True,
+    ) == pytest.approx(1200.0 * 1.39)
+    assert perceived_walk_only_seconds(1200.0, to_airport=True) == pytest.approx(1200.0 * 1.87)
+
+
+def test_mode_costs_are_in_euros_and_pick_the_minimum() -> None:
+    perceived = perceived_minutes(
+        in_vehicle_s=1500.0, wait_s=300.0, access_walk_s=400.0,
+        egress_walk_s=400.0, transfer_walk_s=0.0, transfers=1,
+        car_drive_s=1200.0, car_parking_s=0.0, car_distance_m=12_000.0,
+        walk_s=3000.0,
+    )
+    costs = mode_costs(income_per_year=60_000.0, transit=perceived, car_distance_m=12_000.0)
+    # Порядок величин - десятки евро, а не сотни тысяч.
+    assert 1.0 < costs.driving < 200.0
+    assert 1.0 < costs.transit < 200.0
+    assert 1.0 < costs.walking < 200.0
+    assert costs.choice() == min(
+        ("driving", "transit", "walking"),
+        key=lambda key: {"driving": costs.driving, "transit": costs.transit,
+                         "walking": costs.walking}[key],
+    )
+
+
+def test_short_trip_penalty_scales_the_whole_car_cost() -> None:
+    """Штраф умножает всю авто-стоимость вместе с деньгами, а не только время."""
+    def driving_cost(distance: float) -> float:
+        perceived = perceived_minutes(
+            in_vehicle_s=0.0, wait_s=0.0, access_walk_s=0.0, egress_walk_s=0.0,
+            transfer_walk_s=0.0, transfers=0, car_drive_s=300.0,
+            car_parking_s=0.0, car_distance_m=distance, walk_s=0.0,
+        )
+        return mode_costs(
+            income_per_year=60_000.0, transit=perceived, car_distance_m=distance,
+        ).driving
+    short, sensible = driving_cost(400.0), driving_cost(1_200.0)
+    assert short > sensible
+
+
+def test_circular_gap_wraps_around_midnight() -> None:
+    assert circular_gap_s(3600.0, 0.0) == pytest.approx(3600.0)
+    assert circular_gap_s(0.0, 86_400.0) == pytest.approx(0.0)
+    assert circular_gap_s(100.0, 86_300.0) == pytest.approx(200.0)
+
+
+def test_journey_origin_uses_nearest_departure_time() -> None:
+    home, work = 7 * 3600.0, 19 * 3600.0
+    assert journey_origin(home, work, 8 * 3600.0) == "home"
+    assert journey_origin(home, work, 18.5 * 3600.0) == "work"
+    assert journey_origin(home, work, 12 * 3600.0) == "home"

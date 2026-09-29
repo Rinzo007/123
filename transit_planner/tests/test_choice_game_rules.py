@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from transit_planner.choice import ChoiceConfig, utilities
+from transit_planner.game_rules import value_of_time_s_per_eur
 
 
 def test_short_drive_penalty_applies_only_with_known_distance() -> None:
@@ -46,29 +47,30 @@ def test_value_of_time_follows_income() -> None:
     base = ChoiceConfig()
     poor = base.for_income(20_000.0)
     rich = base.for_income(120_000.0)
-    assert poor.value_of_time_s_per_eur < rich.value_of_time_s_per_eur
-    # Богатый пассажир сильнее чувствует время в пути: минута езды обходится
-    # ему дороже, поэтому авто для него привлекательнее, а не наоборот.
+    # С/евро: бедному минута дороже, поэтому VOT у него больше.
+    assert poor.value_of_time_s_per_eur > rich.value_of_time_s_per_eur
+    # Богатый пассажир платит за минуту дороже в евро, поэтому обобщённая
+    # стоимость у него выше, а полезность ниже.
     def utility(config: ChoiceConfig) -> float:
         return utilities(
             walk_time_min=30.0, car_time_min=20.0, transit_time_min=None,
             car_distance_km=15.0, config=config,
         ).car
-    assert utility(rich) > utility(poor)
+    assert utility(rich) < utility(poor)
 
 
-def test_legacy_vot_is_far_above_game_value() -> None:
-    """Явная фиксация расхождения, а не его сокрытие заменой числа.
+def test_legacy_vot_sits_inside_the_game_income_range() -> None:
+    """Устаревшая константа 360 с/евро не выпадает из игрового диапазона.
 
-    Устаревшая константа reference_model (360 сек/евро) в разы выше игрового
-    VOT = доход / 1860 часов. Пока модель на неё опирается, денежные
-    составляющие занижены, поэтому подключение доходного VOT меняет
-    численные результаты mode choice - это ожидаемо.
+    VOT = 1860*3600 / доход, поэтому 360 с/евро соответствует доходу
+    18 600 EUR в год - это низкая часть диапазона MINIMUM_INCOME=15 000 ...
+    MAXIMUM_INCOME=200 000, а не ошибка на порядок. Ранее здесь стояло
+    утверждение об обратном, порождённое ошибкой размерности в VOT.
     """
     base = ChoiceConfig()
-    for income in (15_000.0, 60_000.0, 200_000.0):
-        # Минимальное отношение - на потолке дохода: 360 / 107.5 = 3.35.
-        assert base.for_income(income).value_of_time_s_per_eur < base.value_of_time_s_per_eur / 3.0
+    legacy = base.value_of_time_s_per_eur
+    assert value_of_time_s_per_eur(15_000.0) > legacy > value_of_time_s_per_eur(200_000.0)
+    assert 15_000.0 < 1860.0 * 3600.0 / legacy < 200_000.0
 
 
 def test_income_zero_keeps_config_usable() -> None:

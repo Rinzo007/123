@@ -121,17 +121,16 @@ class PerceivedMinutes:
     def preferred(self, *, transit_pax: int = 0) -> str:
         """Выбор по правилу MIN_TRANSIT_CHOICE.
 
-        Если на транзите едет меньше MIN_TRANSIT_CHOICE человек, предпочтение
-        отдаётся следующей по стоимости альтернативе: иначе одинокий
-        пассажир-«транзитник» держит убыточную линию в игре.
+        Разбор (popCommuteWorker:38735): если транзит выбрали менее
+        MIN_TRANSIT_CHOICE человек, ВСЕХ переводят в авто - не во вторую по
+        стоимости альтернативу, а именно в авто. Движок так выкидывает
+        мелкие потоки ради производительности, из-за чего на ячейке из 200
+        человек порог в 5% людей заметно искажает модальный сплит.
         """
-        ranked = sorted(
-            (("transit", self.transit), ("driving", self.car), ("walking", self.walk)),
-            key=lambda item: item[1],
-        )
-        if ranked[0][0] == "transit" and transit_pax < MIN_TRANSIT_CHOICE:
-            return ranked[1][0]
-        return ranked[0][0]
+        winner = self.winner()
+        if winner == "transit" and transit_pax < MIN_TRANSIT_CHOICE:
+            return "driving"
+        return winner
 
 
 def driving_time_multiplier(level: str) -> float:
@@ -185,8 +184,25 @@ def short_drive_penalty(distance_m: float) -> float:
 
 
 def value_of_time_s_per_eur(income_per_year: float) -> float:
-    """VOT = годовой доход / отработанные часы, в секундах на евро."""
-    return max(0.0, income_per_year) / HOURS_WORKED_PER_YEAR
+    """Цена времени в секундах на евро, в единицах планировщика.
+
+    Разбор (popCommuteWorker:38780) оперирует VOT в долларах в секунду:
+
+        votAnnual  = income / HOURS_WORKED_PER_YEAR   # фактически $/час
+        votPerHour = votAnnual / 3600                 # $/сек
+
+    Планировщик же оперирует обратной величиной - сколько секунд стоит
+    евро, - поэтому берётся обратное значение. Ошибка размерности здесь
+    неощутима численно, но ломает денежную часть выбора: при доходе 60 000
+    правильный ответ 111.6 с/евро, а `income / 1860` даёт 32.26 - это
+    $/час, а не секунды за евро.
+
+    Контрольные точки из документа: 15 000 -> 446.4, 60 000 -> 111.6,
+    200 000 -> 33.5 секунд за евро.
+    """
+    if income_per_year <= 0:
+        return 0.0
+    return HOURS_WORKED_PER_YEAR * 3600.0 / income_per_year
 
 
 _SQRT2 = sqrt(2.0)
@@ -248,31 +264,46 @@ def income_for_person(
     index: int,
     *,
     total: int,
-    seed: int = 0,
-    to_airport: bool = False,
-    at_college: bool = False,
+    job_id: str = "",
 ) -> float:
     """Доход человека по обратной нормальной CDF, детерминированно.
 
-    Индекс задаёт позицию в последовательности, поэтому расход распределён
-    одинаково при каждом запуске - случайность без повторов не нужна.
-    Анти-кластеризация из разбора: нижний дециль добирается равномерно, плюс
-    10% получают бонус по псевдослучайному признаку.
+    Разбор (popCommuteWorker:38792 getIncomeForPerson):
+
+        q     = personIndex / max(population - 1, 1)
+        z     = inverseNormalCDF(q)
+        income = INCOME_MEAN * multiplier + z * INCOME_STD_DEV
+        income = min(max(income, MINIMUM_INCOME), MAXIMUM_INCOME)
+
+    Квантиль не случайный, а `index / (total - 1)`: в ячейке из 200 человек
+    первый получает самый низкий доход, последний - самый высокий, квантили
+    внутри ячейки равномерны. Случайности нет вообще.
+
+    Множитель применяется к среднему, а не к итогу, поэтому разброс вокруг
+    сдвинутой середины сохраняется. Он определяется префиксом jobId:
+    `AIR_` - аэропорт, `UNI_` - вуз.
+
+    Анти-кластеризация (:38800-38809): если доход уперся в нижнюю отсечку,
+    квантиль перерисовывается равномерно на 0.1..0.95 - иначе треть бедных
+    слипалась бы в MINIMUM_INCOME из-за расходимости Ф^-1 при q -> 0.
+    Отдельно 10% людей получают бонус псевдослучайно, но детерминированно.
     """
-    if total <= 0:
-        return MINIMUM_INCOME
-    probability = (index + 0.5) / total
-    # Нижний дециль: равномерная выборка вместо нормальной, иначе доходы
-    # слипаются у минимума.
-    if probability < 0.10:
-        probability = (index + 0.5) / max(1.0, total * 0.10) * 0.10
-    elif ((index * 2654435761 + seed) % 10) == 0:
-        probability = min(1.0 - 1e-12, probability + 0.10)
-    income = INCOME_MEAN + INCOME_STD_DEV * inverse_normal_cdf(probability)
-    if to_airport:
-        income *= AIRPORT_INCOME_MULTIPLIER
-    elif at_college:
-        income *= COLLEGE_INCOME_MULTIPLIER
+    multiplier = 1.0
+    if job_id.startswith("AIR_"):
+        multiplier = AIRPORT_INCOME_MULTIPLIER
+    elif job_id.startswith("UNI_"):
+        multiplier = COLLEGE_INCOME_MULTIPLIER
+
+    denominator = max(total - 1, 1)
+    probability = index / denominator
+    income = INCOME_MEAN * multiplier + inverse_normal_cdf(probability) * INCOME_STD_DEV
+    if income <= MINIMUM_INCOME + 5000.0:
+        # Равномерная перерисовка квантиля, а не сдвиг готового дохода.
+        spread = 0.85 / max(1, total)
+        probability = 0.1 + ((index * 7919) % 1000) / 1000.0 * spread
+        income = INCOME_MEAN * multiplier + inverse_normal_cdf(probability) * INCOME_STD_DEV
+    if (index * 123456789) % 1_000_000 < 100_000:
+        income += ((index * 123456789) % 1_000_000) / 1_000_000.0 * 1e5
     return min(MAXIMUM_INCOME, max(MINIMUM_INCOME, income))
 
 
@@ -284,9 +315,11 @@ def home_work_departure_pair(
 ) -> tuple[float, float]:
     """Пара (уход из дома, уход с работы) в секундах от начала суток.
 
-    Время выбирается по профилю суток и уровню спроса в часе, а разрыв между
-    выездом и концом рабочего дня не меньше MIN_GAP_MINUTES - иначе поездка
-    вырождается в мгновенный разворот у дома.
+    Время выбирается по профилю суток и уровню спроса в часе. Разрыв между
+    выездом из дома и выездом с работы не меньше MIN_GAP_MINUTES - в игре
+    `work` подбирается циклом до 100 попыток с условием
+    |work - home| >= MIN_GAP_MINUTES*60 (assignCommuteTimes:132975), здесь
+    разрыв берётся сразу, что даёт тот же результат без цикла.
     """
     level_value = {"veryLow": 0.1, "low": 0.35, "lowMedium": 0.6, "medium": 0.8, "high": 1.0}
     span = level_value.get(demand_level, 0.6)
@@ -300,8 +333,101 @@ def home_work_departure_pair(
     return home, work
 
 
+def circular_gap_s(first_s: float, second_s: float) -> float:
+    """Круговая метрика между двумя моментами суток, determineJourneyOrigin.
+
+    Разбор (index-C2DH4lPc.js:136934): направление поездки определяется тем,
+    какой из двух моментов ближе к времени старта, где расстояние считается
+    по кругу на 24 часа: min(|X-Y|, 86400 - |X-Y|).
+    """
+    difference = abs(first_s - second_s) % 86400.0
+    return min(difference, 86400.0 - difference)
+
+
+def journey_origin(home_s: float, work_s: float, trip_start_s: float) -> str:
+    """Откуда идёт поездка в момент `trip_start_s`.
+
+    Разбор (index-C2DH4lPc.js:136934): сравнивается круговая дистанция от
+    старта поездки до времени ухода из дома и до времени ухода с работы;
+    кто ближе - тот и считается домашним направлением.
+    """
+    to_home = circular_gap_s(trip_start_s, home_s)
+    to_work = circular_gap_s(trip_start_s, work_s)
+    return "home" if to_home <= to_work else "work"
+
+
 def airport_parking_cost() -> float:
     return PARKING_COST * AIRPORT_PARKING_COST_MULTIPLIER
+
+
+def value_of_time_eur_per_second(income_per_year: float) -> float:
+    """Цена времени в евро за секунду - форма, в которой считает игра.
+
+    Разбор (popCommuteWorker:38780) умножает время в секундах на VOT в
+    долларах в секунду, поэтому именно эта величина нужна для сравнения
+    обобщённых стоимостей: t * votPerSecond даёт деньги, которые можно
+    складывать с тарифом и ценой бензина.
+
+    Обратная величина - `value_of_time_s_per_eur` - нужна планировщику,
+    где полезность считается как 60 минут / VOT.
+    """
+    if income_per_year <= 0:
+        return 0.0
+    return income_per_year / (HOURS_WORKED_PER_YEAR * 3600.0)
+
+
+def congested_share(traffic_multiplier: float) -> float:
+    """Доля загруженности дороги, popCommuteWorker:38743 getCongestedShare.
+
+    `trafficMultiplier` приходит из DRIVING_TIMES по уровню спроса часа;
+    `CONGESTION_FULL_AT_MULTIPLIER` = 2.0, поэтому делитель равен 1.0.
+    """
+    raw = (traffic_multiplier - 1.0) / (CONGESTION_FULL_AT_MIN - 1.0)
+    return min(1.0, max(0.0, raw))
+
+
+def perceived_driving_seconds(
+    drive_s: float,
+    *,
+    traffic_multiplier: float = 1.0,
+) -> float:
+    """Воспринимаемое время автопоездки, popCommuteWorker:38754.
+
+        result = t * mult * (1 + share * (1.33 - 1))
+                 + PARKING_TIME * 2 * PARKING_SEARCH_MULTIPLIER
+
+    Существенно: парковка прибавляется в обоих концах и даёт постоянные
+    +576 воспринимаемых секунд к каждой поездке независимо от её длины.
+    Для десятиминутной поездки это +96%, из-за чего авто коротких
+    направлений заведомо проигрывает. Денежная сторона парковки (5$, x5 в
+    аэропорту) считается отдельно и сюда не входит.
+    """
+    share = congested_share(traffic_multiplier)
+    return (
+        max(0.0, drive_s) * traffic_multiplier
+        * (1.0 + share * (CONGESTED_DRIVING_MIN - 1.0))
+        + PARKING_TIME_S * 2.0 * PARKING_SEARCH_MIN
+    )
+
+
+def perceived_walk_only_seconds(
+    walk_s: float,
+    *,
+    to_airport: bool = False,
+    apply_walk_multiplier: bool = False,
+) -> float:
+    """Воспринимаемое время варианта «идти пешком», popCommuteWorker:38749.
+
+    В игре пеший вариант НЕ взвешивается множителем 1.39 - применяется
+    только аэропортный 1.87. То есть пешком субъективно в 1.39 раза
+    дешевле, чем пешком в составе метро, при одинаковом физическом
+    времени. Разбор считает это неточностью игры (раздел 5.3), поэтому
+    поведение воспроизводится по умолчанию, а выключается флагом.
+    """
+    base = max(0.0, walk_s)
+    if to_airport:
+        return base * AIRPORT_WALK_MIN
+    return base * WALK_MIN if apply_walk_multiplier else base
 
 
 def perceived_minutes(
@@ -318,11 +444,15 @@ def perceived_minutes(
     walk_s: float,
     to_airport: bool = False,
     departure_shift_s: float = 0.0,
+    traffic_multiplier: float = 1.0,
+    apply_walk_multiplier: bool = False,
 ) -> PerceivedMinutes:
     """Воспринимаемые минуты трёх альтернатив, минута езды = 1.0 (PERCEIVED_TIME).
 
-    Все составляющие переводятся в одну шкалу умножением на множитель
-    восприятия, поэтому альтернативы сравнимы напрямую.
+    Транзит приходит уже взвешенным из rRAPTOR, поэтому езда идёт с 1.0,
+    пешие отрезки с 1.39, ожидание с 1.37, смещение отправления с 0.4.
+    Авто - по формуле getPerceivedDrivingTime, включая постоянные 576 с
+    парковки. Чисто пеший вариант идёт без 1.39, как в игре.
     """
     transit = (
         max(0.0, in_vehicle_s) * RIDE_MIN
@@ -334,12 +464,78 @@ def perceived_minutes(
         + max(0.0, departure_shift_s) * DEPARTURE_SHIFT_MIN
     )
     car = (
-        max(0.0, car_drive_s) * CONGESTED_DRIVING_MIN * short_drive_penalty(car_distance_m)
+        perceived_driving_seconds(
+            car_drive_s, traffic_multiplier=traffic_multiplier,
+        )
         + max(0.0, car_parking_s) / 60.0 * PARKING_SEARCH_MIN
     )
-    walk = max(0.0, walk_s) * (AIRPORT_WALK_MIN if to_airport else WALK_MIN)
+    walk = perceived_walk_only_seconds(
+        walk_s, to_airport=to_airport,
+        apply_walk_multiplier=apply_walk_multiplier,
+    )
     return PerceivedMinutes(
         transit=transit / 60.0,
         car=car / 60.0,
         walk=walk / 60.0,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ModeCosts:
+    """Обобщённая стоимость в единицах VOT, getModeChoiceForPerson.
+
+    Разбор (popCommuteWorker:38762):
+
+        авто    = (t_car * VOT + $cost) * shortTripPenalty
+        транзит = t_transit * VOT + fare
+        пешком  = t_walk * VOT
+
+    Штраф за короткую поездку умножает всю авто-стоимость целиком - вместе с
+    деньгами, а не только время. Это отличает его от множителя на время
+    вождения в `perceived_driving_seconds`.
+    """
+
+    driving: float
+    transit: float
+    walking: float
+
+    def choice(self) -> str:
+        """Победитель - минимум (popCommuteWorker:38789), не логит."""
+        if self.driving <= self.transit and self.driving <= self.walking:
+            return "driving"
+        if self.transit <= self.walking:
+            return "transit"
+        return "walking"
+
+
+def mode_costs(
+    *,
+    income_per_year: float,
+    transit: PerceivedMinutes,
+    car_distance_m: float,
+    transit_fare: float = 0.0,
+    to_airport: bool = False,
+    traffic_multiplier: float = 1.0,
+) -> ModeCosts:
+    """Обобщённые стоимости трёх альтернатив для одного человека.
+
+    Денежная часть авто: километры по 0.65 EUR плюс 5 EUR парковки, в
+    аэропорту парковка умножается на 5.
+    """
+    vot_eur_per_second = value_of_time_eur_per_second(income_per_year)
+    # Воспринимаемое время авто уже посчитано в perceived_minutes, включая
+    # постоянные 576 с парковки в обоих концах.
+    driving_time_s = transit.car * 60.0
+    money = (
+        car_distance_m / 1000.0 * DRIVING_COST_PER_KM
+        + (PARKING_COST * AIRPORT_PARKING_COST_MULTIPLIER
+           if to_airport else PARKING_COST)
+    )
+    driving = (driving_time_s * vot_eur_per_second + money) * short_drive_penalty(
+        car_distance_m
+    )
+    return ModeCosts(
+        driving=driving,
+        transit=transit.transit * 60.0 * vot_eur_per_second + transit_fare,
+        walking=transit.walk * 60.0 * vot_eur_per_second,
     )
