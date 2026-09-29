@@ -86,3 +86,71 @@ def test_interior_connector_splits_geometry_by_linear_reference():
     )
     assert round(time_a_mid, 6) == round(5 / 1000 / 60 * 60, 6)
     assert round(time_mid_b, 6) == round(15 / 1000 / 60 * 60, 6)
+
+
+def test_zero_length_span_is_dropped_but_counted():
+    """Два коннектора в одной точке дают ребро нулевой длины.
+
+    Встречается в данных на Киеве (один сегмент из 83 662), и раньше такой
+    сегмент останавливал сборку всего города. Ребро не несёт геометрии, но
+    дефект обязан остаться виден, поэтому он считается, а не роняет граф.
+    """
+    roads = (
+        RoadRecord(
+            id="degenerate",
+            geometry=LineString((Point(0, 0), Point(10, 0), Point(20, 0))),
+            speed_kph=30,
+            connectors=(
+                ConnectorRef("same", 0.0),
+                ConnectorRef("also_same", 0.0),
+                ConnectorRef("end", 1.0),
+            ),
+        ),
+    )
+
+    result = build_topological_road_graph(roads)
+
+    assert result.degenerate_segments == ("degenerate",)
+    # Узлы на месте, а между совпавшими в одной точке коннекторами ребра нет.
+    nodes = result.graph.connector_nodes
+    assert set(nodes) == {"same", "also_same", "end"}
+    connected = {
+        (edge.from_node, edge.to_node) for edge in result.graph.edges.values()
+    } | {
+        (edge.to_node, edge.from_node) for edge in result.graph.edges.values()
+    }
+    assert (nodes["same"], nodes["also_same"]) not in connected
+    assert (nodes["also_same"], nodes["end"]) in connected
+
+
+def test_clean_segment_reports_no_degenerate():
+    roads = (
+        RoadRecord(
+            id="clean",
+            geometry=LineString((Point(0, 0), Point(10, 0))),
+            speed_kph=30,
+            connectors=(ConnectorRef("a", 0.0), ConnectorRef("b", 1.0)),
+        ),
+    )
+    assert build_topological_road_graph(roads).degenerate_segments == ()
+
+
+def test_connector_order_in_source_does_not_matter():
+    """Ссылки сортируются по at, поэтому порядок в данных не влияет.
+
+    UUID коннекторов непрозрачны, а в Overture они идут в произвольном
+    порядке: 70% сегментов Киева не отсортированы по строке. Сортировка по
+    at - единственное, что делает порядок значимым.
+    """
+    roads = (
+        RoadRecord(
+            id="unsorted",
+            geometry=LineString((Point(0, 0), Point(10, 0))),
+            speed_kph=30,
+            connectors=(ConnectorRef("b", 1.0), ConnectorRef("a", 0.0)),
+        ),
+    )
+    result = build_topological_road_graph(roads)
+    assert result.degenerate_segments == ()
+    # Одно ребро туда и одно обратно, порядок в данных на это не влияет.
+    assert len(result.graph.edges) == 2

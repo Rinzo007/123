@@ -102,14 +102,22 @@ def _best_coverage(
     candidates: list[Path],
     bbox: tuple[float, float, float, float],
 ) -> Path | None:
-    """Растр с наибольшим перекрытием bbox, при отсутствии - первый."""
+    """Растр, покрывающий область, при равенстве - самый специфичный.
+
+    Критерий именно покрытие запрошенной области, а не размер перекрытия:
+    rus_pop геометрически простирается от -180 до +180 по долготе, поэтому
+    перекрытие с Киевом у него ненулевое, и он побеждал ukr_pop, который
+    покрывает область целиком. При равном покрытии берётся растр с меньшим
+    extent - он и есть точным источником для этой территории.
+    """
     try:
         import rasterio
     except ImportError:  # pragma: no cover - зависит от окружения
         return candidates[0]
 
     south, west, north, east = bbox
-    best: tuple[float, Path] | None = None
+    wanted_area = max((east - west) * (north - south), 1e-12)
+    best: tuple[float, float, Path] | None = None
     for candidate in candidates:
         try:
             with rasterio.open(candidate) as dataset:
@@ -120,10 +128,13 @@ def _best_coverage(
         overlap_lat = min(bounds.top, north) - max(bounds.bottom, south)
         if overlap_lon <= 0 or overlap_lat <= 0:
             continue
-        score = overlap_lon * overlap_lat
-        if best is None or score > best[0]:
-            best = (score, candidate)
-    return best[1] if best else None
+        coverage = (overlap_lon * overlap_lat) / wanted_area
+        extent = (bounds.right - bounds.left) * (bounds.top - bounds.bottom)
+        # Сортировка: больше покрытие, потом меньше extent.
+        key = (coverage, -extent)
+        if best is None or key > (best[0], -best[1]):
+            best = (coverage, extent, candidate)
+    return best[2] if best else None
 
 
 @dataclass(frozen=True, slots=True)

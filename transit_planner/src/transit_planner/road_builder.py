@@ -14,6 +14,10 @@ class RoadGraphBuildResult:
     node_count: int
     edge_count: int
     connector_count: int = 0
+    # Сегменты, у которых два соседних коннектора стоят в одной точке. Ребро
+    # между ними имеет нулевую длину и в граф не попадает, но дефект данных
+    # считается: молча выброшенное ребро нельзя отличить от нормального.
+    degenerate_segments: tuple[str, ...] = ()
 
 
 def build_topological_road_graph(
@@ -43,6 +47,7 @@ def build_topological_road_graph(
     graph = RoadGraph()
     next_node_id = 1
     known_locations = connector_locations or {}
+    degenerate: list[str] = []
 
     for record in roads:
         refs = _normalized_refs(record.connectors)
@@ -76,10 +81,14 @@ def build_topological_road_graph(
             left_node = graph.connector_nodes[left_ref.connector_id]
             right_node = graph.connector_nodes[right_ref.connector_id]
             at_delta = right_ref.at - left_ref.at
-            if at_delta <= 0:
-                raise ValueError(
-                    f"Connector references on segment {record.id} are not strictly increasing"
-                )
+            if at_delta == 0:
+                # Оба коннектора в одной точке: ребро нулевой длины, геометрии
+                # оно не несёт. Удаляем, но запоминаем - иначе выпавший кусок
+                # сети не виден нигде. На Киеве такой сегмент ровно один.
+                degenerate.append(record.id)
+                continue
+            # Отрицательной дельты быть не может: _normalized_refs сортирует
+            # ссылки по at перед разбиением сегмента.
 
             length_m = _length_m(record, coordinate_to_metre) * at_delta
             edge_geometry = _slice_geometry(points, left_ref.at, right_ref.at)
@@ -123,6 +132,7 @@ def build_topological_road_graph(
         len(graph.nodes),
         len(graph.edges),
         len(graph.connector_nodes),
+        tuple(degenerate),
     )
 
 

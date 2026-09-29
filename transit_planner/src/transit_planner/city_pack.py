@@ -775,6 +775,7 @@ def _pack_provenance(
             "stops": len(network.stops),
             "places": len(network.places),
             "buildings": len(buildings),
+            "degenerateSegments": list(network.graph_build.degenerate_segments),
             "water": len(water),
             "zones": len(zones),
         },
