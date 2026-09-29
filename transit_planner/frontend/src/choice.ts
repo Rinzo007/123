@@ -14,7 +14,13 @@
 
 import {
   GAME_ARRIVAL_GAP_S,
+  GAME_INCOME_LADDER_SIZE,
   GAME_MIN_SENSIBLE_DRIVING_DISTANCE_M,
+  GAME_WALK_MIN,
+  GAME_WAIT_MIN,
+  gameModeSplit,
+  perceivedDrivingSeconds,
+  perceivedWalkOnlySeconds,
   shortDrivePenalty,
 } from "./game-rules.js";
 
@@ -287,6 +293,87 @@ export type ModeProbabilities = Record<ModeShare, number>;
 const EMPTY_PROBABILITIES: ModeProbabilities = {
   transit: 0, car: 0, walk: 0, bike: 0, rest: 0,
 };
+
+export interface GameProbabilitiesInput {
+  walkTimeMin: number;
+  carTimeMin: number;
+  transitInVehicleMin: number | null;
+  transitWaitMin?: number;
+  transitFare?: number;
+  carDistanceKm?: number;
+  transitAccessWalkMin?: number;
+  transitEgressWalkMin?: number;
+  transitTransferWalkMin?: number;
+  transitTransfers?: number;
+  bikeTimeMin?: number;
+  bikeDistanceKm?: number;
+  carAvailability?: number;
+  restTimeMin?: number | null;
+  transitAvailable?: boolean;
+  population?: number;
+  applyMinTransitChoice?: boolean;
+}
+
+/**
+ * Модальный сплит по правилу игры: минимум обобщённой стоимости.
+ *
+ * Port of `game_probabilities` в `src/transit_planner/choice.py`. Случайной
+ * полезности нет: доля режима получается интегрированием по детерминированной
+ * лестнице дохода, поэтому у разных ступеней дохода разные победители.
+ *
+ * Велосипед - добавка планировщика, в игре его нет: он отбирается из доли
+ * ходьбы и потому не увеличивает активный спрос.
+ */
+export function gameProbabilities(
+  input: GameProbabilitiesInput,
+  _config: ChoiceConfig = DEFAULT_CHOICE_CONFIG,
+): ModeProbabilities {
+  const carDistanceKm = input.carDistanceKm ?? 0;
+  const carDistanceM = carDistanceKm * 1000;
+  const transitPerceivedSec = input.transitAvailable === false ? 0 : (
+    (input.transitInVehicleMin ?? 0) * 60
+    + (input.transitWaitMin ?? 0) * 60 * GAME_WAIT_MIN
+    + (input.transitAccessWalkMin ?? 0) * 60 * GAME_WALK_MIN
+    + (input.transitEgressWalkMin ?? 0) * 60 * GAME_WALK_MIN
+    + (input.transitTransferWalkMin ?? 0) * 60 * GAME_WALK_MIN
+    + GAME_ARRIVAL_GAP_S * GAME_WAIT_MIN * (1 + Math.max(0, (input.transitTransfers ?? 0) - 1))
+  );
+  const carPerceivedSec = perceivedDrivingSeconds(input.carTimeMin * 60);
+  const walkPerceivedSec = perceivedWalkOnlySeconds(input.walkTimeMin * 60);
+
+  const split = gameModeSplit({
+    transitPerceivedSec,
+    carPerceivedSec,
+    walkPerceivedSec,
+    carDistanceM,
+    transitFare: input.transitFare ?? 0,
+    transitAvailable: input.transitAvailable !== false,
+    carAvailability: input.carAvailability ?? 1,
+    restTimeMin: input.restTimeMin ?? null,
+    population: input.population ?? GAME_INCOME_LADDER_SIZE,
+    applyMinTransitChoice: input.applyMinTransitChoice !== false,
+  });
+
+  const result: ModeProbabilities = {
+    transit: split.transit,
+    car: split.car,
+    walk: split.walk,
+    bike: 0,
+    rest: split.rest,
+  };
+  if (input.bikeTimeMin !== undefined || input.bikeDistanceKm !== undefined) {
+    const bikeUtility = input.bikeDistanceKm !== undefined
+      ? Math.max(0, input.bikeDistanceKm) * 1.25 / 15.12 * 60
+      : Math.max(0, input.bikeTimeMin ?? 0);
+    const active = walkPerceivedSec + bikeUtility;
+    if (active > 0) {
+      const bikeShare = split.walk * bikeUtility / active;
+      result.bike = bikeShare;
+      result.walk = split.walk - bikeShare;
+    }
+  }
+  return result;
+}
 
 export interface ProbabilitiesInput {
   carAvailability?: number;

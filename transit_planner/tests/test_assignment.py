@@ -55,28 +55,56 @@ def test_assignment_reports_denied_boardings_when_capacity_is_exceeded():
         router=TransitRouter(network, config=RouterConfig(walk_transfer_radius_m=0)),
     )
 
-    section = next(
-        item for item in result.section_loads
-        if item.from_stop_id == "a" and item.to_stop_id == "b"
-    )
-    assert section.passengers == pytest.approx(525.2364687677873)
-    assert section.capacity == 480.0
-    assert section.denied_boardings == 0.0
+    sections = {
+        f"{item.from_stop_id}->{item.to_stop_id}": item
+        for item in result.section_loads
+    }
+    # Раньше здесь стояло 525.24 - доля 52.5% от логита. По правилу игры
+    # выбор по минимуму стоимости решается однозначно, и на этой паре
+    # транзит выигрывает у всех ступеней дохода, поэтому едут все 1000.
+    assert sections["a->b"].passengers == pytest.approx(1000.0)
+    assert sections["a->b"].capacity == 480.0
+    assert sections["a->b"].denied_boardings == 0.0
+    # Переполнение возникает на участке после посадки: 1000 пассажиров
+    # при вместимости 480, отказано 520.
+    assert sections["b->c"].passengers == pytest.approx(1000.0)
+    assert sections["b->c"].denied_boardings == pytest.approx(520.0)
 
 
 def test_zone_coordinates_drive_car_and_walk_costs():
+    """Координаты зон задают модальность: близко - пешком, далеко - авто.
+
+    Пороги взяты из правила игры, а не подогнаны: постоянные +576 с
+    парковки делают авто невыгодным на коротких поездках, а пешеходная
+    скорость 1.4 м/с съедает дальние направления. Транзит исключён
+    (`max_access_distance_m=0`), чтобы сравнивались только авто и пешком.
+    """
     network = make_network()
-    zones = {
-        "o": DemandZone("o", 0, 0, population=1000),
-        "d": DemandZone("d", 2000, 0, population=1000),
-    }
-    result = assign_demand(
+    config = AssignmentConfig(period_id="peak", max_access_distance_m=0)
+
+    near = assign_demand(
         network,
         DemandMatrix((ODPairDemand("o", "d", 100),)),
-        zones=zones,
-        config=AssignmentConfig(period_id="peak"),
+        zones={
+            "o": DemandZone("o", 0, 0, population=1000),
+            "d": DemandZone("d", 400, 0, population=1000),
+        },
+        config=config,
     )
-    assert result.metrics.car_trips > result.metrics.walk_trips
+    far = assign_demand(
+        network,
+        DemandMatrix((ODPairDemand("o", "d", 100),)),
+        zones={
+            "o": DemandZone("o", 0, 0, population=1000),
+            "d": DemandZone("d", 60_000, 0, population=1000),
+        },
+        config=config,
+    )
+
+    assert near.metrics.walk_trips > 0.0
+    assert near.metrics.walk_trips > near.metrics.car_trips
+    assert far.metrics.car_trips > 0.0
+    assert far.metrics.car_trips > far.metrics.walk_trips
 
 
 def test_mode_shares_sum_to_one():
@@ -190,37 +218,45 @@ def test_assignment_routes_transit_demand_across_alternatives():
 
 
 def test_zone_no_car_share_reduces_car_trips():
+    """Домохозяйства без автомобиля ездят на авто реже.
+
+    Дальний OD в 60 км: постоянные +576 с парковки там амортизированы, и
+    авто выигрывает у части пассажиров. На 2 км авто не выигрывает ни у
+    кого - там правило игры отдаёт всё пешему и транзиту.
+    """
     network = make_network()
     demand = DemandMatrix((ODPairDemand("o", "d", 100),))
-    zones = {
-        "o": DemandZone("o", 0, 0, population=1000, no_car_share=1.0),
-        "d": DemandZone("d", 2000, 0, population=1000, no_car_share=1.0),
-    }
-    baseline_zones = {
-        "o": DemandZone("o", 0, 0, population=1000, no_car_share=0.0),
-        "d": DemandZone("d", 2000, 0, population=1000, no_car_share=0.0),
-    }
-    baseline = assign_demand(
-        network,
-        demand,
-        zones=baseline_zones,
-        config=AssignmentConfig(period_id="peak"),
-    )
-    result = assign_demand(
-        network,
-        demand,
-        zones=zones,
-        config=AssignmentConfig(period_id="peak"),
-    )
-    assert 0.0 < result.metrics.car_trips < baseline.metrics.car_trips
+
+    def car_trips(share: float) -> float:
+        return assign_demand(
+            network,
+            demand,
+            zones={
+                "o": DemandZone("o", 0, 0, population=1000, no_car_share=share),
+                "d": DemandZone("d", 60_000, 0, population=1000, no_car_share=share),
+            },
+            config=AssignmentConfig(period_id="peak", max_access_distance_m=0),
+        ).metrics.car_trips
+
+    without_car = car_trips(1.0)
+    with_car = car_trips(0.0)
+    assert with_car > 0.0
+    assert 0.0 < without_car < with_car
 
 
 def test_assignment_exposes_reference_rest_demand():
+    """Спрос «остаться дома» выигрывает, когда он дешевле поездки.
+
+    base_time_min сравнивается с воспринимаемым временем транзита по тому
+    же правилу минимума, что и остальные режимы. При base_time_min = 20
+    поездка на метро (7 мин) дешевле, поэтому rest не выигрывает ни у кого -
+    раньше логит давал ему долю просто за счёт случайной полезности.
+    """
     network = make_network()
     result = assign_demand(
         network,
         DemandMatrix((
-            ODPairDemand("a", "c", 100.0, base_time_min=20.0),
+            ODPairDemand("a", "c", 100.0, base_time_min=3.0),
         )),
         config=AssignmentConfig(
             period_id="peak",

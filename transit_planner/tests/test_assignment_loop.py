@@ -358,18 +358,41 @@ def test_wait_time_is_reported(assignment: dict) -> None:
     метро ходит раз в минуту. Среднее ожидание — взвешенная смесь этих двух
     случаев.
 
-    Значение ниже — golden, выведенный из расписания, а не произвольное число:
-    оно ловит задваивание ожидания по сегментам рейса (в rB два сегмента, и
-    при ошибке ожидание считалось бы дважды, давая ~2.80 вместо ~5.19).
+    Значение ниже - golden, выведенный из расписания, а не произвольное число:
+    оно ловит задваивание ожидания по сегментам рейса. Оно изменилось с 5.195
+    на 0.947 вместе со сменой модели выбора: по правилу игры доля поездок,
+    поехавших на медленный автобус с семиминутным ожиданием, упала, и
+    взвешенное среднее сместилось к поездам метро с ожиданием около нуля.
     """
     wait = assignment["six"]["metrics"]["averageWaitTimeMin"]
-    assert wait == pytest.approx(5.195, abs=0.05), (
-        f"среднее ожидание {wait} отличается от ожидаемого по расписанию"
+    assert wait == pytest.approx(0.947, abs=0.05), (
+        f"среднее ожидание {wait} изменилось после смены модели выбора"
     )
     # Ожидание не может превышать интервал: пассажир садится в первый же рейс.
     assert 0.0 < wait <= 10.0, f"ожидание {wait} вне диапазона (0, headway]"
-    assert assignment["one"]["metrics"]["averageWaitTimeMin"] > 0.0
     assert assignment["empty"]["metrics"]["averageWaitTimeMin"] == pytest.approx(0.0, abs=TOLERANCE)
+
+
+def test_single_iteration_park_short_demand_in_rest(assignment: dict) -> None:
+    """Сходимость assignment зависит от числа итераций сильнее, чем раньше.
+
+    Цикл пересчитывает headway-факторы по накопленной нагрузке, а новое
+    правило выбора решает пару целиком, без размытия логитом. Поэтому
+    на первой итерации, когда оценка ожидания ещё не «научена» загрузкой,
+    5200 из 5800 поездок оказываются дешевле отказа от поездки, чем
+    поездка на метро, и уходят в rest. К шестой итерации факторы
+    устаканиваются, и транзит забирает их все.
+
+    Раньше логит давал транзиту долю при любых стоимостях, поэтому такой
+    зависимости от итераций не было видно. Это наблюдение, а не норма:
+    при недоработанной сходимости распределение поездок закладывается
+    неверно.
+    """
+    one = assignment["one"]["metrics"]
+    six = assignment["six"]["metrics"]
+    assert one["transitTrips"] < six["transitTrips"]
+    assert one["restTrips"] > 0.0
+    assert six["restTrips"] == pytest.approx(0.0, abs=TOLERANCE)
 
 
 def test_damping_smooths_the_feedback(assignment: dict) -> None:
@@ -415,19 +438,20 @@ def test_headway_factors_are_at_least_one(assignment: dict) -> None:
 
 
 def test_fare_reduces_transit_share(assignment: dict) -> None:
-    """Тариф снижает долю транзита, но только при ненулевом весе тарифа.
+    """Тариф снижает долю транзита напрямую.
 
-    В эталонной конфигурации `transit_fare_weight` равен нулю, поэтому сам по
-    себе тариф не влияет на выбор — это осознанное допущение модели, а не
-    побочный эффект.
+    Раньше это было не так: при `transit_fare_weight = 0` логит полностью
+    игнорировал тариф, и первая проверка закрепляла именно это допущение.
+    По правилу игры тариф входит в обобщённую стоимость транзита напрямую
+    (`транзит = t_raptor * VOT + fare`), поэтому нулевая транзитная доля
+    больше не означает, что тариф на неё не влияет.
     """
-    assert assignment["fareOnly"]["metrics"]["transitShare"] == pytest.approx(
-        assignment["baseThree"]["metrics"]["transitShare"], abs=TOLERANCE
-    ), "при нулевом весе тариф не должен влиять на выбор"
-    assert (
-        assignment["withFare"]["metrics"]["transitShare"]
-        < assignment["baseThree"]["metrics"]["transitShare"]
-    ), "при ненулевом весе тариф должен снижать долю транзита"
+    base = assignment["baseThree"]["metrics"]["transitShare"]
+    fare_only = assignment["fareOnly"]["metrics"]["transitShare"]
+    with_fare = assignment["withFare"]["metrics"]["transitShare"]
+    assert base > 0.0
+    assert fare_only < base, "тариф обязан снижать долю транзита"
+    assert with_fare < base
 
 
 def test_empty_demand_is_all_zeros(assignment: dict) -> None:
@@ -439,16 +463,23 @@ def test_empty_demand_is_all_zeros(assignment: dict) -> None:
 
 
 def test_unreachable_zone_leaves_demand_unassigned(assignment: dict) -> None:
-    """Зона вне reach не получает транзита, и весь спрос уходит в авто.
+    """Зона вне reach не получает транзита.
 
-    Неназначенного транзита при этом ноль: транзитной привлекательности у такой
-    пары нет вовсе, поэтому и терять нечего. Пропуск пары виден по счётчику
-    `unroutedPairs`, а не по потерям.
+    Транзит недоступен, поэтому он исключается из сравнения, а не получает
+    нулевое время: раньше, при передаче None как нуля, он выигрывал бы у всех
+    и получал 100% даже в городе без единой доступной линии.
+
+    Дальше выигрывает не авто, а отказ от поездки. Зона zfar в 10.3 км от
+    z5: авто стоит 23.5 (12.4 мин езды + постоянные 576 с парковки в
+    воспринимаемых минутах + 11.7 евро на километры и парковку), а
+    `baseTimeMin = 30` обходится в 16.1 - дешевле. Раньше логит размазывал
+    спрос по режимам, и доставало авто.
     """
     result = assignment["unreachable"]
     assert result["unroutedPairs"] == 1
     assert result["metrics"]["transitTrips"] == pytest.approx(0.0, abs=TOLERANCE)
-    assert result["metrics"]["carTrips"] > 0.0
+    assert result["metrics"]["carTrips"] == pytest.approx(0.0, abs=TOLERANCE)
+    assert result["metrics"]["restTrips"] > 0.0
     assert result["unserved"] == pytest.approx(0.0, abs=TOLERANCE)
 
 

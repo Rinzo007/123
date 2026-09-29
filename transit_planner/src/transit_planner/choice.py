@@ -310,6 +310,101 @@ def probabilities(
         ),
     }
 
+def game_probabilities(
+    *,
+    walk_time_min: float,
+    car_time_min: float,
+    transit_in_vehicle_min: float | None,
+    transit_wait_min: float = 0.0,
+    transit_fare: float = 0.0,
+    car_distance_km: float = 0.0,
+    transit_access_walk_min: float = 0.0,
+    transit_egress_walk_min: float = 0.0,
+    transit_transfer_walk_min: float = 0.0,
+    transit_transfers: int = 0,
+    bike_time_min: float | None = None,
+    bike_distance_km: float | None = None,
+    car_availability: float = 1.0,
+    rest_time_min: float | None = None,
+    transit_available: bool = True,
+    population: int = game_rules.INCOME_LADDER_SIZE,
+    apply_min_transit_choice: bool = True,
+) -> dict[str, float]:
+    """Модальный сплит по правилу игры: минимум обобщённой стоимости.
+
+    Разбор (popCommuteWorker:38701 getModeChoice, :38762 getModeChoiceForPerson):
+    для каждого человека ячейки берётся минимум из
+
+        авто    = (t_car * VOT + $cost) * shortTripPenalty
+        транзит = t_transit * VOT + fare
+        пешком  = t_walk * VOT
+
+    Случайной полезности в игре нет, поэтому и здесь её нет: доля режима
+    получается интегрированием по детерминированной лестнице дохода из
+    `game_rules.income_ladder`. Так как VOT пропорционален доходу,
+    необеспеченный пассажир выбирает транспорт, а обеспеченный - авто,
+    что в логите с одним общим VOT было невозможно.
+
+    Велосипед - добавка планировщика, в игре его нет. Он отбирается из доли
+    ходьбы по отношению воспринимаемых стоимостей, поэтому велосипед не
+    увеличивает активный спрос, а только перераспределяет его.
+    """
+    perceived = game_rules.perceived_minutes(
+        in_vehicle_s=(transit_in_vehicle_min or 0.0) * 60.0,
+        wait_s=transit_wait_min * 60.0,
+        access_walk_s=transit_access_walk_min * 60.0,
+        egress_walk_s=transit_egress_walk_min * 60.0,
+        transfer_walk_s=transit_transfer_walk_min * 60.0,
+        transfers=transit_transfers,
+        car_drive_s=car_time_min * 60.0,
+        car_parking_s=0.0,
+        car_distance_m=car_distance_km * 1000.0,
+        walk_s=walk_time_min * 60.0,
+    )
+    split = game_rules.game_mode_split(
+        perceived,
+        car_distance_m=car_distance_km * 1000.0,
+        transit_fare=transit_fare,
+        car_availability=car_availability,
+        rest_time_min=rest_time_min,
+        transit_available=transit_available,
+        population=population,
+        apply_min_transit_choice=apply_min_transit_choice,
+    )
+    result = {
+        "transit": split["transit"],
+        "car": split["car"],
+        "walk": split["walk"],
+        "bike": 0.0,
+        "rest": split["rest"],
+    }
+    if bike_time_min is not None or bike_distance_km is not None:
+        bike_utility = _bike_perceived_minutes(
+            bike_time_min, bike_distance_km,
+        )
+        walk_utility = perceived.walk
+        active = walk_utility + bike_utility
+        if active > 0.0:
+            bike_share = split["walk"] * bike_utility / active
+            result["bike"] = bike_share
+            result["walk"] = split["walk"] - bike_share
+    return result
+
+
+def _bike_perceived_minutes(
+    bike_time_min: float | None,
+    bike_distance_km: float | None,
+) -> float:
+    """Воспринимаемое время велосипеда в минутах, для доли внутри ходьбы.
+
+    Велосипеда в игре нет, поэтому своей шкалы у него тоже нет: берётся
+    та же единица езды, что и у прочих альтернатив.
+    """
+    if bike_distance_km is not None:
+        return max(0.0, bike_distance_km) * 1.25 / 15.12 * 60.0
+    return max(0.0, bike_time_min or 0.0)
+
+
 def alternative_probabilities(
     generalized_costs: tuple[float, ...],
 ) -> tuple[float, ...]:

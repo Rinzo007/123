@@ -227,13 +227,19 @@ def test_peak_congestion_amplifies_drive_time() -> None:
     assert peak - 576.0 == pytest.approx(1048.5)
 
 
-def test_walk_only_skips_walk_multiplier_like_the_game() -> None:
-    """Раздел 5.3: чисто пеший вариант не взвешивается 1.39 - это, судя по
-    разбору, неточность игры, но она воспроизводится."""
-    assert perceived_walk_only_seconds(1200.0) == 1200.0
+def test_walk_only_is_weighted_by_default_against_the_game() -> None:
+    """Единственное осознанное отступление от игры.
+
+    В игре (popCommuteWorker:38749) чисто пеший вариант не взвешивается
+    множителем 1.39, хотя те же пешие отрезки внутри rRAPTOR идут с 1.39.
+    По решению владельца модели здесь применяется 1.39; флаг
+    `apply_walk_multiplier=False` возвращает поведение игры и нужен только
+    для сверки с ней.
+    """
+    assert perceived_walk_only_seconds(1200.0) == pytest.approx(1200.0 * 1.39)
     assert perceived_walk_only_seconds(
-        1200.0, apply_walk_multiplier=True,
-    ) == pytest.approx(1200.0 * 1.39)
+        1200.0, apply_walk_multiplier=False,
+    ) == 1200.0
     assert perceived_walk_only_seconds(1200.0, to_airport=True) == pytest.approx(1200.0 * 1.87)
 
 

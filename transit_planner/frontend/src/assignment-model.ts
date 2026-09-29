@@ -392,26 +392,25 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
     const share = noCarShareFor(pair, zones, choice.noCarShare);
     const carAvailability = 1 - Math.min(1, share * choice.noCarEffectiveness);
 
-    const utils = utilities({
+    const probs = gameProbabilities({
       walkTimeMin: walkTime,
       carTimeMin: carTime,
-      transitTimeMin: best ? bestInVehicle : null,
+      transitInVehicleMin: best ? bestInVehicle : null,
       transitWaitMin: bestWait,
-      bikeTimeMin: bikeTime,
       transitFare: config.transitFare,
       carDistanceKm: distanceM / 1000,
-      bikeDistanceKm: distanceM / 1000,
       transitAccessWalkMin: accessWalkMin,
       transitEgressWalkMin: egressWalkMin,
       transitTransferWalkMin: bestTransferWalk,
       transitTransfers: bestTransfers,
-      baseTimeMin: pair.baseTimeMin,
-    }, choice);
-    const probs = probabilities(utils, {
+      bikeTimeMin: bikeTime,
+      bikeDistanceKm: distanceM / 1000,
       carAvailability,
-      noCarShare: 0,
-      bikeAvailability: choice.twoWheelShare,
-    });
+      restTimeMin: pair.baseTimeMin,
+      // `best` - это undefined при пустом journeys, а не null, поэтому
+      // строгое сравнение с null считало бы транзит доступным.
+      transitAvailable: best != null,
+    }, choice);
 
     const transitTrips = trips * probs.transit;
     const alternativeShares = journeys.length > 0 ? alternativeProbabilities(generalized) : [];
@@ -574,6 +573,7 @@ export function assignOnce(input: AssignOnceInput): AssignmentSnapshot {
 
 import {
   alternativeProbabilities,
+  gameProbabilities,
   probabilities,
   transitGeneralizedMinutes as transitGeneralized,
   utilities,

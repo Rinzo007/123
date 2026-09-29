@@ -5,7 +5,13 @@ from math import ceil, sqrt
 
 from .city import DemandZone
 from .demand import DemandMatrix, ODPairDemand
-from .choice import ChoiceConfig, alternative_probabilities, probabilities, utilities
+from .choice import (
+    ChoiceConfig,
+    alternative_probabilities,
+    game_probabilities,
+    probabilities,
+    utilities,
+)
 from .network import Network
 from .routing import Journey, TransitRouter
 from .reference_model import (
@@ -346,26 +352,24 @@ def _assign_once(
             1.0,
             no_car_share * config.choice.no_car_effectiveness,
         )
-        probs = probabilities(
-            utilities(
-                walk_time_min=walk_time,
-                car_time_min=car_time,
-                transit_time_min=journey_in_vehicle if journey is not None else None,
-                transit_wait_min=journey_wait,
-                bike_time_min=bike_time,
-                transit_fare=config.transit_fare,
-                car_distance_km=distance_m / 1000.0,
-                bike_distance_km=distance_m / 1000.0,
-                transit_access_walk_min=access_walk_min,
-                transit_egress_walk_min=egress_walk_min,
-                transit_transfer_walk_min=journey_transfer_walk,
-                transit_transfers=journey_transfers,
-                config=config.choice,
-                base_time_min=pair.base_time_min,
+        probs = game_probabilities(
+            walk_time_min=walk_time,
+            car_time_min=car_time,
+            transit_in_vehicle_min=(
+                journey_in_vehicle if journey is not None else None
             ),
+            transit_available=journey is not None,
+            transit_wait_min=journey_wait,
+            transit_fare=config.transit_fare,
+            car_distance_km=distance_m / 1000.0,
+            transit_access_walk_min=access_walk_min,
+            transit_egress_walk_min=egress_walk_min,
+            transit_transfer_walk_min=journey_transfer_walk,
+            transit_transfers=journey_transfers,
+            bike_time_min=bike_time,
+            bike_distance_km=distance_m / 1000.0,
             car_availability=car_availability,
-            no_car_share=0.0,
-            bike_availability=config.choice.two_wheel_share,
+            rest_time_min=pair.base_time_min,
         )
 
         transit_trips = trips * probs["transit"]

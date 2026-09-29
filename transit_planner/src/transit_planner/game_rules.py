@@ -60,6 +60,10 @@ DEFAULT_POP_SIZE = 200
 ROAD_CIRCUITY_FACTOR = 1.3
 AVG_DRIVING_SPEED_MPS = 11.1  # 40 км/ч
 MIN_DRIVING_SECONDS = 60.0
+# Столько ступеней дохода берётся в ячейке. В игре ячейка всегда 200 человек,
+# поэтому ступеней столько же: модальный сплит получается интегрированием
+# по этой лестнице, без случайной полезности.
+INCOME_LADDER_SIZE = 200
 
 # assignCommuteTimes, index:132965.
 MIN_GAP_MINUTES = 90
@@ -414,15 +418,18 @@ def perceived_walk_only_seconds(
     walk_s: float,
     *,
     to_airport: bool = False,
-    apply_walk_multiplier: bool = False,
+    apply_walk_multiplier: bool = True,
 ) -> float:
     """Воспринимаемое время варианта «идти пешком», popCommuteWorker:38749.
 
     В игре пеший вариант НЕ взвешивается множителем 1.39 - применяется
-    только аэропортный 1.87. То есть пешком субъективно в 1.39 раза
-    дешевле, чем пешком в составе метро, при одинаковом физическом
-    времени. Разбор считает это неточностью игры (раздел 5.3), поэтому
-    поведение воспроизводится по умолчанию, а выключается флагом.
+    только аэропортный 1.87, то есть пешком субъективно в 1.39 раза
+    дешевле, чем пешком в составе метро, при одинаковом физическом времени.
+    Разбор считает это неточностью игры (раздел 5.3).
+
+    Здесь поведение исправлено: по умолчанию 1.39 применяется, как к тем же
+    пешим отрезкам внутри rRAPTOR. Флаг `apply_walk_multiplier=False`
+    возвращает поведение игры - оно нужно только для сверки с ней.
     """
     base = max(0.0, walk_s)
     if to_airport:
@@ -445,14 +452,15 @@ def perceived_minutes(
     to_airport: bool = False,
     departure_shift_s: float = 0.0,
     traffic_multiplier: float = 1.0,
-    apply_walk_multiplier: bool = False,
+    apply_walk_multiplier: bool = True,
 ) -> PerceivedMinutes:
     """Воспринимаемые минуты трёх альтернатив, минута езды = 1.0 (PERCEIVED_TIME).
 
     Транзит приходит уже взвешенным из rRAPTOR, поэтому езда идёт с 1.0,
     пешие отрезки с 1.39, ожидание с 1.37, смещение отправления с 0.4.
     Авто - по формуле getPerceivedDrivingTime, включая постоянные 576 с
-    парковки. Чисто пеший вариант идёт без 1.39, как в игре.
+    парковки. Чисто пеший вариант тоже идёт с 1.39: это единственное
+    отступление от игры, где он невзвешен.
     """
     transit = (
         max(0.0, in_vehicle_s) * RIDE_MIN
@@ -539,3 +547,107 @@ def mode_costs(
         transit=transit.transit * 60.0 * vot_eur_per_second + transit_fare,
         walking=transit.walk * 60.0 * vot_eur_per_second,
     )
+
+
+def income_ladder(size: int = INCOME_LADDER_SIZE) -> tuple[float, ...]:
+    """Детерминированная лестница доходов, getIncomeForPerson по индексу.
+
+    Разбор (popCommuteWorker:38792): квантиль равен
+    `personIndex / (population - 1)`, поэтому первая ступень получает самый
+    низкий доход, последняя - самый высокий, и лестница одинакова в каждой
+    ячейке. Случайности нет: две одинаковые ячейки дают побайтово один и
+    тот же модальный сплит.
+    """
+    if size <= 0:
+        return ()
+    return tuple(income_for_person(index, total=size) for index in range(size))
+
+
+def game_mode_split(
+    perceived: PerceivedMinutes,
+    *,
+    car_distance_m: float,
+    transit_fare: float = 0.0,
+    to_airport: bool = False,
+    traffic_multiplier: float = 1.0,
+    population: int = INCOME_LADDER_SIZE,
+    apply_min_transit_choice: bool = True,
+    car_availability: float = 1.0,
+    rest_time_min: float | None = None,
+    transit_available: bool = True,
+) -> dict[str, float]:
+    """Модальный сплит так, как считает игра: argmin по лестнице дохода.
+
+    Разбор (popCommuteWorker:38701 getModeChoice) обходит всех людей ячейки
+    и берёт минимум из трёх обобщённых стоимостей. Случайной полезности в
+    игре нет вовсе, поэтому и здесь она не используется: доля режима
+    получается интегрированием по детерминированной лестнице дохода.
+
+    Так как VOT пропорционален доходу, дорогой для времени пассажир выбирает
+    транспорт, дешёвый - авто или ходьбу. В логите этого различия не было:
+    у всех был один и тот же VOT.
+
+    `apply_min_transit_choice` повторяет порог popCommuteWorker:38735 - если
+    транзит выбрали менее 10 человек из ячейки, всех переводят в авто. Это
+    искажение модельного сплита на малых ячейках оставлено как в игре;
+    отключается флагом.
+
+    `car_availability` и `rest_time_min` - достройки планировщика, которых
+    в игре нет: доля домохозяйств без автомобиля и спрос, остающийся дома.
+    Они не меняют правило выбора, а ограничивают его: авто недоступно части
+    пассажиров, а «остаться дома» добавляется как четвёртая альтернатива по
+    тому же правилу минимума.
+
+    `transit_available` обязателен: недоступный транзит должен исключаться из
+    сравнения, а не получать нулевое время. При нулевом времени он выигрывал
+    бы всегда - в том числе в городе без единой линии.
+    """
+    income_steps = income_ladder(population)
+    if not income_steps:
+        return {"transit": 0.0, "car": 0.0, "walk": 0.0, "rest": 0.0}
+
+    counts = {"transit": 0.0, "car": 0.0, "walk": 0.0, "rest": 0.0}
+    for income in income_steps:
+        vot = value_of_time_eur_per_second(income)
+        costs = mode_costs(
+            income_per_year=income,
+            transit=perceived,
+            car_distance_m=car_distance_m,
+            transit_fare=transit_fare,
+            to_airport=to_airport,
+            traffic_multiplier=traffic_multiplier,
+        )
+        # Приоритет при равенстве - как в popCommuteWorker:38789: сначала
+        # сравнивается авто, потом транзит, иначе пешком.
+        candidates: list[tuple[str, float]] = [("car", costs.driving)]
+        if transit_available:
+            candidates.append(("transit", costs.transit))
+        candidates.append(("walk", costs.walking))
+        if rest_time_min is not None:
+            candidates.append(("rest", max(0.0, rest_time_min) * 60.0 * vot))
+        best_cost = min(cost for _, cost in candidates)
+        counts[next(key for key, cost in candidates if cost == best_cost)] += 1
+
+    if apply_min_transit_choice and counts["transit"] < MIN_TRANSIT_CHOICE:
+        counts["car"] += counts["transit"]
+        counts["transit"] = 0.0
+
+    if car_availability < 1.0:
+        # Пассажиры без автомобиля не могут им ехать: их доля уходит
+        # пропорционально остальным активным режимам, как это делала
+        # перенормировка логита без автомобиля. Если иных режимов нет
+        # (дальняя поездка без транзита), поездка просто не состоялась -
+        # такие пассажиры учитываются как "остались дома", иначе доля
+        # авто после нормировки снова стала бы 100%.
+        car_before = counts["car"]
+        counts["car"] = car_before * car_availability
+        displaced = car_before - counts["car"]
+        active = counts["transit"] + counts["walk"] + counts["rest"]
+        if active > 0.0:
+            for key in ("transit", "walk", "rest"):
+                counts[key] += displaced * counts[key] / active
+        else:
+            counts["rest"] += displaced
+
+    total = sum(counts.values())
+    return {key: count / total for key, count in counts.items()}
