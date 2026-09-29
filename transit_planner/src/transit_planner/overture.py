@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from math import asin, cos, radians, sin, sqrt
+from math import asin, cos, isfinite, radians, sin, sqrt
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -180,7 +180,15 @@ class OvertureUrbanProvider:
 
         rows = _query_duckdb(self._buildings_sql())
         buildings = []
-        for building_id, geojson, subtype, building_class, is_underground in rows:
+        for (
+            building_id,
+            geojson,
+            subtype,
+            building_class,
+            is_underground,
+            num_floors,
+            height,
+        ) in rows:
             if not geojson or bool(is_underground):
                 continue
             polygons = parse_polygon_geometry(json.loads(geojson))
@@ -197,6 +205,8 @@ class OvertureUrbanProvider:
                     subtype=None if subtype is None else str(subtype),
                     building_class=None if building_class is None else str(building_class),
                     is_underground=bool(is_underground),
+                    num_floors=_positive_or_none(num_floors),
+                    height_m=_positive_or_none(height),
                 )
             )
         return tuple(buildings)
@@ -235,7 +245,9 @@ class OvertureUrbanProvider:
                 ST_AsGeoJSON(geometry) AS geojson,
                 subtype,
                 class,
-                is_underground
+                is_underground,
+                num_floors,
+                height
             FROM read_parquet({_parquet_source(self.source.buildings(), release=self.source.release, overture_type='building', bbox=self.bbox)})
             WHERE TRUE
               {_bbox_sql(self.bbox)}
@@ -503,6 +515,19 @@ class OvertureTransitProvider:
               AND class IN ({classes})
               {bbox_filter}
         """
+
+
+def _positive_or_none(value) -> float | None:
+    """Число из parquet, если оно осмысленно; иначе None."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(number) or number <= 0:
+        return None
+    return number
 
 
 def _first_position(geometry: dict) -> tuple[float | None, float | None]:

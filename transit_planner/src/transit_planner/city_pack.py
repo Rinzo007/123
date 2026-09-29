@@ -5,7 +5,8 @@ import json
 import shutil
 import struct
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -18,9 +19,22 @@ from .binary_pack import (
     encode_water_bin,
     encode_zones_bin,
 )
+from .building_class import (
+    BuildingClass,
+    BuildingClassification,
+    ExternalSignals,
+    classify_buildings,
+    classification_summary,
+)
 from .city import DemandZone
 from .city_demand import CityDemandConfig
 from .geo import Point
+from .urban import (
+    FLOOR_AREA_PER_PERSON_M2,
+    BuildingFootprint,
+    effective_floors,
+    polygon_area_m2,
+)
 from .places import CityPlace, aggregate_place_attractions
 from .projection import project_local_point_wgs84, project_wgs84_point
 from .road import RoadGraph
@@ -65,6 +79,7 @@ class CityPackManifest:
     schema_version: int = PACK_SCHEMA_VERSION
     source: str = "overture"
     release: str = ""
+    provenance: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -76,6 +91,7 @@ class CityPackManifest:
             "schemaVersion": self.schema_version,
             "source": self.source,
             "release": self.release,
+            "provenance": self.provenance,
         }
 
 
@@ -128,6 +144,7 @@ def pack_city_files(
     files: Mapping[str, bytes],
     *,
     release: str = "",
+    provenance: dict | None = None,
 ) -> tuple[CityPackManifest, dict[str, bytes]]:
     normalized = {
         name: bytes(data)
@@ -165,6 +182,7 @@ def pack_city_files(
         files=manifest_files,
         total_bytes=sum(len(data) for data in normalized.values()),
         release=release,
+        provenance=dict(provenance or {}),
     )
     return manifest, normalized
 
@@ -176,12 +194,15 @@ def write_city_pack(
     files: Mapping[str, bytes],
     *,
     release: str = "",
+    provenance: dict | None = None,
 ) -> CityPackManifest:
     """Atomically write a pack: stage into a temp dir, verify, then swap.
 
     A partially written pack is never visible under the target path.
     """
-    manifest, normalized = pack_city_files(city, version, files, release=release)
+    manifest, normalized = pack_city_files(
+        city, version, files, release=release, provenance=provenance
+    )
     destination = Path(output_dir)
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
@@ -295,19 +316,92 @@ def _grid_cell_size(extent_m: float) -> float:
     return min(2000.0, max(200.0, round(extent_m / 24.0)))
 
 
+def _residential_population_by_zone(
+    buildings: tuple[BuildingFootprint, ...],
+    classifications: tuple[BuildingClassification, ...],
+    zones: tuple[DemandZone, ...],
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> dict[str, float]:
+    """Население зон по жилой площади зданий, отнесённых каскадом к жилью."""
+    from .urban import FLOOR_AREA_PER_PERSON_M2
+
+    if not classifications or not buildings:
+        return {}
+
+    residential = {
+        item.building_id
+        for item in classifications
+        if item.building_class is BuildingClass.RESIDENTIAL and item.floor_area_m2 > 0
+    }
+    totals: dict[str, float] = {zone.id: 0.0 for zone in zones}
+    for building in buildings:
+        if building.id not in residential:
+            continue
+        centroid = _building_centroid(building)
+        if centroid is None:
+            continue
+        point = project_wgs84_point(
+            centroid, origin_lon=origin_lon, origin_lat=origin_lat
+        )
+        nearest = min(
+            zones,
+            key=lambda zone: (
+                (point.x - zone.centroid_x) ** 2 + (point.y - zone.centroid_y) ** 2
+            ),
+            default=None,
+        )
+        if nearest is None:
+            continue
+        totals[nearest.id] += building.area_m2 * effective_floors(building)
+    return {
+        zone_id: floor_area / FLOOR_AREA_PER_PERSON_M2
+        for zone_id, floor_area in totals.items()
+        if floor_area > 0
+    }
+
+
+def _building_centroid(building: BuildingFootprint) -> Point | None:
+    """Взвешенный центроид площади полигонов здания."""
+    total_area = 0.0
+    sum_x = 0.0
+    sum_y = 0.0
+    for polygon in building.polygons:
+        if len(polygon) < 3:
+            continue
+        area = abs(polygon_area_m2(polygon))
+        if area <= 0:
+            continue
+        xs = [point.x for point in polygon]
+        ys = [point.y for point in polygon]
+        sum_x += (sum(xs) / len(xs)) * area
+        sum_y += (sum(ys) / len(ys)) * area
+        total_area += area
+    if total_area <= 0:
+        return None
+    return Point(sum_x / total_area, sum_y / total_area)
+
+
 def build_city_zones(
     places: tuple[CityPlace, ...],
     *,
     origin_lon: float,
     origin_lat: float,
     stops_metric: tuple[tuple[float, float], ...] = (),
+    buildings: tuple[BuildingFootprint, ...] = (),
 ) -> tuple[DemandZone, ...]:
-    """Grid zones with place-derived attraction proxy for pop/jobs.
+    """Grid zones with a residential mass from Overture building footprints.
 
-    Overture places carry no census counts; population and jobs use the
-    projected place-importance mass (work importance as employment, all
-    other mapped purposes as a residential proxy). Census calibration of
-    this proxy belongs to Этап 6-7.
+    Population is counted as residential floor area divided by floor area per
+    person, using the `num_floors`/`height` that Overture carries on buildings.
+    The estimate is knowingly low where Overture building coverage is missing,
+    and the direction of the bias is recorded in the pack provenance rather
+    than hidden: this is an estimate, not a census.
+
+    Jobs keep the place-importance proxy. A building footprint cannot separate
+    an office block from a warehouse, and Overture carries no employment
+    count, so jobs have no building-area counterpart.
     """
     points = [
         (
@@ -347,6 +441,10 @@ def build_city_zones(
         for _point, place in points
     )
     enriched = aggregate_place_attractions(zones, projected_places)
+    classifications = classify_buildings(buildings)
+    residential: dict[str, float] = _residential_population_by_zone(
+        buildings, classifications, zones, origin_lon=origin_lon, origin_lat=origin_lat
+    )
 
     result: list[DemandZone] = []
     for zone in enriched:
@@ -356,10 +454,13 @@ def build_city_zones(
             for purpose, value in zone.attractions.items()
             if purpose != "work"
         )
+        # Здания побеждают прокси мест: у POI нет объёма, а у здания есть.
+        # Если зданий нет, остаётся прежний прокси.
+        population = residential.get(zone.id, other)
         result.append(
             replace(
                 zone,
-                population=other,
+                population=population,
                 jobs=work,
             )
         )
@@ -431,6 +532,121 @@ def streets_bin_for_graph(
     }
 
 
+PACK_PROVENANCE_SCHEME = "transit-planner/pack/v1"
+
+# Насколько далеко остановка может лежать от уличного графа и всё равно
+# считаться привязанной. Значение попадает в provenance, поэтому оно одно.
+SNAP_MAX_DISTANCE_M = 150.0
+
+
+def _generator_version() -> str:
+    """Версия пакета для provenance.
+
+    Берётся из метаданных установки, а не из константы в коде: иначе версия
+    в манифесте разошлась бы с той, что стоит в pyproject.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("transit-planner")
+    except Exception:  # пакет может быть не установлен, а не в wheel
+        return "unknown"
+
+
+def _distribution(values: list[float]) -> dict[str, float]:
+    """Сводка по величине: сумма, среднее, максимум, ненулевых."""
+    if not values:
+        return {"total": 0.0, "mean": 0.0, "max": 0.0, "nonZero": 0}
+    return {
+        "total": round(sum(values), 3),
+        "mean": round(sum(values) / len(values), 3),
+        "max": round(max(values), 3),
+        "nonZero": sum(1 for value in values if value > 0),
+    }
+
+
+def _pack_provenance(
+    *,
+    source: OvertureSource,
+    bbox: tuple[float, float, float, float] | None,
+    demand_config: CityDemandConfig,
+    snap_max_distance_m: float,
+    zones: tuple[DemandZone, ...],
+    demand_rows: list[tuple],
+    purposes: list[str],
+    network,
+    buildings: tuple[BuildingFootprint, ...],
+    water: tuple,
+    streets_stats: dict,
+    population_method: str,
+    building_classes: dict | None = None,
+) -> dict:
+    """Откуда взялись цифры пака: источник, параметры, итоги, оговорки.
+
+    Манифест без этого отвечает на вопрос «что за файл», но не «откуда взялось
+    население». Здания Overture и прокси мест дают разные числа, поэтому
+    выбранный метод, константы пересчёта и оговорки пишутся явно: оценка не
+    census.
+    """
+    caveat_list = [
+        "population is a built-area estimate, not census: "
+        + {
+            "overture_buildings": "Overture footprint x num_floors / assumed floor area per person, "
+            "undercounts where Overture building coverage is missing",
+            "place_importance_proxy": "place-importance proxy, not calibrated to any population statistic",
+        }[population_method],
+        "jobs use a place-importance proxy: Overture has no employment count, "
+        "and a building footprint cannot separate offices from warehouses",
+    ]
+    if bbox is None:
+        caveat_list.append("no bbox was given, so the pack covers an unbounded query")
+
+    parameters: dict = {
+        "snapMaxDistanceM": snap_max_distance_m,
+        "populationMethod": population_method,
+        "floorAreaPerPersonM2": FLOOR_AREA_PER_PERSON_M2,
+        "tripRate": demand_config.trip_rate,
+        "decay": demand_config.decay,
+        "referenceSpeedKph": demand_config.reference_speed_kph,
+    }
+
+    return {
+        "scheme": PACK_PROVENANCE_SCHEME,
+        "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "generator": {"name": "transit-planner", "version": _generator_version()},
+        "source": {
+            "kind": "overture",
+            "release": source.release,
+            "bbox": list(bbox) if bbox is not None else None,
+        },
+        "parameters": parameters,
+        "inputs": {
+            "roads": len(network.roads),
+            "connectors": network.graph_build.connector_count,
+            "stops": len(network.stops),
+            "places": len(network.places),
+            "buildings": len(buildings),
+            "water": len(water),
+            "zones": len(zones),
+        },
+        "summary": {
+            "streetNodes": streets_stats["nodes"],
+            "streetEdges": streets_stats["edges"],
+            "streetComponents": streets_stats["components"],
+            "population": _distribution([zone.population for zone in zones]),
+            "jobs": _distribution([zone.jobs for zone in zones]),
+            "odPairs": len(demand_rows),
+            "tripsPerDay": round(sum(row[2] for row in demand_rows), 3),
+            "purposes": {
+                purpose: sum(1 for row in demand_rows if purposes[row[4]] == purpose)
+                for purpose in purposes
+            },
+        },
+        "caveats": caveat_list,
+        "buildingClassification": building_classes or {},
+    }
+
+
 def build_overture_city_pack(
     *,
     city: str,
@@ -443,7 +659,7 @@ def build_overture_city_pack(
     network = OvertureNetworkProvider(
         source=source,
         bbox=bbox,
-        snap_max_distance_m=150.0,
+        snap_max_distance_m=SNAP_MAX_DISTANCE_M,
     ).load(
         include_connectors=True,
         include_stops=True,
@@ -462,6 +678,7 @@ def build_overture_city_pack(
             stops_metric=tuple(
                 (stop.location.x, stop.location.y) for stop in network.stops_metric
             ),
+            buildings=buildings,
         )
 
     streets_payload, streets_stats = streets_bin_for_graph(
@@ -527,13 +744,13 @@ def build_overture_city_pack(
     ]
 
     model_path = Path(__file__).with_name("model.json")
+    population_method = "overture_buildings" if buildings else "place_importance_proxy"
     files = {
         "streets.json": json.dumps(
             streets, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8"),
         "streets.bin": streets_payload,
-        "stops.bin": encode_stops_bin(stops=stop_rows),
-        "zones.bin": encode_zones_bin(zones=zone_rows, attractions=zone_attractions),
+        "stops.bin": encode_stops_bin(stops=stop_rows),        "zones.bin": encode_zones_bin(zones=zone_rows, attractions=zone_attractions),
         "demand.bin": encode_demand_bin(
             zone_count=len(zones), pairs=demand_rows, purposes=purposes
         ),
@@ -541,7 +758,29 @@ def build_overture_city_pack(
         "water.bin": encode_water_bin(water),
         "model.json": model_path.read_bytes(),
     }
-    return pack_city_files(city, version, files, release=source.release)
+    return pack_city_files(
+        city,
+        version,
+        files,
+        release=source.release,
+        provenance=_pack_provenance(
+            source=source,
+            bbox=bbox,
+            demand_config=demand_config,
+            snap_max_distance_m=SNAP_MAX_DISTANCE_M,
+            zones=zones,
+            demand_rows=demand_rows,
+            purposes=purposes,
+            network=network,
+            buildings=buildings,
+            water=water,
+            streets_stats=streets_stats,
+            population_method=population_method,
+            building_classes=classification_summary(
+                classify_buildings(buildings), signals=ExternalSignals()
+            ) if buildings else {},
+        ),
+    )
 
 
 def build_and_write_overture_city_pack(
@@ -568,4 +807,5 @@ def build_and_write_overture_city_pack(
         version,
         files,
         release=manifest.release,
+        provenance=manifest.provenance,
     )

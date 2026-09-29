@@ -106,9 +106,28 @@ def test_city_pack_manifest_dict_matches_stage2_spec():
         "schemaVersion",
         "source",
         "release",
+        "provenance",
     }
     assert payload["source"] == "overture"
     assert payload["schemaVersion"] == 1
+    # Без явного provenance манифест остаётся валидным, но пустым: лучше так,
+    # чем выдуманные значения о том, как считалось население.
+    assert payload["provenance"] == {}
+
+
+def test_manifest_keeps_provenance_and_ignores_it_in_payload_hash():
+    """Provenance описывает сборку и не влияет на хеш содержимого пака."""
+    files = minimal_pack_files()
+    plain, _ = pack_city_files("demo", "1", files, release="r")
+    described, _ = pack_city_files(
+        "demo",
+        "1",
+        files,
+        release="r",
+        provenance={"scheme": "transit-planner/pack/v1", "caveats": ["estimate"]},
+    )
+    assert described.sha256 == plain.sha256
+    assert described.provenance["caveats"] == ["estimate"]
 
 
 def test_city_pack_payload_hash_is_stable_for_file_order():

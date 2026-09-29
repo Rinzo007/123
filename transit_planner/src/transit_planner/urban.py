@@ -15,6 +15,81 @@ class BuildingFootprint:
     subtype: str | None = None
     building_class: str | None = None
     is_underground: bool = False
+    num_floors: float | None = None
+    height_m: float | None = None
+
+
+# Классы зданий, в которых живут люди. Промышленные и инфраструктурные в
+# жилой фонд не входят, иначе грузовые терминалы считывались бы как жильё.
+RESIDENTIAL_BUILDING_CLASSES = frozenset({
+    "house",
+    "residential",
+    "apartments",
+    "dormitory",
+    "bungalow",
+    "hut",
+})
+
+# Этажность, которой заменяют отсутствующее num_floors. Средняя по жилому
+# фонду: низкие дома при одноэтажной застройке, высотки упираются в потолок.
+_FALLBACK_FLOORS_MIN = 1.0
+_FALLBACK_FLOORS_MAX = 8.0
+# Номинальная высота жилого этажа. В Overture height включает конструктив и
+# кровлю, поэтому из неё берётся грубая оценка с потолком, а не точное число.
+_METERS_PER_FLOOR = 3.0
+# Жилая площадь на одного человека. 30-40 м² — обычная величина для
+# городской квартиры вместе с долей общих площадей.
+FLOOR_AREA_PER_PERSON_M2 = 32.0
+
+
+def is_residential_building(building: BuildingFootprint) -> bool:
+    if building.is_underground:
+        return False
+    if building.building_class is not None:
+        if building.building_class in RESIDENTIAL_BUILDING_CLASSES:
+            return True
+        return False
+    # Без класса решение принимает подтип: Overture не заполняет class у части
+    # зданий, но подтип остаётся.
+    subtype = (building.subtype or "").lower()
+    return "residential" in subtype or "house" in subtype or "apart" in subtype
+
+
+def effective_floors(building: BuildingFootprint) -> float:
+    """Число жилых этажей: из данных, иначе из высоты, иначе минимум."""
+    if building.num_floors is not None:
+        return min(max(building.num_floors, _FALLBACK_FLOORS_MIN), _FALLBACK_FLOORS_MAX)
+    if building.height_m is not None:
+        return min(
+            max(building.height_m / _METERS_PER_FLOOR, _FALLBACK_FLOORS_MIN),
+            _FALLBACK_FLOORS_MAX,
+        )
+    return _FALLBACK_FLOORS_MIN
+
+
+def residential_floor_area_m2(building: BuildingFootprint) -> float:
+    if not is_residential_building(building):
+        return 0.0
+    return building.area_m2 * effective_floors(building)
+
+
+def population_from_buildings(
+    buildings: Iterable[BuildingFootprint],
+    *,
+    floor_area_per_person_m2: float = FLOOR_AREA_PER_PERSON_M2,
+) -> float:
+    """Оценка населения по жилой площади этажей.
+
+    Опора self-contained: перепись не нужна, всё считается из площади и
+    этажности, которые Overture отдаёт по зданиям. Метод тот же, что у GHSL:
+    объём жилого фонда делится на площадь на человека.
+    """
+    if floor_area_per_person_m2 <= 0:
+        raise ValueError("floor_area_per_person_m2 must be positive")
+    total = 0.0
+    for building in buildings:
+        total += residential_floor_area_m2(building)
+    return total / floor_area_per_person_m2
 
 
 @dataclass(frozen=True, slots=True)
