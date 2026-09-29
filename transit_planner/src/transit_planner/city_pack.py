@@ -29,6 +29,7 @@ from .building_class import (
 from .city import DemandZone
 from .city_demand import CityDemandConfig
 from .geo import Point
+from .study_area import StudyArea
 from .urban import (
     FLOOR_AREA_PER_PERSON_M2,
     BuildingFootprint,
@@ -580,6 +581,7 @@ def _pack_provenance(
     streets_stats: dict,
     population_method: str,
     building_classes: dict | None = None,
+    study_area: StudyArea | None = None,
 ) -> dict:
     """Откуда взялись цифры пака: источник, параметры, итоги, оговорки.
 
@@ -644,7 +646,38 @@ def _pack_provenance(
         },
         "caveats": caveat_list,
         "buildingClassification": building_classes or {},
+        "studyArea": study_area.to_provenance() if study_area is not None else None,
     }
+
+
+def _clip_to_study_area(
+    buildings: tuple[BuildingFootprint, ...],
+    water: tuple,
+    study_area: StudyArea | None,
+) -> tuple[tuple[BuildingFootprint, ...], tuple]:
+    """Отсекает здания и воду по полигону границы.
+
+    Сеть фильтруется в провайдере, до сборки графа; здесь остаётся то, что
+    приходит отдельным каналом. Здание режется по своему центроиду.
+    """
+    if study_area is None:
+        return buildings, water
+    kept = tuple(
+        building
+        for building in buildings
+        if (centroid := _building_centroid(building)) is not None
+        and study_area.contains(centroid.x, centroid.y)
+    )
+    kept_water = tuple(
+        feature
+        for feature in water
+        if any(
+            study_area.contains(point.x, point.y)
+            for polygon in feature.polygons
+            for point in polygon
+        )
+    )
+    return kept, kept_water
 
 
 def build_overture_city_pack(
@@ -655,7 +688,17 @@ def build_overture_city_pack(
     bbox: tuple[float, float, float, float] | None = None,
     zones: tuple[DemandZone, ...] = (),
     demand_config: CityDemandConfig = CityDemandConfig(),
+    study_area: StudyArea | None = None,
 ) -> tuple[CityPackManifest, dict[str, bytes]]:
+    """Собирает пак города.
+
+    `study_area` задаёт область исследования полигоном: Overture выбирается по
+    bbox, описанному границей, а затем дороги, здания и POI отсекаются по
+    самому полигону. Без этого в пак попадает всё, что лежит в
+    описывающем прямоугольнике, а у Тамбова это 54.5% лишней площади.
+    """
+    if study_area is not None:
+        bbox = study_area.bbox
     network = OvertureNetworkProvider(
         source=source,
         bbox=bbox,
@@ -664,11 +707,15 @@ def build_overture_city_pack(
         include_connectors=True,
         include_stops=True,
         include_places=True,
+        # Отсечение по полигону границы, а не по её bbox: у Тамбова
+        # описывающий прямоугольник вдвое больше города.
+        area_filter=study_area.contains_point if study_area is not None else None,
     )
     buildings, water = OvertureUrbanProvider(
         source=source,
         bbox=bbox,
     ).load()
+    buildings, water = _clip_to_study_area(buildings, water, study_area)
 
     if not zones:
         zones = build_city_zones(
@@ -779,6 +826,7 @@ def build_overture_city_pack(
             building_classes=classification_summary(
                 classify_buildings(buildings), signals=ExternalSignals()
             ) if buildings else {},
+            study_area=study_area,
         ),
     )
 

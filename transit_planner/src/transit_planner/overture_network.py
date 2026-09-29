@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from statistics import fmean
+from typing import Callable
 
 from .overture import (
     OvertureConnectorProvider,
@@ -109,6 +110,17 @@ class OvertureNetwork:
 
 
 
+def _road_midpoint(record: RoadRecord) -> Point:
+    """Середина геометрии дороги в WGS84: по ней режется область исследования."""
+    points = record.geometry.points
+    if not points:
+        return Point(0.0, 0.0)
+    return Point(
+        fmean(point.x for point in points),
+        fmean(point.y for point in points),
+    )
+
+
 def build_overture_network(
     roads: tuple[RoadRecord, ...],
     connectors: tuple[ConnectorRecord, ...],
@@ -183,7 +195,14 @@ class OvertureNetworkProvider:
         include_connectors: bool = True,
         include_stops: bool = True,
         include_places: bool = True,
+        area_filter: Callable[[Point], bool] | None = None,
     ) -> OvertureNetwork:
+        """Читает сеть и, если задан `area_filter`, отсекает её по области.
+
+        Фильтр применяется до сборки графа, а не после: дорога вне области не
+        должна ни попасть в граф, ни стянуть за собой соседей через коннектор.
+        Дороги режутся по середине, точки - по своему положению.
+        """
         transportation = OvertureTransportationProvider(
             source=self.source,
             bbox=self.bbox,
@@ -222,6 +241,22 @@ class OvertureNetworkProvider:
             connectors = () if connectors_future is None else connectors_future.result()
             stops = () if stops_future is None else stops_future.result()
             places = () if places_future is None else places_future.result()
+
+        if area_filter is not None:
+            roads = tuple(record for record in roads if area_filter(_road_midpoint(record)))
+            # Коннекторы оставляем по ссылкам уцелевших дорог, а не по своему
+            # положению: коннектор на шоссе у самой границы лежит вне полигона,
+            # но дорога внутри границы на него опирается. Отбросив его, мы бы
+            # заставили сборщик графа интерполировать узел и получить конфликт
+            # координат, который он честно отказывается разрешать молча.
+            referenced = {
+                ref.connector_id for record in roads for ref in record.connectors
+            }
+            connectors = tuple(
+                record for record in connectors if record.id in referenced
+            )
+            stops = tuple(stop for stop in stops if area_filter(stop.location))
+            places = tuple(place for place in places if area_filter(place.location))
 
         origin_lon, origin_lat = self._origin(stops)
         return build_overture_network(
